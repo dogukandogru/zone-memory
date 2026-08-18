@@ -473,6 +473,53 @@ function isaretleriCiz() {
  * Sinyalin plan cizgilerini grafige dusurur.
  * chart.js `setPriceLines` alanlari: {price, color, title, width, style}
  */
+/**
+ * Plan cizgilerinin bitecegi zamani hesaplar.
+ *
+ * `barsToOutcome` bir BAR sayisidir, saniye degil. Barlar surekli degildir
+ * (hafta sonu, gunluk seans arasi, eksik dakikalar), bu yuzden
+ * `zaman + bar * adim` seklinde duvar saatine cevirmek yanlis sonuc verir:
+ * Cuma aksami acilan ve 20 bar sonra biten bir plan, gercekte Pazartesi
+ * sabahi biterken duvar saati hesabiyla ayni gece bitmis gorunur.
+ *
+ * Dogrusu, sinyalin bar INDEKSINI bulup `indeks + barsToOutcome` barinin
+ * zamanini almaktir. Bar dizisinde bulunamazsa duvar saati tahminine duseriz.
+ *
+ * @param {object} s Sinyal
+ * @param {number} zaman Sinyal zamani (UNIX saniye)
+ * @returns {number} Bitis zamani
+ */
+function planBitisZamani(s, zaman) {
+  const adim = tfSaniye(durum.tf)
+  const ufuk = sayi(
+    durum.ayarlar && durum.ayarlar.outcomeCfg ? durum.ayarlar.outcomeCfg.horizonBars : NaN,
+    48
+  )
+  // -1 "sonuc bilinmiyor" demektir (canli sinyal veya eski kayit).
+  // 0 ise "kendi barinda bitti" demektir, ufka uzatilmamalidir.
+  const barSayisi = sayi(s.barsToOutcome, -1)
+  const kacBar = barSayisi >= 0 ? barSayisi : ufuk
+
+  const barlar = durum.bars
+  if (Array.isArray(barlar) && barlar.length > 0) {
+    // Sinyal barinin indeksi (ikili arama).
+    let lo = 0
+    let hi = barlar.length - 1
+    let idx = -1
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1
+      const t = barlar[mid].time
+      if (t === zaman) { idx = mid; break }
+      if (t < zaman) { idx = mid; lo = mid + 1 } else hi = mid - 1
+    }
+    if (idx >= 0) {
+      const hedef = Math.min(idx + kacBar, barlar.length - 1)
+      return barlar[hedef].time
+    }
+  }
+  return zaman + kacBar * adim
+}
+
 function planCizgileri(s) {
   if (!view) return
   if (!s) {
@@ -491,20 +538,18 @@ function planCizgileri(s) {
     { price: sayi(s.tp2, NaN), color: RENK.up, title: 'TP2', width: 1, dashed: true },
     { price: sayi(s.sl, NaN), color: RENK.down, title: 'SL', width: 1, dashed: true },
   ].filter((c) => Number.isFinite(c.price) && c.price !== 0)
-  if (seviyeler.length === 0) return
+
+  // Cizilecek gecerli seviye yoksa ONCEKI planin cizgileri ekranda kalmamali,
+  // yoksa kullanici onlari yeni sinyalin plani sanar.
+  if (seviyeler.length === 0) {
+    if (typeof view.clearPlanLines === 'function') {
+      try { view.clearPlanLines() } catch (err) { /* onemsiz */ }
+    }
+    return
+  }
 
   const zaman = sayi(s.time, 0)
-
-  // Cizgiler sinyalin verildigi bardan BASLAR ve sonuca kadar uzar.
-  // Sonuc biliniyorsa (gecmis sinyal) TP veya SL'in vuruldugu bara,
-  // bilinmiyorsa (canli sinyal) degerlendirme ufkunun sonuna kadar.
-  const adim = tfSaniye(durum.tf)
-  const ufuk = sayi(
-    durum.ayarlar && durum.ayarlar.outcomeCfg ? durum.ayarlar.outcomeCfg.horizonBars : NaN,
-    48
-  )
-  const barSayisi = sayi(s.barsToOutcome, -1)
-  const bitis = barSayisi > 0 ? zaman + barSayisi * adim : zaman + ufuk * adim
+  const bitis = planBitisZamani(s, zaman)
 
   if (typeof view.setPlanLines === 'function') {
     try {

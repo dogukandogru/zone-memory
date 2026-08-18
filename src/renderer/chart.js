@@ -407,28 +407,54 @@ export function createChartView(container) {
 
   /** @type {{time:number, endTime:number|null, levels:Array<object>}|null} */
   let plan = null;
+  /**
+   * Fiyat ekseni gorunumleri. Kutuphane bu diziyi KIMLIK uzerinden onbellege
+   * aldigi icin her cagride yeni dizi uretmek etiket hizalamasini bozar
+   * (ust uste binen etiketler). Bu yuzden dizi yalnizca plan degistiginde
+   * yeniden kurulur; koordinat hesabi gorunumlerin icinde, cagri aninda yapilir.
+   */
+  let planAxisViews = [];
 
   const PLAN_LABEL_FONT = '10px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif';
+  /** Cok kisa planlarin gorunur kalmasi icin asgari piksel genisligi. */
+  const MIN_PLAN_PX = 18;
+
+  /**
+   * Plan su an cizilebilir mi. Sinyal yuklu verinin disindaysa ne segment
+   * ne de eksen etiketi gosterilir; aksi halde pencere degistiginde ekranda
+   * hangi sinyale ait oldugu belli olmayan etiketler asili kalir.
+   */
+  function planCizilebilir() {
+    if (!plan || !plan.levels || plan.levels.length === 0) return false;
+    const dr = getDataTimeRange();
+    if (!dr) return false;
+    if (plan.time > dr.to) return false;
+    const bitis = plan.endTime != null ? plan.endTime : plan.time;
+    if (bitis < dr.from) return false;
+    return true;
+  }
 
   function planCiz(ctx, paneW, paneH) {
     if (!plan || !plan.levels || plan.levels.length === 0) return;
 
-    // Veri araligina kirp: disarida `timeToX` duvar saatine gore tahmin yapar
-    // ve piyasa kapali saatleri yuzunden konumu carpitir (bkz. getDataTimeRange).
-    const dr = getDataTimeRange();
-    if (!dr) return;
-    const basT = Math.max(plan.time, dr.from);
-    if (plan.time > dr.to) return;
+    if (!planCizilebilir()) return;
 
-    const xBas = timeToX(basT);
+    const dr = getDataTimeRange();
+    const xBas = timeToX(Math.max(plan.time, dr.from));
     if (!isNum(xBas)) return;
-    let xSon = plan.endTime != null ? timeToX(Math.min(plan.endTime, dr.to)) : null;
-    if (!isNum(xSon) || xSon <= xBas) xSon = paneW;
-    // Cok kisa suren planlar (sonuca 1 barda ulasanlar) uzaklastirilmis
-    // gorunumde neredeyse gorunmez kalir. En az bu kadar piksel cizeriz;
-    // sinyalin verildigi AN zaten dikey isaretle belirtildigi icin bu,
-    // zamani yanlis gostermez, yalnizca seviyeleri okunur kilar.
-    if (xSon - xBas < 24) xSon = xBas + 24;
+
+    // Bitis koordinati. Hesaplanamazsa panelin TAMAMINI boyamak yanlistir
+    // (duzeltilmek istenen hatanin ta kendisi); asgari genislige duseriz.
+    let xSon = null;
+    if (plan.endTime != null) {
+      const bit = timeToX(Math.min(plan.endTime, dr.to));
+      if (isNum(bit)) xSon = bit;
+    }
+    if (!isNum(xSon) || xSon <= xBas) xSon = xBas + MIN_PLAN_PX;
+    // Sonuca ayni barda veya 1 barda ulasan planlar uzaklastirilmis gorunumde
+    // gorunmez kalir. Sinyalin verildigi AN dikey isaretle belirtildigi icin
+    // bu, baslangici degil yalnizca bitisi bir miktar uzatir.
+    if (xSon - xBas < MIN_PLAN_PX) xSon = xBas + MIN_PLAN_PX;
     // Panelin disina tasmasin.
     const x1 = Math.max(xBas, 0);
     const x2 = Math.min(xSon, paneW);
@@ -477,24 +503,28 @@ export function createChartView(container) {
     }
   }
 
-  /** Fiyat eksenindeki etiketler (TP2 / TP1 / Giris / SL kutucuklari). */
-  function planEksenGorunumleri() {
-    if (!plan || !plan.levels || plan.levels.length === 0) return [];
-    const out = [];
-    for (let i = 0; i < plan.levels.length; i++) {
-      const lv = plan.levels[i];
-      const y = priceToY(lv.price);
-      if (!isNum(y)) continue;
-      out.push({
-        coordinate: () => y,
-        text: () => formatPriceLabel(lv.price),
-        textColor: () => '#ffffff',
-        backColor: () => lv.color,
-        visible: () => true,
-        tickVisible: () => true,
-      });
+  /**
+   * Fiyat eksenindeki etiketleri (TP2 / TP1 / Giris / SL) kurar.
+   * Yalnizca plan degistiginde cagrilir; gorunumler koordinati cagri aninda
+   * hesaplar, boylece dizi kimligi sabit kalir ve kutuphanenin etiket
+   * hizalamasi calisir.
+   */
+  function planEksenGorunumleriniKur() {
+    if (!plan || !plan.levels || plan.levels.length === 0) {
+      planAxisViews = [];
+      return;
     }
-    return out;
+    planAxisViews = plan.levels.map((lv) => ({
+      coordinate: () => {
+        const y = priceToY(lv.price);
+        return isNum(y) ? y : -1000;
+      },
+      text: () => formatPriceLabel(lv.price),
+      textColor: () => '#ffffff',
+      backColor: () => lv.color,
+      visible: () => planCizilebilir() && isNum(priceToY(lv.price)),
+      tickVisible: () => true,
+    }));
   }
 
   /** Fiyat ekseni etiketi icin kisa bicim. */
@@ -512,7 +542,7 @@ export function createChartView(container) {
     },
     detached: () => { planPrimitive._requestUpdate = null; },
     updateAllViews: () => {},
-    priceAxisViews: () => planEksenGorunumleri(),
+    priceAxisViews: () => planAxisViews,
     paneViews: () => [{
       zOrder: () => 'top',
       renderer: () => ({
@@ -552,10 +582,15 @@ export function createChartView(container) {
           width: lv.width,
         });
       }
-      plan = levels.length
-        ? { time: +next.time, endTime: isNum(+next.endTime) ? +next.endTime : null, levels: levels }
-        : null;
+      // `+null === 0` tuzagi: endTime verilmediginde 0 yazilirsa timeToX cok
+      // buyuk negatif deger uretir ve cizgi panel boyu uzar. Bu yuzden
+      // yalnizca GERCEKTEN sayi olan degerler kabul edilir.
+      const bit = (next.endTime === null || next.endTime === undefined)
+        ? null
+        : (isNum(+next.endTime) ? +next.endTime : null);
+      plan = levels.length ? { time: +next.time, endTime: bit, levels: levels } : null;
     }
+    planEksenGorunumleriniKur();
     if (planPrimitive._requestUpdate) planPrimitive._requestUpdate();
   }
 
@@ -636,12 +671,40 @@ export function createChartView(container) {
     return isNum(y) ? y : null;
   }
 
+  /**
+   * Zamandan piksel koordinatina.
+   *
+   * DIKKAT: `logicalToCoordinate` bu surumde YALNIZCA TAM SAYI mantiksal
+   * indeks kabul eder; kesirli deger verildiginde sessizce 0 doner
+   * (uretim paketinde: `zt(t){if(this.Ni()||!R(t))return 0;...}` ve
+   * `R(t)= typeof t=='number' && t%1==0`). `timeToLogical` ise bar zamanina
+   * tam oturmayan her zaman icin kesir uretir.
+   *
+   * Bu tuzak gercek bir hataya yol acmisti: bir bolgenin sag kenari gorunur
+   * alanin disina tastiginda kenar `vTo` zamanina kirpiliyor, o zaman kesirli
+   * bir indekse dusuyor ve koordinat 0 cikiyordu. Sonucta kutu, baslangicinin
+   * SOLUNDAN panelin sol kenarina kadar uzuyordu ("soldan sonsuzdan geliyor"
+   * gorunumu).
+   *
+   * Cozum: kesirli indeks, komsu iki TAM SAYI indeksin koordinatlari arasinda
+   * dogrusal ara degerle hesaplanir. Bar araligi mantiksal uzayda sabit
+   * oldugu icin bu ara deger kesindir.
+   */
   function timeToX(time) {
     if (destroyed) return null;
     const l = timeToLogical(+time);
     if (l == null) return null;
-    const x = chart.timeScale().logicalToCoordinate(l);
-    return isNum(x) ? x : null;
+    const ts = chart.timeScale();
+
+    const i = Math.floor(l);
+    const f = l - i;
+    const x0 = ts.logicalToCoordinate(i);
+    if (!isNum(x0)) return null;
+    if (f === 0) return x0;
+
+    const x1 = ts.logicalToCoordinate(i + 1);
+    if (!isNum(x1)) return x0;
+    return x0 + (x1 - x0) * f;
   }
 
   function xToTime(x) {
