@@ -1,0 +1,314 @@
+'use strict'
+
+// A12 - src/core/learn/outcome.js testleri (CONTRACTS.md bolum 10 ve 21).
+
+const test = require('node:test')
+const assert = require('node:assert/strict')
+
+const { labelTouch, zoneLevels, DEFAULT_OUTCOME_CFG } = require('../src/core/learn/outcome')
+const series = require('../src/core/series')
+
+const T0 = 1704067200
+const ADIM = 900
+
+/**
+ * Duz bir seri kurar; barlar varsayilan olarak 100 civarinda dar aralikta gezer.
+ * ozel: { bar: {high, low, close} } ile tekil barlar degistirilir.
+ */
+function seriKur (n, ozel) {
+  const time = new Array(n)
+  const open = new Array(n)
+  const high = new Array(n)
+  const low = new Array(n)
+  const close = new Array(n)
+  const volume = new Array(n)
+  for (let i = 0; i < n; i++) {
+    time[i] = T0 + i * ADIM
+    open[i] = 100
+    high[i] = 100.4
+    low[i] = 99.6
+    close[i] = 100
+    volume[i] = 10
+  }
+  const o = ozel || {}
+  for (const k of Object.keys(o)) {
+    const bar = k | 0
+    const v = o[k]
+    if (v.high !== undefined) high[bar] = v.high
+    if (v.low !== undefined) low[bar] = v.low
+    if (v.close !== undefined) close[bar] = v.close
+    if (v.open !== undefined) open[bar] = v.open
+  }
+  return series.fromArrays({ time, open, high, low, close, volume })
+}
+
+// Bu blogun testleri ESKI 'atr' modunu dogrular; mod acikca verilir cunku
+// varsayilan mod artik bolge tabanlidir.
+const CFG = { mode: 'atr', horizonBars: 5, tpAtr: 1, slAtr: 1 }
+const ALIS = { bar: 5, direction: 'BUY', isSupport: true }
+const SATIS = { bar: 5, direction: 'SELL', isSupport: false }
+
+// Bolge modu icin ornek dokunuslar. Varsayilan giris modeli 'zoneEdge':
+// destekte giris = zoneTop, dirençte giris = zoneBottom.
+//
+// ALIS_BOLGE, ATR 1 ve targetAtr 1.0 ile:
+//   giris = 100.20, gecersizlik = 99.4 - 0.25 = 99.15, hedef = 100.2 + 1.0 = 101.20
+//   riskAtr = 1.05, rewardAtr = 1.00
+// SATIS_BOLGE, ayni ayarlarla:
+//   giris = 99.80, gecersizlik = 100.6 + 0.25 = 100.85, hedef = 99.8 - 1.0 = 98.80
+const ALIS_BOLGE = {
+  bar: 5, direction: 'BUY', isSupport: true,
+  price: 100, zoneTop: 100.2, zoneBottom: 99.4,
+}
+const SATIS_BOLGE = {
+  bar: 5, direction: 'SELL', isSupport: false,
+  price: 100, zoneTop: 100.6, zoneBottom: 99.8,
+}
+const ZCFG = { horizonBars: 5, targetAtr: 1.0 }
+
+test('DEFAULT_OUTCOME_CFG sozlesmedeki degerler', () => {
+  assert.deepEqual(DEFAULT_OUTCOME_CFG, {
+    mode: 'zone',
+    horizonBars: 48,
+    targetAtr: 1.0,
+    breakBufferAtr: 0.25,
+    minTargetAtr: 0.25,
+    entryMode: 'zoneEdge',
+    tpAtr: 1.0,
+    slAtr: 1.0,
+  })
+})
+
+test('TP once vurulursa outcome respect olur', () => {
+  // Giris 100, ATR 1 -> TP 101, SL 99. TP 8. barda vuruluyor.
+  const s = seriKur(20, { 8: { high: 101.2 } })
+  const o = labelTouch(s, ALIS, 1, CFG)
+  assert.notEqual(o, null)
+  assert.equal(o.outcome, 'respect')
+  assert.equal(o.success, true)
+  assert.equal(o.barsToOutcome, 3)
+  assert.equal(o.atr, 1)
+  assert.ok(o.mfeAtr >= 1.2 - 1e-9, 'mfeAtr ufkun tamamindan hesaplanmali: ' + o.mfeAtr)
+})
+
+test('SL once vurulursa outcome break olur', () => {
+  const s = seriKur(20, { 7: { low: 98.5 }, 9: { high: 101.5 } })
+  const o = labelTouch(s, ALIS, 1, CFG)
+  assert.equal(o.outcome, 'break')
+  assert.equal(o.success, false)
+  assert.equal(o.barsToOutcome, 2)
+  assert.ok(o.maeAtr >= 1.5 - 1e-9, 'maeAtr 1.5 ATR olmali: ' + o.maeAtr)
+})
+
+test('ayni barda hem TP hem SL vurulursa MUHAFAZAKAR davranilir (SL kazanir)', () => {
+  const s = seriKur(20, { 6: { high: 101.5, low: 98.5 } })
+  const o = labelTouch(s, ALIS, 1, CFG)
+  assert.equal(o.outcome, 'break')
+  assert.equal(o.success, false)
+  assert.equal(o.barsToOutcome, 1)
+})
+
+test('hicbiri vurulmazsa outcome timeout olur', () => {
+  const s = seriKur(20)
+  const o = labelTouch(s, ALIS, 1, CFG)
+  assert.equal(o.outcome, 'timeout')
+  assert.equal(o.success, false)
+  assert.equal(o.barsToOutcome, -1)
+  assert.ok(o.mfeAtr < 1)
+  assert.ok(o.maeAtr < 1)
+})
+
+test('SELL yonu simetriktir: asagi hareket TP, yukari hareket SL', () => {
+  // Giris 100, TP 99, SL 101.
+  const tp = labelTouch(seriKur(20, { 7: { low: 98.8 } }), SATIS, 1, CFG)
+  assert.equal(tp.outcome, 'respect')
+  assert.equal(tp.barsToOutcome, 2)
+
+  const sl = labelTouch(seriKur(20, { 7: { high: 101.2 } }), SATIS, 1, CFG)
+  assert.equal(sl.outcome, 'break')
+  assert.equal(sl.barsToOutcome, 2)
+
+  const ikisi = labelTouch(seriKur(20, { 6: { high: 101.2, low: 98.8 } }), SATIS, 1, CFG)
+  assert.equal(ikisi.outcome, 'break', 'ayni barda ikisi de vurulursa SL kazanir')
+})
+
+test('ileri veri yetmiyorsa null doner', () => {
+  const s = seriKur(20)
+  // bar + horizonBars >= n  ->  15 + 5 = 20 >= 20
+  assert.equal(labelTouch(s, { bar: 15, direction: 'BUY' }, 1, CFG), null)
+  assert.equal(labelTouch(s, { bar: 19, direction: 'BUY' }, 1, CFG), null)
+  // Son etiketlenebilir bar 14 olmali.
+  assert.notEqual(labelTouch(s, { bar: 14, direction: 'BUY' }, 1, CFG), null)
+})
+
+test('gecersiz girdilerde null doner', () => {
+  const s = seriKur(20)
+  assert.equal(labelTouch(null, ALIS, 1, CFG), null)
+  assert.equal(labelTouch(s, null, 1, CFG), null)
+  assert.equal(labelTouch(s, { bar: -1, direction: 'BUY' }, 1, CFG), null)
+  assert.equal(labelTouch(s, ALIS, 0, CFG), null, 'ATR sifirsa etiketlenemez')
+  assert.equal(labelTouch(s, ALIS, NaN, CFG), null)
+})
+
+test('mfeAtr / maeAtr ATR biriminde ve negatif degil', () => {
+  const s = seriKur(20, { 6: { high: 100.9 }, 7: { low: 99.2 } })
+  const o = labelTouch(s, ALIS, 2, CFG)   // ATR = 2
+  assert.equal(o.outcome, 'timeout')
+  assert.ok(o.mfeAtr >= 0 && o.maeAtr >= 0)
+  assert.ok(Math.abs(o.mfeAtr - 0.9 / 2) < 1e-9, 'mfeAtr = 0.9 / 2: ' + o.mfeAtr)
+  assert.ok(Math.abs(o.maeAtr - 0.8 / 2) < 1e-9, 'maeAtr = 0.8 / 2: ' + o.maeAtr)
+})
+
+test('fwdReturnPct ufkun sonundaki yonlu getiridir', () => {
+  const s = seriKur(20, { 10: { close: 101, high: 101 } })
+  const alis = labelTouch(s, ALIS, 1, CFG)   // son bar = 5 + 5 = 10
+  assert.ok(Math.abs(alis.fwdReturnPct - 1) < 1e-9, 'BUY icin +%1 beklenir: ' + alis.fwdReturnPct)
+
+  const satis = labelTouch(s, SATIS, 1, CFG)
+  assert.ok(Math.abs(satis.fwdReturnPct + 1) < 1e-9, 'SELL icin -%1 beklenir: ' + satis.fwdReturnPct)
+})
+
+test('isSupport alani direction yerine kullanilabilir', () => {
+  const s = seriKur(20, { 7: { high: 101.2 } })
+  const o = labelTouch(s, { bar: 5, isSupport: true }, 1, CFG)
+  assert.equal(o.outcome, 'respect')
+})
+
+test('cfg verilmezse DEFAULT_OUTCOME_CFG kullanilir (48 bar ufuk, 1.0 ATR hedef)', () => {
+  // 48 barlik ufuk icin yeterli veri yoksa null donmeli.
+  const kisa = seriKur(50)
+  assert.equal(labelTouch(kisa, ALIS_BOLGE, 1), null)
+
+  // Varsayilan targetAtr 1.0 -> hedef = 100.2 + 1.0 = 101.20
+  const yetmez = seriKur(200, { 50: { high: 101.0 } })
+  assert.equal(labelTouch(yetmez, ALIS_BOLGE, 1).outcome, 'timeout',
+    '101.0 varsayilan 101.20 hedefine yetmez')
+
+  const uzun = seriKur(200, { 50: { high: 101.3 } })
+  const o = labelTouch(uzun, ALIS_BOLGE, 1)
+  assert.equal(o.mode, 'zone')
+  assert.equal(o.outcome, 'respect')
+  assert.equal(o.barsToOutcome, 45)
+  assert.equal(o.entryPrice, 100.2, 'giris bolgenin ust kenari')
+})
+
+// ===========================================================================
+// BOLGE MODU (varsayilan): "bolge gercekten tuttu mu"
+// ===========================================================================
+
+test('zoneLevels kenardan giriste seviyeleri bolge geometrisinden uretir', () => {
+  const lv = zoneLevels(ALIS_BOLGE, 1, { targetAtr: 1.0 })
+  assert.equal(lv.sign, 1)
+  assert.equal(lv.entryMode, 'zoneEdge')
+  assert.ok(Math.abs(lv.entry - 100.2) < 1e-9, 'giris = zoneTop')
+  assert.ok(Math.abs(lv.invalid - 99.15) < 1e-9, 'gecersizlik = zoneBottom - 0.25 ATR')
+  assert.ok(Math.abs(lv.target - 101.2) < 1e-9, 'hedef = zoneTop + 1.0 ATR')
+  assert.ok(Math.abs(lv.riskAtr - 1.05) < 1e-9)
+  assert.ok(Math.abs(lv.rewardAtr - 1.0) < 1e-9, 'kenardan giriste odul tam targetAtr')
+
+  const sv = zoneLevels(SATIS_BOLGE, 1, { targetAtr: 1.0 })
+  assert.equal(sv.sign, -1)
+  assert.ok(Math.abs(sv.entry - 99.8) < 1e-9, 'giris = zoneBottom')
+  assert.ok(Math.abs(sv.invalid - 100.85) < 1e-9, 'gecersizlik = zoneTop + 0.25 ATR')
+  assert.ok(Math.abs(sv.target - 98.8) < 1e-9, 'hedef = zoneBottom - 1.0 ATR')
+  assert.ok(Math.abs(sv.rewardAtr - 1.0) < 1e-9)
+})
+
+test('kenardan giriste risk/odul kapanisin konumundan BAGIMSIZDIR', () => {
+  // Ayni bolge, kapanis cok farkli iki yerde. Kenardan giriste risk ve odul
+  // ayni kalmali; ters secim sorunu bu yuzden ortadan kalkar.
+  const a = zoneLevels({ direction: 'BUY', price: 100.19, zoneTop: 100.2, zoneBottom: 99.4 }, 1, {})
+  const b = zoneLevels({ direction: 'BUY', price: 99.45, zoneTop: 100.2, zoneBottom: 99.4 }, 1, {})
+  assert.ok(Math.abs(a.riskAtr - b.riskAtr) < 1e-12)
+  assert.ok(Math.abs(a.rewardAtr - b.rewardAtr) < 1e-12)
+
+  // Kapanistan giriste ise risk kapanisla birlikte carpilir.
+  const ka = zoneLevels({ direction: 'BUY', price: 100.19, zoneTop: 100.2, zoneBottom: 99.4 }, 1, { entryMode: 'close' })
+  const kb = zoneLevels({ direction: 'BUY', price: 99.45, zoneTop: 100.2, zoneBottom: 99.4 }, 1, { entryMode: 'close' })
+  assert.ok(ka.riskAtr - kb.riskAtr > 0.5, 'kapanistan giriste risk kapanisa gore cok degisir')
+})
+
+test('kapanistan giriste hedef en az minTargetAtr kadar uzaga konur', () => {
+  // Kapanis bolgenin cok ustunde: ham hedef girisin altinda kalirdi.
+  const t = { direction: 'BUY', price: 105, zoneTop: 100.2, zoneBottom: 99.4 }
+  const lv = zoneLevels(t, 1, { entryMode: 'close' })
+  assert.ok(lv.target >= 105 + 0.25 - 1e-9, 'hedef en az giris + 0.25 ATR olmali')
+})
+
+test('kenardan giriste dokunus barinda gecersizlik gorulduyse ANINDA kirilma', () => {
+  // Emir dokunus bari icinde dolar; ayni bar gecersizligi de gordiyse bar ici
+  // sirayi bilemeyiz, muhafazakar davranilir.
+  const s = seriKur(20, { 5: { low: 99.0 } })
+  const o = labelTouch(s, ALIS_BOLGE, 1, ZCFG)
+  assert.equal(o.outcome, 'break')
+  assert.equal(o.barsToOutcome, 0)
+})
+
+test('bolge modu: hedef once gelirse bolge TUTTU', () => {
+  const s = seriKur(20, { 8: { high: 101.3 } })
+  const o = labelTouch(s, ALIS_BOLGE, 1, ZCFG)
+  assert.equal(o.mode, 'zone')
+  assert.equal(o.outcome, 'respect')
+  assert.equal(o.success, true)
+  assert.equal(o.barsToOutcome, 3)
+})
+
+test('bolge modu: gecersizlik once gelirse bolge KIRILDI', () => {
+  const s = seriKur(20, { 7: { low: 99.1 } })
+  const o = labelTouch(s, ALIS_BOLGE, 1, ZCFG)
+  assert.equal(o.outcome, 'break')
+  assert.equal(o.success, false)
+  assert.equal(o.barsToOutcome, 2)
+})
+
+test('bolge modu: ayni barda ikisi de olursa MUHAFAZAKAR davranilir (kirildi)', () => {
+  const s = seriKur(20, { 7: { high: 101.3, low: 99.1 } })
+  const o = labelTouch(s, ALIS_BOLGE, 1, ZCFG)
+  assert.equal(o.outcome, 'break')
+})
+
+test('bolge modu: hicbiri olmazsa timeout', () => {
+  const o = labelTouch(seriKur(20), ALIS_BOLGE, 1, ZCFG)
+  assert.equal(o.outcome, 'timeout')
+  assert.equal(o.barsToOutcome, -1)
+})
+
+test('bolge modu SELL yonu simetriktir', () => {
+  // gecersizlik 100.85, hedef 98.8
+  const tuttu = labelTouch(seriKur(20, { 8: { low: 98.7 } }), SATIS_BOLGE, 1, ZCFG)
+  assert.equal(tuttu.outcome, 'respect')
+
+  const kirildi = labelTouch(seriKur(20, { 7: { high: 100.9 } }), SATIS_BOLGE, 1, ZCFG)
+  assert.equal(kirildi.outcome, 'break')
+
+  const ikisi = labelTouch(seriKur(20, { 7: { high: 100.9, low: 98.7 } }), SATIS_BOLGE, 1, ZCFG)
+  assert.equal(ikisi.outcome, 'break', 'ayni barda ikisi de varsa kirilma kazanir')
+})
+
+test('mfeExitAtr yalnizca SONUCA kadar olan hareketi olcer', () => {
+  // 7. barda gecersizlik vurulur, 9. barda buyuk lehte hareket olur.
+  // mfeAtr bu hareketi gorur, mfeExitAtr GORMEZ.
+  // Giris 100.2 (bolge kenari). 7. barda gecersizlik (99.15) vurulur,
+  // 9. barda 105'e cikilir. mfeAtr bu hareketi gorur, mfeExitAtr GORMEZ.
+  const s = seriKur(20, { 7: { low: 99.1 }, 9: { high: 105 } })
+  const o = labelTouch(s, ALIS_BOLGE, 1, ZCFG)
+  assert.equal(o.outcome, 'break')
+  assert.ok(o.mfeAtr >= 4.7, 'mfeAtr tum ufku olcer, buyuk hareketi icerir: ' + o.mfeAtr)
+  assert.ok(o.mfeExitAtr <= 0.5, 'mfeExitAtr sonuc barindan sonrasini saymaz: ' + o.mfeExitAtr)
+  assert.ok(o.mfeExitAtr <= o.mfeAtr, 'mfeExitAtr her zaman mfeAtr kadar veya daha kucuk')
+})
+
+test('bolge modu bolge bilgisi olmayan dokunusta null doner', () => {
+  const s = seriKur(20)
+  assert.equal(labelTouch(s, { bar: 5, direction: 'BUY' }, 1, ZCFG), null)
+})
+
+test('riskAtr ve rewardAtr plan ile ayni seviyeleri tasir', () => {
+  const s = seriKur(20)
+  const o = labelTouch(s, ALIS_BOLGE, 1, ZCFG)
+  assert.ok(Math.abs(o.entryPrice - 100.2) < 1e-9)
+  assert.ok(Math.abs(o.invalidPrice - 99.15) < 1e-9)
+  assert.ok(Math.abs(o.targetPrice - 101.2) < 1e-9)
+  assert.ok(Math.abs(o.riskAtr - 1.05) < 1e-9)
+  assert.ok(Math.abs(o.rewardAtr - 1.0) < 1e-9)
+})

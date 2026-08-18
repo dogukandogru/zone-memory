@@ -1,0 +1,35 @@
+# Bagimliliklar
+node_modules/
+
+# Paketleme ciktilari
+release/
+dist/
+out/
+build/*.blockmap
+
+# Veri deposu (mumlar ve hafiza vektorleri)
+# Not: gercek depo uygulama veri klasorundedir, bunlar yerel denemeler icindir.
+data/
+*.bin
+*.bin.tmp
+*.vec
+*.vec.tmp
+*_memory.json
+
+# Gecici ve gunluk dosyalari
+tmp/
+temp/
+logs/
+*.log
+npm-debug.log*
+
+# Isletim sistemi ve editor artiklari
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Yerel ortam degiskenleri (API anahtarlari)
+.env
+.env.local

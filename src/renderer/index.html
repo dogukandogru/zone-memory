@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <!--
+    CSP: yerel dosyalar disinda kaynak yuklenmez. TradingView gomulu grafigi
+    icin yalnizca frame-src'e izin verilir. lightweight-charts yerel bir
+    <script src> ile geldiginden script-src 'self' yeterlidir; 'unsafe-inline'
+    panels.js'in calisma aninda ekledigi <style> blogu ve tradingview.html
+    icindeki kucuk yardimci betik icin birakilmistir.
+  -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; frame-src 'self' https://s.tradingview.com https://www.tradingview.com; media-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="color-scheme" content="dark">
+  <title>Zone Memory - XAUUSD</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div id="app">
+
+  <!-- ============================ UST SERIT ============================ -->
+  <header id="topbar">
+    <div class="tb-group tb-symbol">
+      <span id="symbolLabel" class="symbol">XAUUSD</span>
+      <span id="symbolSub" class="muted">Altın / Dolar</span>
+      <span id="lastPrice" class="last-price">-</span>
+      <span id="lastChange" class="last-change muted">-</span>
+    </div>
+
+    <div class="tb-sep"></div>
+
+    <div class="tb-group" id="tfButtons" role="group" aria-label="Zaman dilimi">
+      <button type="button" class="tf-btn" id="tfBtn1m" data-tf="1m">1m</button>
+      <button type="button" class="tf-btn" id="tfBtn5m" data-tf="5m">5m</button>
+      <button type="button" class="tf-btn active" id="tfBtn15m" data-tf="15m">15m</button>
+      <button type="button" class="tf-btn" id="tfBtn30m" data-tf="30m">30m</button>
+      <button type="button" class="tf-btn" id="tfBtn1h" data-tf="1h">1h</button>
+      <button type="button" class="tf-btn" id="tfBtn4h" data-tf="4h">4h</button>
+    </div>
+
+    <div class="tb-sep"></div>
+
+    <div class="tb-group">
+      <!-- Secenekleri app.js saglayici listesinden yeniden doldurur. -->
+      <label class="tb-label" for="providerSelect">Kaynak</label>
+      <select id="providerSelect" class="select" title="Geçmiş verisi sağlayıcısı">
+        <option value="histdata">HistData</option>
+        <option value="yahoo">Yahoo</option>
+        <option value="binance">Binance</option>
+        <option value="okx">OKX</option>
+        <option value="twelvedata">TwelveData</option>
+        <option value="polygon">Polygon</option>
+      </select>
+      <label class="tb-label" for="liveProviderSelect">Canlı</label>
+      <select id="liveProviderSelect" class="select" title="Canlı veri sağlayıcısı">
+        <option value="yahoo">Yahoo</option>
+        <option value="binance">Binance</option>
+        <option value="okx">OKX</option>
+        <option value="twelvedata">TwelveData</option>
+        <option value="polygon">Polygon</option>
+      </select>
+    </div>
+
+    <div class="tb-group">
+      <label class="switch" for="liveToggle" title="Canlı veri akışını aç/kapa">
+        <input type="checkbox" id="liveToggle">
+        <span class="switch-track"><span class="switch-knob"></span></span>
+        <span class="switch-text">Canlı</span>
+      </label>
+    </div>
+
+    <div class="tb-group">
+      <button type="button" class="btn" id="syncBtn" title="Seçili kaynaktan eksik geçmişi indir">Veri Çek</button>
+      <button type="button" class="btn btn-primary" id="scanBtn" title="Tüm geçmişi tarayıp hafızayı kur">Geçmişi Tara</button>
+      <button type="button" class="btn btn-ghost" id="cancelBtn" hidden>Durdur</button>
+    </div>
+
+    <div class="tb-group tb-progress">
+      <div id="progressTrack" class="progress">
+        <div id="progressBar" class="progress-fill" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div>
+      </div>
+      <span id="progressText" class="muted"></span>
+    </div>
+
+    <div class="tb-spacer"></div>
+
+    <div class="tb-group" id="mainTabs" role="tablist" aria-label="Görünüm">
+      <button type="button" class="main-tab active" id="tabAnaliz" data-view="analysis" role="tab" aria-selected="true">Analiz</button>
+      <button type="button" class="main-tab" id="tabTradingView" data-view="tradingview" role="tab" aria-selected="false">TradingView</button>
+    </div>
+  </header>
+
+  <!-- ============================= ANA ALAN ============================= -->
+  <main id="main">
+
+    <div id="chartCol">
+      <!-- Analiz görünümü: grafik + bölge overlay canvas'ı.
+           createChartView(#chart) ve createZoneOverlay(view, #chartWrap). -->
+      <div id="chartWrap">
+        <div id="chart"></div>
+        <div id="chartLegend" class="chart-legend">
+          <span id="legendSymbol">XAUUSD</span>
+          <span id="legendTf" class="muted">15m</span>
+          <span>A <b id="legendO">-</b></span>
+          <span>Y <b id="legendH">-</b></span>
+          <span>D <b id="legendL">-</b></span>
+          <span>K <b id="legendC">-</b></span>
+          <span id="legendChange" class="muted">-</span>
+        </div>
+        <div id="chartEmpty" class="chart-empty">
+          Veri yok. Önce <b>Veri Çek</b>, sonra <b>Geçmişi Tara</b> düğmesini kullanın.
+        </div>
+        <div id="chartLoading" class="chart-loading" hidden>Yükleniyor...</div>
+      </div>
+
+      <!-- TradingView görünümü. Görünürlüğünü app.js yönetir.
+           #tvFrame kaynağını app.js atar: tradingview.html?interval=15m -->
+      <div id="tvPanel" hidden>
+        <div id="tvNote" class="tv-note">
+          Bu gömülü grafik TradingView'in kendi grafiğidir. Uygulamanın çizdiği
+          <b>bölgeler ve sinyaller burada görünmez</b>, çünkü gömülü widget üzerine
+          dışarıdan çizim yapılamaz. Kendi bölgelerinizi görmek için <b>Analiz</b>
+          sekmesine dönün.
+        </div>
+        <iframe id="tvFrame" title="TradingView gömülü grafik" referrerpolicy="origin"></iframe>
+      </div>
+    </div>
+
+    <!-- ============================ SAG PANEL ============================ -->
+    <aside id="sidePanel">
+      <nav id="sideTabs" role="tablist" aria-label="Panel sekmeleri">
+        <button type="button" class="side-tab active" id="sideTabSignals" data-tab="signals" role="tab" aria-selected="true">Sinyaller</button>
+        <button type="button" class="side-tab" id="sideTabZones" data-tab="zones" role="tab" aria-selected="false">Bölgeler</button>
+        <button type="button" class="side-tab" id="sideTabMemory" data-tab="memory" role="tab" aria-selected="false">Hafıza</button>
+        <button type="button" class="side-tab" id="sideTabSettings" data-tab="settings" role="tab" aria-selected="false">Ayarlar</button>
+        <button type="button" class="side-tab" id="sideTabTest" data-tab="test" role="tab" aria-selected="false">Test</button>
+      </nav>
+
+      <div id="sidePanelBody">
+
+        <!-- ---------------------- SINYALLER ---------------------- -->
+        <section id="panelSignals" class="panel active" data-panel="signals" role="tabpanel">
+          <div class="panel-head">
+            <span class="panel-title">Sinyaller <span id="signalCount" class="badge">0</span></span>
+            <span class="panel-actions">
+              <select id="signalFilter" class="select mini" title="Listeleme filtresi">
+                <option value="fired">Yayınlananlar</option>
+                <option value="all">Tüm dokunuşlar</option>
+                <option value="buy">Sadece AL</option>
+                <option value="sell">Sadece SAT</option>
+              </select>
+              <button type="button" class="btn mini" id="signalRefreshBtn">Yenile</button>
+            </span>
+          </div>
+          <div id="signalList" class="list scroll"></div>
+          <div id="signalEmpty" class="empty">Henüz sinyal yok. Önce hafızayı kurun.</div>
+          <div id="signalDetail" class="detail scroll" hidden></div>
+        </section>
+
+        <!-- ---------------------- BOLGELER ---------------------- -->
+        <section id="panelZones" class="panel" data-panel="zones" role="tabpanel">
+          <div class="panel-head">
+            <span class="panel-title">Bölgeler <span id="zoneCount" class="badge">0</span></span>
+            <span class="panel-actions">
+              <select id="zoneFilter" class="select mini">
+                <option value="active">Aktif</option>
+                <option value="all">Tümü</option>
+                <option value="broken">Kırılan</option>
+                <option value="support">Destek</option>
+                <option value="resistance">Direnç</option>
+              </select>
+              <label class="check mini" for="zoneShowToggle" title="Bölgeleri grafikte göster">
+                <input type="checkbox" id="zoneShowToggle" checked><span>Göster</span>
+              </label>
+            </span>
+          </div>
+          <div id="zoneList" class="list scroll"></div>
+          <div id="zoneEmpty" class="empty">Bölge yok. Önce tarama yapın.</div>
+          <div id="zoneDetail" class="detail scroll" hidden></div>
+        </section>
+
+        <!-- ----------------------- HAFIZA ----------------------- -->
+        <section id="panelMemory" class="panel" data-panel="memory" role="tabpanel">
+          <div class="panel-head">
+            <span class="panel-title">Hafıza</span>
+            <span class="panel-actions">
+              <button type="button" class="btn mini" id="memoryExtendBtn">Güncelle</button>
+              <button type="button" class="btn mini btn-primary" id="memoryBuildBtn">Yeniden Kur</button>
+              <button type="button" class="btn mini btn-danger" id="memoryDeleteBtn">Sil</button>
+            </span>
+          </div>
+          <!-- İçeriği panels.js/renderMemory çizer. -->
+          <div class="scroll panel-body"></div>
+        </section>
+
+        <!-- ----------------------- AYARLAR ---------------------- -->
+        <section id="panelSettings" class="panel" data-panel="settings" role="tabpanel">
+          <div class="panel-head">
+            <span class="panel-title">Ayarlar</span>
+            <span class="panel-actions">
+              <span id="settingsStatus" class="muted small"></span>
+              <button type="button" class="btn mini" id="settingsResetBtn">Varsayılan</button>
+              <button type="button" class="btn mini btn-primary" id="settingsSaveBtn">Kaydet</button>
+            </span>
+          </div>
+          <!-- Alanları panels.js/renderSettings üretir. -->
+          <form id="settingsForm" class="scroll panel-body" autocomplete="off"></form>
+        </section>
+
+        <!-- ------------------------ TEST ------------------------ -->
+        <section id="panelTest" class="panel" data-panel="test" role="tabpanel">
+          <div class="panel-head">
+            <span class="panel-title">Yürüyen ileri test</span>
+            <span class="panel-actions">
+              <label class="field inline mini" for="testWarmup"><span>Isınma</span>
+                <input type="number" id="testWarmup" class="input mini" value="500" min="0" step="50">
+              </label>
+              <button type="button" class="btn mini btn-primary" id="testRunBtn">Çalıştır</button>
+            </span>
+          </div>
+          <!-- Özet, yıllara göre kırılım ve sermaye eğrisini panels.js çizer. -->
+          <div class="scroll panel-body"></div>
+        </section>
+
+      </div>
+    </aside>
+  </main>
+
+  <!-- ============================ ALT SERIT ============================ -->
+  <footer id="statusbar">
+    <span id="statusData" class="st">Veri: -</span>
+    <span class="st-sep"></span>
+    <span id="statusRange" class="st muted">Aralık: -</span>
+    <span class="st-sep"></span>
+    <span id="statusEngine" class="st">Motor: hazır</span>
+    <span class="st-sep"></span>
+    <span id="statusLive" class="st muted">Canlı: kapalı</span>
+    <span class="st-sep"></span>
+    <span id="statusProvider" class="st muted">Kaynak: -</span>
+    <span id="statusMessage" class="st grow muted"></span>
+    <span id="statusClock" class="st mono">--:--:--</span>
+  </footer>
+
+</div>
+
+<!-- lightweight-charts 4.2.3 standalone: global LightweightCharts nesnesini verir.
+     Bu yol paketlenmis asar icinde de gecerlidir (package.json build.files). -->
+<script src="../../node_modules/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+<script type="module" src="app.js"></script>
+
+<!--
+=======================================================================
+  ELEMENT ID SOZLUGU
+  app.js bu kimlikleri arar, bulamadigini sessizce atlar. Panellerin ici
+  panels.js tarafindan cizilir; bir kabin icerigi silinip yeniden
+  uretilecekse o kabin disindaki dugmeler (panel-head icindekiler) korunur.
+=======================================================================
+
+UST SERIT
+  #topbar               ust serit kabi
+  #symbolLabel #symbolSub      sembol basligi (sabit)
+  #lastPrice #lastChange       son fiyat ve yuzde degisim
+  #tfButtons            zaman dilimi dugme kabi; dugmelerde
+                        data-tf="1m|5m|15m|30m|1h|4h", secili olana .active
+  #tfBtn1m #tfBtn5m #tfBtn15m #tfBtn30m #tfBtn1h #tfBtn4h
+  #providerSelect       gecmis verisi saglayicisi (select)
+  #liveProviderSelect   canli veri saglayicisi (select)
+  #liveToggle           canli akis anahtari (checkbox)
+  #syncBtn              'Veri Cek'
+  #scanBtn              'Gecmisi Tara'
+  #cancelBtn            'Durdur' (baslangicta gizli)
+  #progressTrack        ilerleme cubugu kabi
+  #progressBar          ilerleme DOLGUSU: style.width = '42.0%'
+  #progressText         ilerleme metni
+  #mainTabs             gorunum sekmeleri kabi
+  #tabAnaliz            data-view="analysis"
+  #tabTradingView       data-view="tradingview"; etkin olana .active
+
+ANA ALAN
+  #main                 #chartCol + #sidePanel
+  #chartCol             grafik sutunu
+  #chartWrap            grafik kabi (position: relative);
+                        createZoneOverlay canvas'i buraya eklenir
+  #chart                createChartView(#chart) kutusu
+  #chartLegend          sol ust efsane kutusu
+  #legendSymbol #legendTf #legendO #legendH #legendL #legendC #legendChange
+  #chartEmpty           veri yokken gosterilen kutu
+  #chartLoading         yuklenirken gosterilen kutu
+  #tvPanel              TradingView gorunumu (baslangicta hidden)
+  #tvNote               gomulu grafik uyarisi
+  #tvFrame              gomulu iframe; kaynagi app.js atar
+                        (tradingview.html?interval=15m)
+
+SAG PANEL
+  #sidePanel            sag panel (380px)
+  #sideTabs             sekme serisi; dugmelerde
+                        data-tab="signals|zones|memory|settings|test"
+  #sideTabSignals #sideTabZones #sideTabMemory #sideTabSettings #sideTabTest
+  #sidePanelBody        panel govdesi
+  #panelSignals #panelZones #panelMemory #panelSettings #panelTest
+                        her birinde data-panel="..."; etkin olana .active
+                        (.panel gizli, .panel.active gorunur)
+
+  Sinyaller: #signalCount #signalFilter #signalRefreshBtn #signalList
+             #signalEmpty #signalDetail
+  Bolgeler : #zoneCount #zoneFilter #zoneShowToggle #zoneList #zoneEmpty
+             #zoneDetail
+  Hafiza   : #memoryBuildBtn #memoryExtendBtn #memoryDeleteBtn
+             ve panel govdesi: #panelMemory .panel-body
+  Ayarlar  : #settingsSaveBtn #settingsResetBtn #settingsStatus
+             ve alanlarin uretildigi kap: #settingsForm (.panel-body)
+  Test     : #testWarmup #testRunBtn ve govde: #panelTest .panel-body
+
+ALT SERIT
+  #statusbar #statusData #statusRange #statusEngine #statusLive
+  #statusProvider #statusMessage #statusClock
+
+PANELLERDE KULLANILABILIR CSS SINIFLARI
+  .row .row-main .row-sub .row-side .badge .tag .up .down
+  .muted .small .mono .grow .empty .detail .sec-title .kv .spark
+  .stat-grid > .stat > (.stat-label + .stat-value)
+  .table-wrap > table.tbl
+  .btn .btn-primary .btn-ghost .btn-danger .mini
+  .field .field-grid .select .input .check .inline
+  .panel-head .panel-title .panel-actions .panel-body .panel-foot
+  .list ve .row.selected
+  Ayrica panels.js kendi `zm-` onekli stillerini calisma aninda ekler;
+  styles.css bu siniflara koyu tema renklerini yedek olarak verir.
+=======================================================================
+-->
+</body>
+</html>

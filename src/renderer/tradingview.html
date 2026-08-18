@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <!-- Bu sayfa tek basina da acilabilir. Disariya yalnizca TradingView
+       gomulu grafigi icin frame izni verilir. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-src https://s.tradingview.com https://www.tradingview.com; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="color-scheme" content="dark">
+  <title>TradingView - XAUUSD</title>
+  <style>
+    :root {
+      --bg: #131722;
+      --panel: #1b1f2b;
+      --border: #2a2e39;
+      --text: #d1d4dc;
+      --dim: #787b86;
+      --warn: #f2b40e;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      height: 100%; margin: 0; padding: 0;
+      background: var(--bg); color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      font-size: 12px;
+      overflow: hidden;
+    }
+    #wrap { display: flex; flex-direction: column; height: 100%; }
+    #note {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 7px 12px;
+      background: #2a2413;
+      border-bottom: 1px solid #4a3d15;
+      color: #e6d9a8;
+      font-size: 11px;
+      line-height: 1.45;
+    }
+    #note b { color: var(--warn); }
+    #note .icon { flex: 0 0 auto; color: var(--warn); font-weight: 700; }
+    #note .txt { flex: 1 1 auto; }
+    #bar {
+      flex: 0 0 auto;
+      display: flex; align-items: center; gap: 8px;
+      height: 28px; padding: 0 10px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      color: var(--dim);
+      font-size: 11px;
+    }
+    #bar .sym { color: var(--text); font-weight: 600; }
+    #bar .grow { flex: 1 1 auto; }
+    button {
+      height: 20px; padding: 0 8px;
+      background: #222634; color: var(--text);
+      border: 1px solid var(--border); border-radius: 3px;
+      font: inherit; font-size: 10px; cursor: pointer;
+    }
+    button:hover { background: #262b3a; }
+    #frameBox { position: relative; flex: 1 1 auto; min-height: 0; }
+    iframe { width: 100%; height: 100%; border: 0; display: block; background: var(--bg); }
+    #fallback {
+      position: absolute; inset: 0;
+      display: none;
+      align-items: center; justify-content: center;
+      text-align: center; padding: 20px;
+      color: var(--dim);
+    }
+  </style>
+</head>
+<body>
+<div id="wrap">
+
+  <div id="note">
+    <span class="icon">!</span>
+    <span class="txt">
+      Bu gömülü grafik <b>TradingView'in kendi grafiğidir</b>. Uygulamanın hesapladığı
+      destek/direnç bölgeleri ve sinyaller <b>burada görünmez</b>, çünkü gömülü widget
+      üzerine dışarıdan çizim yapılamaz. Kendi bölgelerinizi ve sinyallerinizi görmek
+      için <b>Analiz</b> sekmesindeki grafiği kullanın. Buradaki fiyat OANDA XAUUSD
+      spot verisidir, uygulamanın kullandığı kaynaktan küçük farklar gösterebilir.
+    </span>
+  </div>
+
+  <div id="bar">
+    <span class="sym">OANDA:XAUUSD</span>
+    <span id="intervalLabel">15 dakika</span>
+    <span class="grow"></span>
+    <button type="button" id="reloadBtn">Yeniden yükle</button>
+  </div>
+
+  <div id="frameBox">
+    <iframe id="tvWidget" title="TradingView XAUUSD" referrerpolicy="origin" allowtransparency="true" scrolling="no"></iframe>
+    <div id="fallback">
+      TradingView grafiği yüklenemedi. İnternet bağlantısını kontrol edip
+      <b>Yeniden yükle</b> düğmesine basın.
+    </div>
+  </div>
+
+</div>
+
+<script>
+  // Zaman dilimi disaridan ?interval= ile verilebilir: '15', '15m', '1h', '4h', '1d'.
+  // Verilmezse 15 dakika kullanilir.
+  var TV_INTERVALS = {
+    '1m': '1', '5m': '5', '15m': '15', '30m': '30',
+    '1h': '60', '4h': '240', '1d': 'D',
+    '1': '1', '5': '5', '15': '15', '30': '30', '60': '60', '240': '240', 'd': 'D', 'D': 'D'
+  };
+  var TV_LABELS = {
+    '1': '1 dakika', '5': '5 dakika', '15': '15 dakika',
+    '30': '30 dakika', '60': '1 saat', '240': '4 saat', 'D': '1 gün'
+  };
+
+  function resolveInterval() {
+    var raw = '';
+    try {
+      raw = (new URLSearchParams(window.location.search).get('interval') || '').trim();
+    } catch (e) {
+      raw = '';
+    }
+    return TV_INTERVALS[raw] || TV_INTERVALS[raw.toLowerCase()] || '15';
+  }
+
+  function buildUrl(interval) {
+    return 'https://s.tradingview.com/widgetembed/'
+      + '?symbol=OANDA%3AXAUUSD'
+      + '&interval=' + encodeURIComponent(interval)
+      + '&theme=dark'
+      + '&style=1'
+      + '&timezone=Europe%2FIstanbul'
+      + '&locale=tr'
+      + '&hide_side_toolbar=0'
+      + '&withdateranges=1'
+      + '&allow_symbol_change=1'
+      + '&saveimage=0';
+  }
+
+  var frame = document.getElementById('tvWidget');
+  var fallback = document.getElementById('fallback');
+  var label = document.getElementById('intervalLabel');
+  var loaded = false;
+
+  // Bu sayfa uygulamanin icinde bir cerceve olarak acildiysa ayni uyari
+  // ust sayfada zaten gosterilir; iki kez yazmamak icin buradakini gizle.
+  try {
+    if (window.parent && window.parent !== window) {
+      document.getElementById('note').style.display = 'none';
+    }
+  } catch (e) {
+    // Cerceve erisimi engellendiyse not gorunur kalir.
+  }
+
+  function load() {
+    var interval = resolveInterval();
+    label.textContent = TV_LABELS[interval] || interval;
+    fallback.style.display = 'none';
+    loaded = false;
+    frame.src = buildUrl(interval);
+    // Belirli bir sure icinde yuklenmezse uyari goster.
+    window.setTimeout(function () {
+      if (!loaded) fallback.style.display = 'flex';
+    }, 12000);
+  }
+
+  frame.addEventListener('load', function () {
+    loaded = true;
+    fallback.style.display = 'none';
+  });
+
+  document.getElementById('reloadBtn').addEventListener('click', load);
+
+  load();
+</script>
+</body>
+</html>

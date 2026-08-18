@@ -1,0 +1,65 @@
+{
+  "name": "zone-memory",
+  "productName": "Zone Memory",
+  "version": "0.1.0",
+  "description": "XAUUSD destek/direnc bolge hafizasi ve canli patern eslestirme masaustu uygulamasi",
+  "author": "Dogukan Dogru",
+  "license": "UNLICENSED",
+  "private": true,
+  "main": "src/main/main.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "test": "node --test \"test/*.test.js\"",
+    "import-legacy": "node scripts/import-legacy.mjs",
+    "fetch-history": "node scripts/fetch-history.mjs",
+    "dist": "electron-builder",
+    "dist:mac": "electron-builder --mac",
+    "dist:win": "electron-builder --win"
+  },
+  "devDependencies": {
+    "electron": "^43.4.0",
+    "electron-builder": "^26.15.3"
+  },
+  "dependencies": {
+    "lightweight-charts": "4.2.3"
+  },
+  "build": {
+    "appId": "com.dogukandogru.zonememory",
+    "productName": "Zone Memory",
+    "asar": true,
+    "files": [
+      "src/**/*",
+      "node_modules/lightweight-charts/dist/lightweight-charts.standalone.production.js",
+      "package.json"
+    ],
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "mac": {
+      "target": [
+        { "target": "dmg", "arch": ["arm64", "x64"] }
+      ],
+      "category": "public.app-category.finance",
+      "icon": "build/icon.icns",
+      "identity": null
+    },
+    "dmg": {
+      "title": "Zone Memory"
+    },
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] }
+      ],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "Zone Memory"
+    }
+  }
+}
