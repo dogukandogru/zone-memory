@@ -36,3 +36,4 @@ Thumbs.db
 
 # Uretilen kurulum paketleri
 release/
+src/build-info.json

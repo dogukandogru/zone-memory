@@ -1696,6 +1696,43 @@ const SAAT_BICIMI = new Intl.DateTimeFormat('tr-TR', {
   timeZone: 'Europe/Istanbul', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
 })
 
+/**
+ * Uygulama surumunu ve yapi damgasini pencere basligina yazar.
+ *
+ * Surum numarasi her pakette ayni oldugu icin tek basina hangi yapinin
+ * calistigini soylemiyordu; bir hata bildirildiginde eski bir paketten mi
+ * geldigi anlasilmadigi icin bosuna arama yapiliyordu. Damga paketleme
+ * sirasinda yazilir (scripts/stamp-build.mjs).
+ */
+async function yapiDamgasiniYaz() {
+  let bilgi = null
+  try {
+    bilgi = await cagir('app:info', {})
+  } catch (err) {
+    return
+  }
+  if (!bilgi) return
+
+  const parcalar = ['Zone Memory', 'XAUUSD']
+  if (bilgi.version) parcalar.push('v' + bilgi.version)
+  if (bilgi.builtAt) {
+    const d = new Date(bilgi.builtAt)
+    if (!isNaN(d.getTime())) {
+      parcalar.push(formatDate(Math.floor(d.getTime() / 1000)) +
+        ' ' + SAAT_BICIMI.format(d))
+    }
+  }
+  if (bilgi.commit) parcalar.push(bilgi.commit)
+  document.title = parcalar.join(' - ')
+
+  const e = el('statusClock')
+  if (e) {
+    e.title = 'Sürüm ' + (bilgi.version || '?') +
+      (bilgi.builtAt ? ', yapı ' + bilgi.builtAt : '') +
+      (bilgi.commit ? ', commit ' + bilgi.commit : '')
+  }
+}
+
 /** Alt seritteki saati baslatir (Istanbul saati). */
 function saatiBaslat() {
   const e = el('statusClock')
@@ -1793,6 +1830,7 @@ function dugmeleriBagla() {
 /** Uygulamayi baslatir. */
 async function baslat() {
   saatiBaslat()
+  yapiDamgasiniYaz()
   pencereOlaylari()
   olaylariBagla()
   dugmeleriBagla()

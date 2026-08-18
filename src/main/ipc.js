@@ -79,15 +79,26 @@ async function dispatch(cmd, payload) {
   const p = payload || {}
 
   switch (cmd) {
-    case 'app:info':
+    case 'app:info': {
+      // Yapi damgasi paketleme sirasinda yazilir (scripts/stamp-build.mjs).
+      // Gelistirme calistirmasinda dosya olmayabilir, o zaman bos gecilir.
+      let build = null
+      try {
+        build = require('../build-info.json')
+      } catch (err) {
+        build = null
+      }
       return {
         version: app.getVersion(),
+        builtAt: build && build.builtAt ? build.builtAt : null,
+        commit: build && build.commit ? build.commit : null,
         platform: process.platform,
         electron: process.versions.electron,
         node: process.versions.node,
         dataDir: paths.dataDir(),
         userDataDir: paths.userDataDir(),
       }
+    }
 
     case 'settings:get':
       return settings.get(p.key)

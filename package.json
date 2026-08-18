@@ -14,9 +14,10 @@
     "test": "node --test \"test/*.test.js\"",
     "import-legacy": "node scripts/import-legacy.mjs",
     "fetch-history": "node scripts/fetch-history.mjs",
-    "dist": "electron-builder",
-    "dist:mac": "electron-builder --mac",
-    "dist:win": "electron-builder --win"
+    "dist": "node scripts/stamp-build.mjs && electron-builder",
+    "dist:mac": "node scripts/stamp-build.mjs && electron-builder --mac",
+    "dist:win": "node scripts/stamp-build.mjs && electron-builder --win",
+    "stamp": "node scripts/stamp-build.mjs"
   },
   "devDependencies": {
     "electron": "^43.4.0",
@@ -31,6 +32,7 @@
     "asar": true,
     "files": [
       "src/**/*",
+      "src/build-info.json",
       "node_modules/lightweight-charts/dist/lightweight-charts.standalone.production.js",
       "package.json"
     ],
@@ -40,7 +42,13 @@
     },
     "mac": {
       "target": [
-        { "target": "dmg", "arch": ["arm64", "x64"] }
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
       ],
       "category": "public.app-category.finance",
       "icon": "build/icon.icns",
@@ -51,7 +59,12 @@
     },
     "win": {
       "target": [
-        { "target": "nsis", "arch": ["x64"] }
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "icon": "build/icon.ico"
     },
