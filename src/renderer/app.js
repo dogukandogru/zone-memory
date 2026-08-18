@@ -1348,7 +1348,10 @@ async function sinyalSec(s) {
 
   planCizgileri(s)
   if (view && typeof view.scrollToTime === 'function') {
-    try { view.scrollToTime(zaman) } catch (err) { /* onemsiz */ }
+    // Yakinlastirma seviyesi korunur ama makul araliga sinirlanir; aksi halde
+    // asiri yakinlasmis bir gorunumden baska sinyale atlayinca ekranda birkac
+    // mum kalir ve kullanici her seferinde elle uzaklastirmak zorunda kalir.
+    try { view.scrollToTime(zaman, { minSpan: 80, maxSpan: 900 }) } catch (err) { /* onemsiz */ }
   }
   if (durum.aktifPanel !== 'signals') panelSec('signals')
   else sinyalPaneliniCiz()
@@ -1401,7 +1404,7 @@ async function bolgeSec(z) {
       }
     }
     if (view && typeof view.scrollToTime === 'function') {
-      try { view.scrollToTime(zaman) } catch (err) { /* onemsiz */ }
+      try { view.scrollToTime(zaman, { minSpan: 80, maxSpan: 900 }) } catch (err) { /* onemsiz */ }
     }
   }
 

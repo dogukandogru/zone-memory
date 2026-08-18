@@ -749,13 +749,30 @@ export function createChartView(container) {
     emitRange();
   }
 
-  function scrollToTime(time) {
+  /**
+   * Grafigi verilen zamana ortalar.
+   *
+   * Kullanicinin yakinlastirma seviyesi KORUNUR, ama makul bir araliga
+   * sinirlanir. Sebebi: kullanici 10 barlik bir yakinlastirmadayken baska bir
+   * sinyale atladiginda ekranda 10 mum kalir ve grafik bos gorunur; her
+   * atlayistan sonra elle uzaklastirmak gerekir. Tersi de gecerlidir, cok
+   * uzaklasmis gorunumde sinyal fark edilmez.
+   *
+   * @param {number} time
+   * @param {{minSpan?:number, maxSpan?:number}} [opts] Bar cinsinden sinirlar
+   */
+  function scrollToTime(time, opts) {
     if (destroyed || count === 0) return;
     const l = timeToLogical(+time);
     if (l == null) return;
     const ts = chart.timeScale();
     const cur = ts.getVisibleLogicalRange();
-    const span = cur && isNum(cur.to - cur.from) && cur.to - cur.from > 4 ? cur.to - cur.from : 200;
+    let span = cur && isNum(cur.to - cur.from) && cur.to - cur.from > 4 ? cur.to - cur.from : 200;
+
+    const o = opts || {};
+    if (isNum(+o.minSpan) && span < +o.minSpan) span = +o.minSpan;
+    if (isNum(+o.maxSpan) && span > +o.maxSpan) span = +o.maxSpan;
+
     ts.setVisibleLogicalRange({ from: l - span / 2, to: l + span / 2 });
     emitRange();
   }
