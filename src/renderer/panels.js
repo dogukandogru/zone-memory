@@ -119,6 +119,14 @@ function tam(v) {
   return NF.tam.format(Math.round(sayi(v, 0)))
 }
 
+/**
+ * Yil numarasi. `tam` kullanilamaz cunku binlik ayraci ekleyip 2009'u
+ * "2.009" yapar.
+ */
+function yil(v) {
+  return String(Math.round(sayi(v, 0)))
+}
+
 /* ------------------------------------------------------------------ */
 /* DOM yardimcilari                                                    */
 /* ------------------------------------------------------------------ */
@@ -735,7 +743,7 @@ export function renderMemory(el, summary, prototypes) {
     for (let i = 0; i < yillar.length; i++) {
       const y = yillar[i]
       satirlar.push([
-        tam(y.year), tam(y.total), tam(y.success), tam(y.fail),
+        yil(y.year), tam(y.total), tam(y.success), tam(y.fail),
         formatPercent(y.winRate, 1), formatNumber(y.avgMfeAtr, 2), formatNumber(y.avgMaeAtr, 2),
       ])
     }
@@ -1142,7 +1150,7 @@ export function renderBacktest(el, result, opts) {
     for (let i = 0; i < yillar.length; i++) {
       const y = yillar[i]
       satirlar.push([
-        tam(y.year), tam(y.fired), tam(y.wins), tam(y.losses),
+        yil(y.year), tam(y.fired), tam(y.wins), tam(y.losses),
         formatPercent(y.winRate, 1), formatNumber(y.expectancyAtr, 3),
       ])
     }

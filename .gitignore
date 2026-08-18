@@ -33,3 +33,6 @@ Thumbs.db
 # Yerel ortam degiskenleri (API anahtarlari)
 .env
 .env.local
+
+# Uretilen kurulum paketleri
+release/

@@ -32,7 +32,13 @@ const DEFAULTS = {
   indicatorParams: coreConst('../core/indicator/masterTouch', 'DEFAULT_PARAMS', {}),
   outcomeCfg: coreConst('../core/learn/outcome', 'DEFAULT_OUTCOME_CFG', {}),
   signalCfg: coreConst('../core/learn/signal', 'DEFAULT_SIGNAL_CFG', {}),
-  providers: { history: 'histdata', live: 'yahoo' },
+  // Canli varsayilani Binance PAXGUSDT'dir. Yahoo (GC=F) olculdu ve bu agdan
+  // tekrarli isteklerde HTTP 429 (hiz siniri) donuyor, yani canli takip icin
+  // guvenilir degil. Binance anahtarsiz, gercek zamanli ve gercek hacimli
+  // calisiyor; PAXG fiziki altina dayali oldugu icin spot XAUUSD'yi yakindan
+  // izler, aradaki seviye farki basis duzeltmesiyle kapatilir (loader.js).
+  // En dogru canli spot fiyat icin Polygon (C:XAUUSD) anahtari onerilir.
+  providers: { history: 'histdata', live: 'binance' },
   apiKeys: { twelvedata: '', polygon: '' },
   livePollSeconds: 20,
   theme: 'dark',

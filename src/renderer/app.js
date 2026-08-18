@@ -418,14 +418,25 @@ function bolgeleriCiz() {
 /** Sinyal isaretlerini grafige koyar. */
 function isaretleriCiz() {
   if (!view || typeof view.setMarkers !== 'function') return
+
+  // Isaretler YALNIZCA yuklu mum araligindaki sinyaller icin konur.
+  // lightweight-charts, veri araliginin disinda kalan bir isareti serinin ilk
+  // barina yaslar; boylece 17 yillik sinyal listesi grafigin sol kenarinda
+  // ust uste yigilip yanlis bir gorunti verirdi.
+  const barlar = durum.bars
+  const ilk = Array.isArray(barlar) && barlar.length ? barlar[0].time : null
+  const son = Array.isArray(barlar) && barlar.length ? barlar[barlar.length - 1].time : null
+
   const isaretler = []
   for (let i = 0; i < durum.signals.length; i++) {
     const s = durum.signals[i]
     if (!s || s.fired === false) continue
+    const t = sayi(s.time, 0)
+    if (ilk === null || t < ilk || t > son) continue
     const alis = s.direction !== 'SELL'
     isaretler.push({
       id: String(s.id),
-      time: sayi(s.time, 0),
+      time: t,
       position: alis ? 'belowBar' : 'aboveBar',
       shape: alis ? 'arrowUp' : 'arrowDown',
       color: alis ? RENK.up : RENK.down,
@@ -554,12 +565,58 @@ async function mumlariYukle() {
 
   const barlar = barlariNormalle(ham)
   durum.bars = barlar
+  durum.pencereliMumlar = false
   goster(el('chartEmpty'), barlar.length === 0)
   grafik('setBars', barlar)
   if (barlar.length > 0) {
     grafik('fitContent')
     efsaneyiYaz(null)
   }
+}
+
+/**
+ * Verilen zamanin ETRAFINDAKI mumlari yukler.
+ *
+ * Grafik varsayilan olarak yalnizca son MUM_LIMITI kadar mumu tutar. Kullanici
+ * 2015 tarihli bir sinyale tikladiginda o mumlar yuklu olmadigi icin grafik
+ * bos bir alana kayiyordu. Bu fonksiyon hedef zamani ortalayan bir pencere
+ * yukler, boylece sinyal, bolgeleri ve isaretleriyle birlikte gorunur.
+ *
+ * @param {number} hedefZaman UNIX saniye
+ * @returns {Promise<boolean>} yukleme yapildiysa true
+ */
+async function mumlariZamanEtrafindaYukle(hedefZaman) {
+  if (!Number.isFinite(hedefZaman) || hedefZaman <= 0) return false
+  const adim = tfSaniye(durum.tf)
+  const yariPencere = (MUM_LIMITI / 2) * adim
+  const from = hedefZaman - yariPencere
+  const to = hedefZaman + yariPencere
+
+  goster(el('chartLoading'), true)
+  const ham = await cagirGuvenli('data:candles',
+    { tf: durum.tf, from: from, to: to, limit: MUM_LIMITI }, 'Mumlar yüklenemedi')
+  goster(el('chartLoading'), false)
+  if (ham === null) return false
+
+  const barlar = barlariNormalle(ham)
+  if (barlar.length === 0) return false
+
+  durum.bars = barlar
+  // Grafik artik son mumlari degil, gecmiste bir pencereyi gosteriyor.
+  durum.pencereliMumlar = true
+  goster(el('chartEmpty'), false)
+  grafik('setBars', barlar)
+  return true
+}
+
+/** Hedef zaman yuklu mum penceresinin disinda mi. */
+function zamanPencereDisinda(t) {
+  const b = durum.bars
+  if (!Array.isArray(b) || b.length === 0) return true
+  const adim = tfSaniye(durum.tf)
+  // Kenara cok yakinsa da yeniden yukle: sinyalin saginda ve solunda
+  // baglam gorunsun.
+  return t < b[0].time + adim * 5 || t > b[b.length - 1].time - adim * 5
 }
 
 /** Bolgeleri yukler, katmana ve panele verir. */
@@ -1077,12 +1134,26 @@ function seciliSinyal() {
 }
 
 /** Bir sinyali secer: plan cizgileri, ayrinti paneli ve grafige kaydirma. */
-function sinyalSec(s) {
+async function sinyalSec(s) {
   if (!s) return
   durum.seciliSinyalId = s.id
+  const zaman = sayi(s.time, 0)
+
+  // Sinyal yuklu mum penceresinin disindaysa once o tarihin etrafini yukle,
+  // aksi halde grafik bos bir alana kayar.
+  if (zamanPencereDisinda(zaman)) {
+    const yuklendi = await mumlariZamanEtrafindaYukle(zaman)
+    if (yuklendi) {
+      const barlar = durum.bars
+      const to = barlar.length ? barlar[barlar.length - 1].time + tfSaniye(durum.tf) * 200 : undefined
+      await bolgeleriYukle(barlar.length ? barlar[0].time : undefined, to)
+      isaretleriCiz()
+    }
+  }
+
   planCizgileri(s)
   if (view && typeof view.scrollToTime === 'function') {
-    try { view.scrollToTime(sayi(s.time, 0)) } catch (err) { /* onemsiz */ }
+    try { view.scrollToTime(zaman) } catch (err) { /* onemsiz */ }
   }
   if (durum.aktifPanel !== 'signals') panelSec('signals')
   else sinyalPaneliniCiz()
@@ -1120,6 +1191,24 @@ async function bolgeSec(z) {
   durum.seciliBolgeId = z.id === undefined ? null : z.id
   if (durum.aktifPanel !== 'zones') panelSec('zones')
   else bolgePaneliniCiz()
+
+  // Sinyallerde oldugu gibi: bolge yuklu pencerenin disindaysa once o tarihin
+  // etrafi yuklenir, sonra grafik oraya kaydirilir.
+  const zaman = sayi(z.createdTime, 0)
+  if (zaman > 0) {
+    if (zamanPencereDisinda(zaman)) {
+      const yuklendi = await mumlariZamanEtrafindaYukle(zaman)
+      if (yuklendi) {
+        const barlar = durum.bars
+        const to = barlar.length ? barlar[barlar.length - 1].time + tfSaniye(durum.tf) * 200 : undefined
+        await bolgeleriYukle(barlar.length ? barlar[0].time : undefined, to)
+        isaretleriCiz()
+      }
+    }
+    if (view && typeof view.scrollToTime === 'function') {
+      try { view.scrollToTime(zaman) } catch (err) { /* onemsiz */ }
+    }
+  }
 
   if (overlay && typeof overlay.setHighlight === 'function') {
     try { overlay.setHighlight(z.id) } catch (err) { /* onemsiz */ }
