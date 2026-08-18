@@ -268,6 +268,24 @@ export function createChartView(container) {
   const rangeListeners = [];
   const crosshairListeners = [];
 
+  /**
+   * YUKLU verinin zaman araligi.
+   *
+   * Cizim eklentileri bunu bilmek zorundadir: `timeToX`, veri araliginin
+   * disindaki bir zamani DUVAR SAATINE gore tahmin eder
+   * (`(t - times[0]) / stepSec`). Piyasa kapaliyken bar olusmadigi icin bu
+   * tahmin hafta sonlarinda ve gunluk aralarda cok yanilir; hafta sonunu
+   * kapsayan 120 barlik bir bolge, 59 saatlik duvar saati farki yuzunden
+   * 700 bardan genis cizilirdi. Bu yuzden veri disina tasan geometri
+   * cizilmeden once buraya gore kirpilir.
+   *
+   * @returns {{from:number, to:number}|null}
+   */
+  function getDataTimeRange() {
+    if (destroyed || count === 0) return null;
+    return { from: times[0], to: times[count - 1] };
+  }
+
   function getVisibleTimeRange() {
     if (destroyed || count === 0) return null;
     let lr = null;
@@ -395,9 +413,16 @@ export function createChartView(container) {
   function planCiz(ctx, paneW, paneH) {
     if (!plan || !plan.levels || plan.levels.length === 0) return;
 
-    const xBas = timeToX(plan.time);
+    // Veri araligina kirp: disarida `timeToX` duvar saatine gore tahmin yapar
+    // ve piyasa kapali saatleri yuzunden konumu carpitir (bkz. getDataTimeRange).
+    const dr = getDataTimeRange();
+    if (!dr) return;
+    const basT = Math.max(plan.time, dr.from);
+    if (plan.time > dr.to) return;
+
+    const xBas = timeToX(basT);
     if (!isNum(xBas)) return;
-    let xSon = plan.endTime != null ? timeToX(plan.endTime) : null;
+    let xSon = plan.endTime != null ? timeToX(Math.min(plan.endTime, dr.to)) : null;
     if (!isNum(xSon) || xSon <= xBas) xSon = paneW;
     // Cok kisa suren planlar (sonuca 1 barda ulasanlar) uzaklastirilmis
     // gorunumde neredeyse gorunmez kalir. En az bu kadar piksel cizeriz;
@@ -793,6 +818,7 @@ export function createChartView(container) {
     xToTime,
     getPaneSize,
     getVisibleTimeRange,
+    getDataTimeRange,
     resize,
     destroy,
     barCount: () => count,

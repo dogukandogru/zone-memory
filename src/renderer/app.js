@@ -63,6 +63,9 @@ const durum = {
   tf: '15m',
   bars: [],
   zones: [],
+  // Depodaki veri durumu (kac bar, ilk/son zaman). Gecmise dogru
+  // genisletme bunun firstTime alanina bakar.
+  veriDurumu: null,
   signals: [],
   seciliSinyalId: null,
   seciliBolgeId: null,
@@ -576,7 +579,75 @@ function gorunurAralikDegisti(aralik) {
   aralikZamanlayici = setTimeout(() => {
     aralikZamanlayici = 0
     bolgeleriYukle(Math.floor(aralik.from), Math.ceil(aralik.to))
+    gecmiseDogruGenislet(aralik)
   }, ARALIK_GECIKMESI_MS)
+}
+
+/** Grafikte tutulacak azami bar sayisi. */
+const AZAMI_YUKLU_BAR = 20000
+/** Sol kenara bu kadar bar kala yeni parca yuklenir. */
+const GENISLETME_ESIGI_BAR = 300
+/** Her seferinde bu kadar eski bar eklenir. */
+const GENISLETME_PARCASI = 4000
+
+let genisletmeSuruyor = false
+
+/**
+ * Kullanici gecmise dogru kaydirirken yuklu pencereyi sola dogru buyutur.
+ *
+ * Grafik acilista yalnizca son birkac bin bari tutar. Depoda 17 yillik veri
+ * varken sol kenarda duvara carpmak dogru degil; kenara yaklasildikca eski
+ * mumlar yuklenir. Bellek buyumesin diye toplam bar sayisi sinirlanir.
+ *
+ * @param {{from:number,to:number}} aralik Gorunur zaman araligi
+ */
+async function gecmiseDogruGenislet(aralik) {
+  if (genisletmeSuruyor) return
+  const barlar = durum.bars
+  if (!Array.isArray(barlar) || barlar.length === 0) return
+  if (barlar.length >= AZAMI_YUKLU_BAR) return
+
+  const adim = tfSaniye(durum.tf)
+  const ilkZaman = barlar[0].time
+  // Gorunur aralik sol kenara yaklasti mi.
+  if (aralik.from > ilkZaman + GENISLETME_ESIGI_BAR * adim) return
+
+  // Depoda daha eski veri var mi.
+  const st = durum.veriDurumu
+  if (st && Number.isFinite(st.firstTime) && ilkZaman <= st.firstTime) return
+
+  genisletmeSuruyor = true
+  try {
+    const to = ilkZaman - adim
+    const from = to - GENISLETME_PARCASI * adim
+    const ham = await cagir('data:candles', { tf: durum.tf, from: from, to: to, limit: GENISLETME_PARCASI })
+    const eski = barlariNormalle(ham)
+    if (eski.length === 0) return
+
+    // Grafigin gorunur konumu kaymasin diye mantiksal araligi kaydiririz:
+    // basa n bar eklendiginde ayni barlarin indeksi n artar.
+    let lr = null
+    try { lr = view.chart.timeScale().getVisibleLogicalRange() } catch (err) { lr = null }
+
+    durum.bars = eski.concat(barlar)
+    grafik('setBars', durum.bars)
+
+    if (lr && Number.isFinite(lr.from) && Number.isFinite(lr.to)) {
+      try {
+        view.chart.timeScale().setVisibleLogicalRange({
+          from: lr.from + eski.length,
+          to: lr.to + eski.length,
+        })
+      } catch (err) { /* onemsiz */ }
+    }
+
+    isaretleriCiz()
+    await bolgeleriYukle(durum.bars[0].time, durum.bars[durum.bars.length - 1].time + adim * 200)
+  } catch (err) {
+    // Sessiz gec: kaydirma sirasinda hata mesaji basmak rahatsiz edici olur.
+  } finally {
+    genisletmeSuruyor = false
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -586,9 +657,12 @@ function gorunurAralikDegisti(aralik) {
 /** Veri durumunu alt seritte gosterir. */
 async function veriDurumunuYukle() {
   const ham = await cagirGuvenli('data:status', { tf: durum.tf }, 'Veri durumu okunamadı')
+  const st0 = veriDurumuKaydi(ham, durum.tf)
+  // Gecmise dogru genisletme, depoda daha eski veri olup olmadigini buradan bilir.
+  durum.veriDurumu = st0
   const e = el('statusData')
   if (!e) return
-  const st = veriDurumuKaydi(ham, durum.tf)
+  const st = st0
   if (!st) {
     e.textContent = 'Veri: -'
     return

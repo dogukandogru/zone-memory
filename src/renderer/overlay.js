@@ -103,6 +103,30 @@ export function createZoneOverlay(chartView, container) {
       }
     }
 
+    // YUKLU veri araligi. Bunun disinda kalan zamanlar icin `timeToX`,
+    // konumu DUVAR SAATINE gore tahmin eder. Piyasa kapaliyken bar
+    // olusmadigindan bu tahmin hafta sonlarinda ve gunluk aralarda buyuk
+    // yanilir: hafta sonunu kapsayan 120 barlik bir bolge, aradaki 59
+    // saatlik duvar saati farki yuzunden 700 bardan genis cizilir. Bu,
+    // grafigi gecmise dogru kaydirirken bazi kutularin "soldan sonsuzdan
+    // geliyormus gibi" uzamasina yol aciyordu.
+    //
+    // Cozum: cizim yalnizca gercek bar bulunan araliga yapilir. Zaten o
+    // araligin disinda mum da yoktur, dolayisiyla orada kutu gostermek
+    // bilgi vermez.
+    let dFrom = -Infinity;
+    let dTo = Infinity;
+    if (typeof chartView.getDataTimeRange === 'function') {
+      const dr = chartView.getDataTimeRange();
+      if (dr && isNum(dr.from) && isNum(dr.to)) {
+        dFrom = dr.from;
+        dTo = dr.to;
+      }
+    }
+    if (vFrom < dFrom) vFrom = dFrom;
+    if (vTo > dTo) vTo = dTo;
+    if (vFrom > vTo) return out;
+
     for (let i = 0; i < zones.length; i++) {
       const z = zones[i];
       if (!z) continue;
@@ -112,13 +136,15 @@ export function createZoneOverlay(chartView, container) {
       if (!isNum(startT) || !isNum(endT)) continue;
       if (endT < startT) endT = startT;
 
-      // Gorunur araligin disindaki bolgeler hic cizilmez.
+      // Gorunur (ve veri bulunan) araligin disindaki bolgeler hic cizilmez.
       if (endT < vFrom || startT > vTo) continue;
 
-      // Sag kenar: bitis zamani ile gorunur son arasindaki kucuk olan.
+      // Kenarlar veri araligina kirpilir: disari tasan kisim icin `timeToX`
+      // duvar saatine gore tahmin yapar ve bolgeyi carpitir.
+      const leftT = Math.max(startT, vFrom);
       const rightT = Math.min(endT, vTo);
 
-      const rawX1 = chartView.timeToX(startT);
+      const rawX1 = chartView.timeToX(leftT);
       const rawX2 = chartView.timeToX(rightT);
       const top = isNum(+z.top) ? +z.top : NaN;
       const bottom = isNum(+z.bottom) ? +z.bottom : NaN;
