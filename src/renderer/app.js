@@ -473,20 +473,51 @@ function isaretleriCiz() {
 function planCizgileri(s) {
   if (!view) return
   if (!s) {
+    if (typeof view.clearPlanLines === 'function') {
+      try { view.clearPlanLines() } catch (err) { /* onemsiz */ }
+    }
     if (typeof view.clearPriceLines === 'function') {
       try { view.clearPriceLines() } catch (err) { /* onemsiz */ }
     }
     return
   }
-  if (typeof view.setPriceLines !== 'function') return
-  const cizgiler = [
-    { price: sayi(s.entry, NaN), color: '#d1d4dc', title: 'Giriş', width: 1, style: 0 },
-    { price: sayi(s.tp1, NaN), color: RENK.up, title: 'TP1', width: 1, style: 2 },
-    { price: sayi(s.tp2, NaN), color: RENK.up, title: 'TP2', width: 1, style: 2 },
-    { price: sayi(s.sl, NaN), color: RENK.down, title: 'SL', width: 1, style: 2 },
+
+  const seviyeler = [
+    { price: sayi(s.entry, NaN), color: '#d1d4dc', title: 'Giriş', width: 1, dashed: false },
+    { price: sayi(s.tp1, NaN), color: RENK.up, title: 'TP1', width: 1, dashed: true },
+    { price: sayi(s.tp2, NaN), color: RENK.up, title: 'TP2', width: 1, dashed: true },
+    { price: sayi(s.sl, NaN), color: RENK.down, title: 'SL', width: 1, dashed: true },
   ].filter((c) => Number.isFinite(c.price) && c.price !== 0)
+  if (seviyeler.length === 0) return
+
+  const zaman = sayi(s.time, 0)
+
+  // Cizgiler sinyalin verildigi bardan BASLAR ve sonuca kadar uzar.
+  // Sonuc biliniyorsa (gecmis sinyal) TP veya SL'in vuruldugu bara,
+  // bilinmiyorsa (canli sinyal) degerlendirme ufkunun sonuna kadar.
+  const adim = tfSaniye(durum.tf)
+  const ufuk = sayi(
+    durum.ayarlar && durum.ayarlar.outcomeCfg ? durum.ayarlar.outcomeCfg.horizonBars : NaN,
+    48
+  )
+  const barSayisi = sayi(s.barsToOutcome, -1)
+  const bitis = barSayisi > 0 ? zaman + barSayisi * adim : zaman + ufuk * adim
+
+  if (typeof view.setPlanLines === 'function') {
+    try {
+      view.setPlanLines({ time: zaman, endTime: bitis, levels: seviyeler })
+    } catch (err) {
+      hataGoster('Plan çizgileri konulamadı: ' + hataMetni(err))
+    }
+    return
+  }
+
+  // Eski yol (zaman araligi desteklenmiyorsa): panel boyu yatay cizgi.
+  if (typeof view.setPriceLines !== 'function') return
   try {
-    view.setPriceLines(cizgiler)
+    view.setPriceLines(seviyeler.map((c) => ({
+      price: c.price, color: c.color, title: c.title, width: 1, style: c.dashed ? 2 : 0,
+    })))
   } catch (err) {
     hataGoster('Plan çizgileri konulamadı: ' + hataMetni(err))
   }

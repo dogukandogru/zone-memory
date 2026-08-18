@@ -1033,6 +1033,7 @@ function tradesToSignals(trades, memory) {
       topMatches: Array.isArray(t.topMatches) ? t.topMatches : [],
       reasons: reasons,
       outcome: t.outcome || null,
+      barsToOutcome: num(t.barsToOutcome, -1),
       success: t.success === undefined ? null : !!t.success,
       win: t.win === undefined ? null : !!t.win,
       pnlAtr: num(t.pnlAtr, 0),

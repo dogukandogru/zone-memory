@@ -377,6 +377,169 @@ export function createChartView(container) {
   }
 
   // ---------------------------------------------------------------------
+  // Islem plani cizgileri (zaman araligi olan yatay parcalar)
+  // ---------------------------------------------------------------------
+  //
+  // `createPriceLine` yatay cizgiyi panelin TAMAMI boyunca ceker; sinyalin
+  // ne zaman verildigi gorunmez. Plan cizgileri sinyalin verildigi bardan
+  // BASLAYIP sonuca (veya degerlendirme ufkunun sonuna) kadar uzamalidir.
+  // Bu yuzden cizim, bolge kutulari gibi, grafigin kendi cizim gecisinde
+  // calisan bir eklentiyle yapilir. Fiyat eksenindeki etiketler
+  // `priceAxisViews` ile korunur.
+
+  /** @type {{time:number, endTime:number|null, levels:Array<object>}|null} */
+  let plan = null;
+
+  const PLAN_LABEL_FONT = '10px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif';
+
+  function planCiz(ctx, paneW, paneH) {
+    if (!plan || !plan.levels || plan.levels.length === 0) return;
+
+    const xBas = timeToX(plan.time);
+    if (!isNum(xBas)) return;
+    let xSon = plan.endTime != null ? timeToX(plan.endTime) : null;
+    if (!isNum(xSon) || xSon <= xBas) xSon = paneW;
+    // Cok kisa suren planlar (sonuca 1 barda ulasanlar) uzaklastirilmis
+    // gorunumde neredeyse gorunmez kalir. En az bu kadar piksel cizeriz;
+    // sinyalin verildigi AN zaten dikey isaretle belirtildigi icin bu,
+    // zamani yanlis gostermez, yalnizca seviyeleri okunur kilar.
+    if (xSon - xBas < 24) xSon = xBas + 24;
+    // Panelin disina tasmasin.
+    const x1 = Math.max(xBas, 0);
+    const x2 = Math.min(xSon, paneW);
+    if (x2 <= 0 || x1 >= paneW) return;
+
+    // Sinyal ani: ince dikey isaret.
+    if (xBas >= 0 && xBas <= paneW) {
+      ctx.strokeStyle = 'rgba(209, 212, 220, 0.35)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([2, 3]);
+      ctx.beginPath();
+      ctx.moveTo(xBas + 0.5, 0);
+      ctx.lineTo(xBas + 0.5, paneH);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    for (let i = 0; i < plan.levels.length; i++) {
+      const lv = plan.levels[i];
+      const y = priceToY(lv.price);
+      if (!isNum(y) || y < -20 || y > paneH + 20) continue;
+
+      ctx.strokeStyle = lv.color;
+      ctx.lineWidth = isNum(+lv.width) && +lv.width > 0 ? +lv.width : 1;
+      ctx.setLineDash(lv.dashed ? [5, 4] : []);
+      ctx.beginPath();
+      ctx.moveTo(x1, y + 0.5);
+      ctx.lineTo(x2, y + 0.5);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Etiket parcanin SOL ucunda durur, yani sinyalin verildigi anda.
+      if (lv.title) {
+        ctx.font = PLAN_LABEL_FONT;
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        const tw = ctx.measureText(lv.title).width;
+        const lx = Math.min(x1 + 4, paneW - tw - 6);
+        if (lx > 0) {
+          ctx.fillStyle = 'rgba(19, 23, 34, 0.78)';
+          ctx.fillRect(lx - 3, y - 7, tw + 6, 14);
+          ctx.fillStyle = lv.color;
+          ctx.fillText(lv.title, lx, y);
+        }
+      }
+    }
+  }
+
+  /** Fiyat eksenindeki etiketler (TP2 / TP1 / Giris / SL kutucuklari). */
+  function planEksenGorunumleri() {
+    if (!plan || !plan.levels || plan.levels.length === 0) return [];
+    const out = [];
+    for (let i = 0; i < plan.levels.length; i++) {
+      const lv = plan.levels[i];
+      const y = priceToY(lv.price);
+      if (!isNum(y)) continue;
+      out.push({
+        coordinate: () => y,
+        text: () => formatPriceLabel(lv.price),
+        textColor: () => '#ffffff',
+        backColor: () => lv.color,
+        visible: () => true,
+        tickVisible: () => true,
+      });
+    }
+    return out;
+  }
+
+  /** Fiyat ekseni etiketi icin kisa bicim. */
+  function formatPriceLabel(p) {
+    const n = +p;
+    if (!isNum(n)) return '';
+    return n.toFixed(Math.abs(n) >= 100 ? 2 : 3);
+  }
+
+  const planPrimitive = {
+    attached: (param) => {
+      planPrimitive._requestUpdate = param && typeof param.requestUpdate === 'function'
+        ? param.requestUpdate
+        : null;
+    },
+    detached: () => { planPrimitive._requestUpdate = null; },
+    updateAllViews: () => {},
+    priceAxisViews: () => planEksenGorunumleri(),
+    paneViews: () => [{
+      zOrder: () => 'top',
+      renderer: () => ({
+        draw: (target) => {
+          target.useMediaCoordinateSpace((scope) => {
+            planCiz(scope.context, scope.mediaSize.width, scope.mediaSize.height);
+          });
+        },
+      }),
+    }],
+  };
+
+  if (typeof candleSeries.attachPrimitive === 'function') {
+    try { candleSeries.attachPrimitive(planPrimitive); } catch (_e) { /* yoksay */ }
+  }
+
+  /**
+   * Islem plani cizgilerini kurar.
+   * @param {{time:number, endTime?:number|null,
+   *          levels:Array<{price:number,color:string,title?:string,
+   *                        dashed?:boolean,width?:number}>}|null} next
+   */
+  function setPlanLines(next) {
+    if (destroyed) return;
+    if (!next || !Array.isArray(next.levels) || next.levels.length === 0 || !isNum(+next.time)) {
+      plan = null;
+    } else {
+      const levels = [];
+      for (let i = 0; i < next.levels.length; i++) {
+        const lv = next.levels[i];
+        if (!lv || !isNum(+lv.price)) continue;
+        levels.push({
+          price: +lv.price,
+          color: lv.color || COLOR.accent,
+          title: lv.title || '',
+          dashed: !!lv.dashed,
+          width: lv.width,
+        });
+      }
+      plan = levels.length
+        ? { time: +next.time, endTime: isNum(+next.endTime) ? +next.endTime : null, levels: levels }
+        : null;
+    }
+    if (planPrimitive._requestUpdate) planPrimitive._requestUpdate();
+  }
+
+  /** Plan cizgilerini kaldirir. */
+  function clearPlanLines() {
+    setPlanLines(null);
+  }
+
+  // ---------------------------------------------------------------------
   // Veri
   // ---------------------------------------------------------------------
   function setBars(bars) {
@@ -618,6 +781,8 @@ export function createChartView(container) {
     setMarkers,
     setPriceLines,
     clearPriceLines,
+    setPlanLines,
+    clearPlanLines,
     fitContent,
     scrollToTime,
     onVisibleRangeChange,

@@ -331,6 +331,8 @@ function runBacktest(memory, prototypes, cfg, onProgress) {
           mfeAtr: Number.isFinite(mfeAtr) ? mfeAtr : NaN,
           maeAtr: Number(ev.maeAtr),
           outcome: ev.outcome,
+          // Sonuca kac barda ulasildi. Arayuz plan cizgilerini burada bitirir.
+          barsToOutcome: Number.isFinite(Number(ev.barsToOutcome)) ? Number(ev.barsToOutcome) : -1,
           success: ev.success === true,
           win: win,
           grossAtr: grossAtr,   // maliyet dusulmeden
