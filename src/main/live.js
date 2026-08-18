@@ -33,6 +33,8 @@ const state = {
   isProxy: false,
   pollSeconds: 20,
   basis: null,
+  // Vekil kaynagin hacmini depodaki olcege tasiyan katsayi.
+  volScale: null,
   sinceTime: 0,
   lastPollTime: null,
   lastBarTime: null,
@@ -124,6 +126,7 @@ async function start(opts) {
   state.isProxy = !!provider.isProxy
   state.pollSeconds = Math.min(MAX_POLL_SECONDS, Math.max(MIN_POLL_SECONDS, Math.floor(Number(cfg.livePollSeconds) || 20)))
   state.basis = null
+  state.volScale = null
   state.lastError = null
   state.ticks = 0
   state.signals = 0
@@ -209,6 +212,7 @@ async function tick() {
       },
       isProxy: state.isProxy,
       basis: state.basis,
+      volScale: state.volScale,
       basisWarned: basisWarned,
       sinceTime: state.sinceTime,
       params: cfg.indicatorParams || {},
@@ -221,6 +225,9 @@ async function tick() {
     state.lastError = null
 
     if (res && res.basisWarned) basisWarned = true
+    if (res && typeof res.volScale === 'number' && isFinite(res.volScale) && res.volScale > 0) {
+      state.volScale = res.volScale
+    }
     if (res && typeof res.basis === 'number' && isFinite(res.basis)) {
       state.basis = res.basis
       if (!basisLogged) {

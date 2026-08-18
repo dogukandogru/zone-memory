@@ -301,6 +301,51 @@ kaydırılır. Bu durum sinyalin gerekçelerine not düşülür.
 
 ---
 
+
+### 4.6 Güncel veri ve canlı akış
+
+HistData yalnızca **kapanmış ayları** yayınlar, bu yüzden depo her zaman
+1 ile 31 gün arası geride kalır. Aradaki boşluğu kapatmak ve canlı devam etmek
+için üst şeritteki **Veri Çek** düğmesi kullanılır.
+
+Bu düğme şunları yapar:
+
+1. Seçili sağlayıcıdan eksik aralığı indirir. Güncelleme her zaman **1 dakikalık
+   taban seri** üzerinden yapılır, sonra 5m, 15m, 1h ve 4h ondan yeniden üretilir.
+   Böylece zaman dilimleri birbiriyle tutarlı kalır.
+2. Sağlayıcı bir **vekil** ise (Binance PAXG, OKX XAUT, Yahoo GC=F) üç düzeltme
+   uygulanır:
+   - **Fiyat kaydırması:** depodaki seriyle çakışan bölgeden medyan fark
+     hesaplanır ve yeni barlara uygulanır. Ölçüldü: PAXG ile spot arasındaki
+     fark 1 dakikalıkta yalnızca 0,38 dolar. Çakışma bulunamazsa **ekleme
+     yapılmaz** ve hata verilir; düzeltmesiz eklemek seriye sahte bir sıçrama
+     yazardı.
+   - **Piyasa saatleri:** kripto vekilleri 7/24 işlem görür, spot altın görmez.
+     Hangi saatlerin açık olduğu depodaki son 8 haftadan **veriye bakılarak**
+     çıkarılır ve kapalı saatlerdeki barlar elenir. Ölçüldü: 18 günlük boşlukta
+     9.360 bar (yaklaşık üçte biri) bu şekilde elendi.
+   - **Hacim ölçeği:** HistData hacmi dakikadaki tick sayısıdır (~95), Binance
+     ise PAXG miktarını verir (~0,4). İndikatörün flow bileşeni hacme bağlı
+     olduğu için çakışma bölgesindeki medyan orana göre ölçeklenir.
+
+**Canlı** anahtarı açıldığında seçili sağlayıcı `livePollSeconds` aralığıyla
+(varsayılan 20 saniye) yoklanır, aynı düzeltmeler uygulanır, kapanan her yeni
+bar depoya yazılır ve indikatör son pencerede yeniden çalıştırılır. Yeni bir ilk
+dokunuş oluşursa hafızayla karşılaştırılıp sinyal üretilir. Durum çubuğunda
+kullanılan kaynak ve uygulanan kaydırma miktarı yazar.
+
+Ölçülen sağlayıcı durumu (bu ağdan, 2026-08):
+
+| Sağlayıcı | Canlı | Not |
+| --- | --- | --- |
+| Binance PAXGUSDT | ✅ | Anahtarsız, gerçek zamanlı, gerçek hacim. **Varsayılan.** |
+| OKX XAUT-USDT | ✅ | Anahtarsız, hacim çoğu barda zayıf |
+| Yahoo GC=F | ⚠️ | Tekrarlı isteklerde HTTP 429, canlı için güvenilmez |
+| Twelve Data | 🔑 | Spot doğru fiyat ama forexte hacim vermez |
+| Polygon C:XAUUSD | 🔑 | Ücretli, gerçek spot + tick hacmi. **En doğru seçenek.** |
+
+---
+
 ## 5. Veri kaynakları
 
 Aşağıdaki durumlar bu makineden **ölçülmüştür**, tahmin değildir.

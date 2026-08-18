@@ -190,8 +190,17 @@ function kaynakDurumuYaz() {
   if (!e) return
   const ayar = durum.ayarlar && durum.ayarlar.providers ? durum.ayarlar.providers : {}
   const gecmis = ayar.history || '-'
-  const canliK = ayar.live || '-'
-  e.textContent = 'Kaynak: ' + gecmis + ' / canlı ' + canliK
+  // Canli akis actiksa GERCEKTEN kullanilan saglayiciyi yaz; ayar dosyasi
+  // acilistan sonra degismis olabilir ve eski adi gostermek yaniltir.
+  const canliK = (durum.canliDurum && durum.canliDurum.providerId) || ayar.live || '-'
+  let metin = 'Kaynak: ' + gecmis + ' / canlı ' + canliK
+  // Vekil kaynakta uygulanan fiyat kaydirmasini da gosteririz; kullanicinin
+  // grafikteki fiyatin duzeltilmis oldugunu bilmesi gerekir.
+  const b = durum.canliDurum && durum.canliDurum.basis
+  if (durum.canli && typeof b === 'number' && isFinite(b) && b !== 0) {
+    metin += ' (vekil, ' + (b > 0 ? '+' : '') + b.toFixed(2) + ' kaydırma)'
+  }
+  e.textContent = metin
 }
 
 /* ------------------------------------------------------------------ */
@@ -340,11 +349,17 @@ function grafigiKur() {
     return
   }
 
+  // Hata ayiklama tutamagi: gelistirici konsolundan grafik ve durum incelenebilir.
+  // contextIsolation acik oldugu icin bu yalnizca renderer icinde gorunur,
+  // ana surece veya dosya sistemine erisim vermez.
+  window.__zm = { view: view, durum: durum }
+
   try {
     overlay = createZoneOverlay(view, sarmal)
     if (overlay && typeof overlay.onZoneClick === 'function') {
       overlay.onZoneClick((z) => { if (z) bolgeSec(z) })
     }
+    window.__zm.overlay = overlay
   } catch (err) {
     overlay = null
     hataGoster('Bölge katmanı kurulamadı: ' + hataMetni(err))
@@ -934,15 +949,45 @@ async function canliBaslat() {
     return
   }
   durum.canli = true
+  durum.canliDurum = sonuc && typeof sonuc === 'object' ? sonuc : null
   canliAnahtariniIsaretle()
+  kaynakDurumuYaz()
   bildir('Canlı takip açıldı (' + durum.tf + ', kaynak ' + (saglayici || '-') + ').')
+  canliDurumuTazele()
+}
+
+/**
+ * Canli durumu belirli araliklarla tazeler.
+ * Fiyat kaydirmasi ilk cekimde degil, ortak zaman bulununca hesaplanir; bu
+ * yuzden baslangictaki durum nesnesinde henuz olmayabilir.
+ */
+function canliDurumuTazele() {
+  if (durum.canliDurumZamanlayici) clearInterval(durum.canliDurumZamanlayici)
+  durum.canliDurumZamanlayici = setInterval(async () => {
+    if (!durum.canli) return
+    // Arka plan yoklamasi: hata olursa kullaniciya uyari basmayiz, sonraki
+    // turda yeniden denenir. Aksi halde gecici bir ag hatasi ekrani doldurur.
+    try {
+      const d = await cagir('live:status', {})
+      if (d && typeof d === 'object') {
+        durum.canliDurum = d
+        kaynakDurumuYaz()
+      }
+    } catch (err) { /* sessiz gec */ }
+  }, 15000)
 }
 
 /** Canli takibi durdurur. */
 async function canliDurdur() {
   await cagirGuvenli('live:stop', {}, 'Canlı takip durdurulamadı')
   durum.canli = false
+  durum.canliDurum = null
+  if (durum.canliDurumZamanlayici) {
+    clearInterval(durum.canliDurumZamanlayici)
+    durum.canliDurumZamanlayici = null
+  }
   canliAnahtariniIsaretle()
+  kaynakDurumuYaz()
   bildir('Canlı takip kapatıldı.')
 }
 

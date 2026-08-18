@@ -404,22 +404,62 @@ handlers['data:candles'] = async function (payload) {
 }
 
 /** Saglayicidan gecmis indirip depoya ekler. */
+/** Turetilen zaman dilimleri: 1m guncellendikten sonra yeniden uretilir. */
+const TURETILEN_TF = ['5m', '15m', '1h', '4h']
+
 handlers['data:sync'] = async function (payload, ctx) {
   const tf = requireTf(payload.tf)
   const loader = core('data/loader')
+  const binstore = core('store/binstore')
+  const seriesMod = core('series')
+  const { tfSeconds } = core('tf')
+
+  // Guncelleme her zaman TABAN seri (1m) uzerinden yapilir, sonra ust zaman
+  // dilimleri ondan yeniden uretilir. Yalnizca secili dilimi guncellemek
+  // digerlerini geride birakir ve ayni sembolun zaman dilimleri birbirini
+  // tutmaz hale gelir.
+  let baseStat = null
+  try {
+    baseStat = await binstore.statSeries(paths.candlePath('1m'))
+  } catch (err) {
+    baseStat = null
+  }
+  const tabanVar = !!(baseStat && baseStat.count > 0)
+  const hedefTf = tabanVar ? '1m' : tf
+
+  // Fiyat kaydirmasi hesabi icin depodaki seri gerekir; onbellekte varsa
+  // 290 MB'lik dosyayi yeniden okumayiz.
+  const onbellek = seriesCache.tf === hedefTf && seriesCache.series ? seriesCache.series : null
+
   const res = await loader.syncHistory({
     dataDir: paths.dataDir(),
-    tf: tf,
+    tf: hedefTf,
     providerId: payload.providerId,
     apiKey: payload.apiKey || '',
     from: num(payload.from, 0),
     to: num(payload.to, Math.floor(Date.now() / 1000)),
-    onProgress: ctx.progress,
+    storedSeries: onbellek,
+    onProgress: (pct, msg) => ctx.progress(num(pct, 0) * 0.75, msg),
   })
-  clearCache(tf)
-  // 1m degistiyse yeniden ornekleme yapan tum dilimler de gecersizdir.
-  if (tf === '1m') clearCache(null)
-  return res || { added: 0 }
+
+  // Taban degistiyse ust zaman dilimlerini yeniden uret.
+  const uretilen = []
+  if (hedefTf === '1m' && res && res.added > 0) {
+    const taban = await binstore.readSeries(paths.candlePath('1m'))
+    if (taban && taban.length > 0) {
+      for (let i = 0; i < TURETILEN_TF.length; i++) {
+        const ust = TURETILEN_TF[i]
+        ctx.progress(75 + (i / TURETILEN_TF.length) * 24, ust + ' yeniden uretiliyor')
+        const s = seriesMod.resample(taban, tfSeconds(ust))
+        await binstore.writeSeries(paths.candlePath(ust), s)
+        uretilen.push({ tf: ust, count: s.length })
+      }
+    }
+  }
+
+  clearCache(null)
+  ctx.progress(100, 'Veri guncellendi')
+  return Object.assign({ added: 0 }, res, { syncedTf: hedefTf, derived: uretilen })
 }
 
 /**
@@ -790,6 +830,28 @@ handlers['engine:live-tick'] = async function (payload) {
     }
   }
 
+  // Hacim olcegi: kaynaklarin hacim birimi farklidir (HistData tick sayisi,
+  // Binance PAXG miktari). Indikatorun flow bileseni hacme bagli oldugu icin
+  // canli barlar da depodaki olcege tasinir, aksi halde flow yapay olarak
+  // sifira yakin cikar ve bolge olusmaz.
+  let volScale = typeof payload.volScale === 'number' && isFinite(payload.volScale) && payload.volScale > 0
+    ? payload.volScale
+    : null
+  if (payload.isProxy && volScale === null) {
+    try {
+      const stored2 = await getSeries(tf, false)
+      if (stored2 && stored2.length > 0) {
+        const k = core('data/loader').hacimOlcegi(stored2, inc)
+        if (typeof k === 'number' && isFinite(k) && k > 0 && k !== 1) volScale = k
+      }
+    } catch (err) {
+      logs.push('Hacim olcegi hesaplanamadi: ' + (err && err.message ? err.message : String(err)))
+    }
+  }
+  if (payload.isProxy && volScale !== null && volScale !== 1) {
+    for (let i = 0; i < inc.length; i++) inc.volume[i] *= volScale
+  }
+
   const lastBars = seriesMod.toBars(inc, inc.length - 1, inc.length)
   const lastBar = lastBars.length > 0 ? lastBars[0] : null
 
@@ -898,6 +960,7 @@ handlers['engine:live-tick'] = async function (payload) {
     added: added,
     stored: stored,
     basis: basis,
+    volScale: volScale,
     basisComputed: basisComputed,
     basisWarned: basisWarned,
     lastBar: lastBar,

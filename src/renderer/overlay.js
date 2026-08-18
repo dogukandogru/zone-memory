@@ -1,14 +1,36 @@
 /**
- * overlay.js - Grafigin uzerine destek/direnc bolgelerini cizen canvas katmani.
+ * overlay.js - Destek/direnc bolgelerini grafige cizen katman.
  *
- * Katman `pointer-events: none` ile durur, boylece grafigin kendi kaydirma ve
- * yakinlastirma etkilesimi bozulmaz. Tiklama, kap eleman (#chartWrap) uzerinde
- * yakalanip koordinat hesabiyla bolgeye eslenir.
+ * ----------------------------------------------------------------------------
+ * NEDEN AYRI CANVAS DEGIL DE CIZIM EKLENTISI (primitive)
+ * ----------------------------------------------------------------------------
+ * Ilk surum grafigin ustune mutlak konumlu bir <canvas> koyuyor ve
+ * `subscribeVisibleLogicalRangeChange` olayinda yeniden ciziyordu. Iki hatasi
+ * vardi ve ikisi de kullanicinin gordugu "kutular kayiyor / sabit kaliyor"
+ * belirtisini uretiyordu:
  *
- * Koordinat cevrimi chart.js'in verdigi `priceToY` ve `timeToX` ile yapilir.
- * Yalnizca gorunur zaman araligindaki bolgeler cizilir.
+ *  1. O olay YALNIZCA zaman ekseni degisince tetiklenir. Fiyat eksenini
+ *     suruklemek, dikey kaydirmak veya otomatik olcekleme (yeni mum girince
+ *     fiyat araligi degisir) olay uretmez. Bu yuzden kutular dikeyde eski
+ *     yerinde kalir; yatayda kaydirinca olay gelir ve kutular birden yerine
+ *     oturur, yani "scroll edince duzeliyor" gorunur.
+ *  2. Olay geldiginde bile cizim `requestAnimationFrame` ile bir SONRAKI kareye
+ *     erteleniyordu. Grafik zaten o karede boyandigi icin katman surekli bir
+ *     kare geriden gelir ve akici kaydirmada kutular mumlarin arkasindan
+ *     surunur gibi gorunur.
  *
- * CONTRACTS.md 19. bolum, createZoneOverlay disa acilan API:
+ * Cozum: lightweight-charts'in `series.attachPrimitive()` arayuzunu kullanmak.
+ * Eklenti, grafigin KENDI cizim gecisinin icinde cagrilir. Boylece:
+ *   - Kutular her karede mumlarla ayni anda ve ayni donusumle cizilir,
+ *     yatay/dikey/yakinlastirma fark etmez, gecikme sifirdir.
+ *   - Cizim uzayi dogrudan PANE'dir; fiyat ve zaman olceklerinin genisligini
+ *     elle olcup kirpmak gerekmez.
+ *   - Kirpma isini grafik yapar.
+ *
+ * Isabet testi (tiklama) icin `chart.subscribeClick` kullanilir; verdigi
+ * `param.point` de pane koordinatlarindadir, yani cizim uzayiyla ayni.
+ *
+ * CONTRACTS.md 19. bolum, createZoneOverlay disa acilan API korunmustur:
  *   setZones(zones), setHighlight(zoneId|null), redraw(), destroy(), onZoneClick(cb)
  */
 
@@ -21,7 +43,6 @@ const BROKEN_FILL_ALPHA = 0.06;       // kirilmis bolge dolgusu
 const BROKEN_EDGE_ALPHA = 0.30;       // kirilmis bolge siniri (soluk)
 const HL_FILL_ALPHA = 0.26;           // vurgulanan bolge dolgusu
 const MIN_LABEL_HEIGHT = 14;          // etiket icin gereken en az piksel yukseklik
-const DRAG_TOLERANCE = 4;             // bu kadar pikselden fazla kaydiysa tiklama sayilmaz
 
 const LABEL_FONT = '10px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif';
 
@@ -39,27 +60,11 @@ function zoneRightTime(zone) {
 /**
  * Bolge katmani olusturur.
  * @param {object} chartView createChartView ciktisi
- * @param {HTMLElement} container Grafigin durdugu, konumu `relative` olan kap
+ * @param {HTMLElement} container Grafigin durdugu kap (yalnizca imza uyumu icin)
  * @returns {{setZones:Function,setHighlight:Function,redraw:Function,destroy:Function,onZoneClick:Function}}
  */
 export function createZoneOverlay(chartView, container) {
   if (!chartView) throw new Error('createZoneOverlay: chartView gerekli');
-  if (!container) throw new Error('createZoneOverlay: kap elemani gerekli');
-
-  const canvas = document.createElement('canvas');
-  canvas.className = 'zone-overlay';
-  // Sinif styles.css'te tanimli; yine de temel konumlandirmayi burada da veriyoruz
-  // ki katman stil dosyasi olmadan da dogru yerde dursun.
-  canvas.style.position = 'absolute';
-  canvas.style.left = '0';
-  canvas.style.top = '0';
-  canvas.style.width = '100%';
-  canvas.style.height = '100%';
-  canvas.style.pointerEvents = 'none';
-  canvas.style.zIndex = '3';
-  container.appendChild(canvas);
-
-  const ctx = canvas.getContext('2d');
 
   /** @type {Array<object>} */
   let zones = [];
@@ -67,103 +72,26 @@ export function createZoneOverlay(chartView, container) {
   let highlightId = null;
   /** @type {Array<Function>} */
   const clickHandlers = [];
-  /** Cizilen dikdortgenler, tiklama testi icin. */
+  /** Son cizimde olusan dikdortgenler, tiklama testi icin (pane koordinati). */
   let hitRects = [];
 
   let destroyed = false;
-  let rafId = 0;
-  let warmupDraws = 0;   // olcekler olculene kadar yapilan yeniden cizim sayisi
-  let cssW = 0;
-  let cssH = 0;
-  let backingW = 0;
-  let backingH = 0;
+  /** Eklenti baglandiginda grafigin verdigi "yeniden ciz" istegi. */
+  let requestUpdate = null;
 
   // ---------------------------------------------------------------------
   // Cizim
   // ---------------------------------------------------------------------
-  function syncCanvasSize() {
-    const dpr = window.devicePixelRatio || 1;
-    cssW = Math.max(1, container.clientWidth);
-    cssH = Math.max(1, container.clientHeight);
-    const bw = Math.round(cssW * dpr);
-    const bh = Math.round(cssH * dpr);
-    if (bw !== backingW || bh !== backingH) {
-      canvas.width = bw;
-      canvas.height = bh;
-      backingW = bw;
-      backingH = bh;
-    }
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  }
 
-  function drawZoneBox(r, strong) {
-    const rgb = r.isSupport ? SUPPORT_RGB : RESIST_RGB;
-    const broken = r.broken;
-
-    let fillA = broken ? BROKEN_FILL_ALPHA : FILL_ALPHA;
-    let edgeA = broken ? BROKEN_EDGE_ALPHA : EDGE_ALPHA;
-    if (strong) {
-      fillA = HL_FILL_ALPHA;
-      edgeA = 0.95;
-    }
-
-    const w = Math.max(1, r.x2 - r.x1);
-    const h = Math.max(1, r.y2 - r.y1);
-
-    ctx.fillStyle = 'rgba(' + rgb + ',' + fillA + ')';
-    ctx.fillRect(r.x1, r.y1, w, h);
-
-    ctx.strokeStyle = 'rgba(' + rgb + ',' + edgeA + ')';
-    ctx.lineWidth = strong ? 2 : 1;
-    ctx.setLineDash(broken ? [4, 3] : []);
-    // Yarim piksel kaydirma keskin cizgi verir.
-    ctx.strokeRect(r.x1 + 0.5, r.y1 + 0.5, Math.max(1, w - 1), Math.max(1, h - 1));
-    ctx.setLineDash([]);
-
-    // Etiket yalnizca kutu yeterince yuksekse cizilir.
-    if (h > MIN_LABEL_HEIGHT) {
-      const label = (r.isSupport ? 'DES' : 'DIR') + (isNum(r.flow) ? ' ' + r.flow.toFixed(2) : '');
-      ctx.font = LABEL_FONT;
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'top';
-      const tw = ctx.measureText(label).width;
-      const lx = Math.max(r.x1, 0) + 3;
-      const ly = r.y1 + 2;
-      ctx.fillStyle = 'rgba(19, 23, 34, 0.72)';
-      ctx.fillRect(lx - 2, ly - 1, tw + 5, 12);
-      ctx.fillStyle = 'rgba(' + rgb + ',' + (broken && !strong ? 0.55 : 0.95) + ')';
-      ctx.fillText(label, lx, ly);
-    }
-  }
-
-  function draw() {
-    rafId = 0;
-    if (destroyed) return;
-
-    syncCanvasSize();
-    ctx.clearRect(0, 0, cssW, cssH);
-    hitRects = [];
-    if (zones.length === 0) return;
-
-    // Cizim alani: fiyat ve zaman olcekleri disarida kalir.
-    let paneW = cssW;
-    let paneH = cssH;
-    if (typeof chartView.getPaneSize === 'function') {
-      const p = chartView.getPaneSize();
-      if (p && isNum(p.width) && isNum(p.height)) {
-        paneW = p.width;
-        paneH = p.height;
-        // Grafik ilk boyamasini bitirmeden olcek genislikleri 0 gelir; bu
-        // durumda bir sonraki karede yeniden cizeriz ki kutular fiyat
-        // olceginin uzerine tasmasin.
-        if (p.measured === false && warmupDraws < 5) {
-          warmupDraws++;
-          requestAnimationFrame(redraw);
-        } else if (p.measured) {
-          warmupDraws = 0;
-        }
-      }
-    }
+  /**
+   * Gorunur bolgeleri pane koordinatlarina cevirir.
+   * Her cizimde yeniden hesaplanir, cunku donusum her karede degisebilir.
+   * @param {number} paneW
+   * @param {number} paneH
+   */
+  function hesaplaDikdortgenler(paneW, paneH) {
+    const out = [];
+    if (zones.length === 0) return out;
 
     let vFrom = -Infinity;
     let vTo = Infinity;
@@ -174,13 +102,6 @@ export function createZoneOverlay(chartView, container) {
         vTo = vr.to;
       }
     }
-
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(0, 0, paneW, paneH);
-    ctx.clip();
-
-    let highlighted = null;
 
     for (let i = 0; i < zones.length; i++) {
       const z = zones[i];
@@ -219,103 +140,159 @@ export function createZoneOverlay(chartView, container) {
       y1 = Math.max(y1, -1);
       y2 = Math.min(y2, paneH);
 
-      const rect = {
+      out.push({
         zone: z,
         id: z.id,
         isSupport: !!z.isSupport,
         broken: !!z.broken,
         flow: isNum(+z.flow) ? +z.flow : NaN,
+        strong: highlightId != null && z.id === highlightId,
         x1, x2, y1, y2,
         h: y2 - y1,
-      };
-      hitRects.push(rect);
-
-      if (highlightId != null && z.id === highlightId) {
-        highlighted = rect;   // en uste cizilsin diye sona birakilir
-      } else {
-        drawZoneBox(rect, false);
-      }
+      });
     }
-
-    if (highlighted) drawZoneBox(highlighted, true);
-
-    ctx.restore();
+    return out;
   }
 
-  function redraw() {
-    if (destroyed || rafId !== 0) return;
-    rafId = requestAnimationFrame(draw);
+  /** Bir bolgenin dolgusunu ve sinirini cizer. */
+  function cizKutu(ctx, r) {
+    const rgb = r.isSupport ? SUPPORT_RGB : RESIST_RGB;
+    const broken = r.broken;
+
+    let fillA = broken ? BROKEN_FILL_ALPHA : FILL_ALPHA;
+    let edgeA = broken ? BROKEN_EDGE_ALPHA : EDGE_ALPHA;
+    if (r.strong) {
+      fillA = HL_FILL_ALPHA;
+      edgeA = 0.95;
+    }
+
+    const w = Math.max(1, r.x2 - r.x1);
+    const h = Math.max(1, r.y2 - r.y1);
+
+    ctx.fillStyle = 'rgba(' + rgb + ',' + fillA + ')';
+    ctx.fillRect(r.x1, r.y1, w, h);
+
+    ctx.strokeStyle = 'rgba(' + rgb + ',' + edgeA + ')';
+    ctx.lineWidth = r.strong ? 2 : 1;
+    ctx.setLineDash(broken ? [4, 3] : []);
+    // Yarim piksel kaydirma keskin cizgi verir.
+    ctx.strokeRect(r.x1 + 0.5, r.y1 + 0.5, Math.max(1, w - 1), Math.max(1, h - 1));
+    ctx.setLineDash([]);
+  }
+
+  /** Bolge etiketini cizer (mumlarin USTUNDE, okunabilir kalsin diye). */
+  function cizEtiket(ctx, r) {
+    const h = Math.max(1, r.y2 - r.y1);
+    if (h <= MIN_LABEL_HEIGHT) return;
+
+    const rgb = r.isSupport ? SUPPORT_RGB : RESIST_RGB;
+    const label = (r.isSupport ? 'DES' : 'DIR') + (isNum(r.flow) ? ' ' + r.flow.toFixed(2) : '');
+    ctx.font = LABEL_FONT;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    const tw = ctx.measureText(label).width;
+    const lx = Math.max(r.x1, 0) + 3;
+    const ly = r.y1 + 2;
+    ctx.fillStyle = 'rgba(19, 23, 34, 0.72)';
+    ctx.fillRect(lx - 2, ly - 1, tw + 5, 12);
+    ctx.fillStyle = 'rgba(' + rgb + ',' + (r.broken && !r.strong ? 0.55 : 0.95) + ')';
+    ctx.fillText(label, lx, ly);
+  }
+
+  /**
+   * Dolgu ve sinir katmani: mumlarin ARKASINDA cizilir, boylece mumlar
+   * okunakli kalir (TradingView'in bolge gorunumu de boyledir).
+   */
+  const dolguGorunumu = {
+    zOrder: () => 'bottom',
+    renderer: () => ({
+      draw: (target) => {
+        target.useMediaCoordinateSpace((scope) => {
+          const ctx = scope.context;
+          const w = scope.mediaSize.width;
+          const h = scope.mediaSize.height;
+          // Isabet testi icin kullanilan dikdortgenler burada tazelenir.
+          hitRects = hesaplaDikdortgenler(w, h);
+          let vurgulu = null;
+          for (let i = 0; i < hitRects.length; i++) {
+            const r = hitRects[i];
+            if (r.strong) { vurgulu = r; continue; }  // vurgulu en uste
+            cizKutu(ctx, r);
+          }
+          if (vurgulu) cizKutu(ctx, vurgulu);
+        });
+      },
+    }),
+  };
+
+  /** Etiket katmani: mumlarin USTUNDE, yoksa etiket mumun altinda kayboluyor. */
+  const etiketGorunumu = {
+    zOrder: () => 'top',
+    renderer: () => ({
+      draw: (target) => {
+        target.useMediaCoordinateSpace((scope) => {
+          const ctx = scope.context;
+          for (let i = 0; i < hitRects.length; i++) cizEtiket(ctx, hitRects[i]);
+        });
+      },
+    }),
+  };
+
+  const primitive = {
+    attached: (param) => {
+      requestUpdate = param && typeof param.requestUpdate === 'function' ? param.requestUpdate : null;
+    },
+    detached: () => { requestUpdate = null; },
+    updateAllViews: () => {},
+    paneViews: () => [dolguGorunumu, etiketGorunumu],
+  };
+
+  const bagli = typeof chartView.attachPrimitive === 'function' && chartView.attachPrimitive(primitive);
+  if (!bagli) {
+    throw new Error(
+      'Bölge katmanı bağlanamadı: grafik kütüphanesi attachPrimitive desteklemiyor. ' +
+      'lightweight-charts 4.1 veya üzeri gerekir.'
+    );
   }
 
   // ---------------------------------------------------------------------
   // Tiklama
   // ---------------------------------------------------------------------
-  let downX = 0;
-  let downY = 0;
-  let downOk = false;
+  const unsubscribeClick = typeof chartView.onChartClick === 'function'
+    ? chartView.onChartClick((param) => {
+      if (destroyed || clickHandlers.length === 0 || hitRects.length === 0) return;
+      const p = param && param.point;
+      if (!p || !isNum(p.x) || !isNum(p.y)) return;
 
-  function onMouseDown(e) {
-    if (e.button !== 0) { downOk = false; return; }
-    downX = e.clientX;
-    downY = e.clientY;
-    downOk = true;
-  }
+      // Ust uste binen bolgelerde en dar olani secilir.
+      let best = null;
+      for (let i = 0; i < hitRects.length; i++) {
+        const r = hitRects[i];
+        if (p.x < r.x1 || p.x > r.x2 || p.y < r.y1 || p.y > r.y2) continue;
+        if (best === null || r.h < best.h) best = r;
+      }
+      if (!best) return;
 
-  function onMouseUp(e) {
-    if (!downOk || e.button !== 0) return;
-    downOk = false;
-    if (clickHandlers.length === 0 || hitRects.length === 0) return;
-    // Suruklemeyi tiklama sayma.
-    if (Math.abs(e.clientX - downX) > DRAG_TOLERANCE || Math.abs(e.clientY - downY) > DRAG_TOLERANCE) return;
-
-    const rect = container.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-
-    // Ust uste binen bolgelerde en dar olani secilir.
-    let best = null;
-    for (let i = 0; i < hitRects.length; i++) {
-      const r = hitRects[i];
-      if (x < r.x1 || x > r.x2 || y < r.y1 || y > r.y2) continue;
-      if (best === null || r.h < best.h) best = r;
-    }
-    if (!best) return;
-
-    for (let i = 0; i < clickHandlers.length; i++) {
-      try { clickHandlers[i](best.zone); } catch (_e) { /* dinleyici hatasi yayilmasin */ }
-    }
-  }
-
-  container.addEventListener('mousedown', onMouseDown, true);
-  container.addEventListener('mouseup', onMouseUp, true);
-
-  // ---------------------------------------------------------------------
-  // Yeniden cizim tetikleyicileri
-  // ---------------------------------------------------------------------
-  const unsubscribeRange = typeof chartView.onVisibleRangeChange === 'function'
-    ? chartView.onVisibleRangeChange(() => redraw())
+      for (let i = 0; i < clickHandlers.length; i++) {
+        try { clickHandlers[i](best.zone); } catch (_e) { /* dinleyici hatasi yayilmasin */ }
+      }
+    })
     : () => {};
-
-  let ro = null;
-  if (typeof ResizeObserver === 'function') {
-    ro = new ResizeObserver(() => redraw());
-    ro.observe(container);
-  } else {
-    window.addEventListener('resize', redraw);
-  }
-
-  // Retina ekranindan normale tasima gibi durumlarda olcek degisir.
-  let dprQuery = null;
-  const onDprChange = () => { backingW = 0; backingH = 0; redraw(); };
-  if (typeof window.matchMedia === 'function') {
-    dprQuery = window.matchMedia('(resolution: ' + (window.devicePixelRatio || 1) + 'dppx)');
-    if (typeof dprQuery.addEventListener === 'function') dprQuery.addEventListener('change', onDprChange);
-    else dprQuery = null;
-  }
 
   // ---------------------------------------------------------------------
   // Disa acilan API
   // ---------------------------------------------------------------------
+
+  /**
+   * Yeniden cizim ister. Kaydirma ve yakinlastirmada BUNA GEREK YOKTUR,
+   * grafik zaten her karede eklentiyi cagirir. Yalnizca veri degistiginde
+   * (bolge listesi, vurgu) cagrilir.
+   */
+  function redraw() {
+    if (destroyed) return;
+    if (requestUpdate) requestUpdate();
+  }
+
   /** @param {Array<object>} next Zone dizisi */
   function setZones(next) {
     zones = Array.isArray(next) ? next : [];
@@ -344,19 +321,17 @@ export function createZoneOverlay(chartView, container) {
   function destroy() {
     if (destroyed) return;
     destroyed = true;
-    if (rafId !== 0) { cancelAnimationFrame(rafId); rafId = 0; }
-    container.removeEventListener('mousedown', onMouseDown, true);
-    container.removeEventListener('mouseup', onMouseUp, true);
-    try { unsubscribeRange(); } catch (_e) { /* yoksay */ }
-    if (ro) ro.disconnect(); else window.removeEventListener('resize', redraw);
-    if (dprQuery) dprQuery.removeEventListener('change', onDprChange);
+    try { unsubscribeClick(); } catch (_e) { /* yoksay */ }
+    if (typeof chartView.detachPrimitive === 'function') chartView.detachPrimitive(primitive);
     clickHandlers.length = 0;
     zones = [];
     hitRects = [];
-    if (canvas.parentNode) canvas.parentNode.removeChild(canvas);
+    requestUpdate = null;
   }
 
-  redraw();
+  // `container` artik cizim icin kullanilmiyor (grafik kendi pane'ine ciziyor),
+  // imza uyumlulugu ve ileride gerekebilecek DOM islemleri icin duruyor.
+  void container;
 
-  return { setZones, setHighlight, redraw, destroy, onZoneClick, canvas };
+  return { setZones, setHighlight, redraw, destroy, onZoneClick, canvas: null };
 }

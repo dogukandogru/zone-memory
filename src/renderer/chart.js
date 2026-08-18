@@ -567,10 +567,52 @@ export function createChartView(container) {
     count = 0;
   }
 
+  /**
+   * Seriye bir cizim eklentisi (primitive) baglar.
+   *
+   * Bunun onemi: eklenti, grafigin KENDI cizim gecisinde calisir. Grafigin
+   * ustune ayri bir canvas koyup olay dinleyerek yeniden cizmek, kaydirma ve
+   * yakinlastirmada bir kare geriden gelir ve dikey kaydirmada hic tetiklenmez
+   * (zaman ekseni degismedigi icin). Eklenti yolunda bu sorunlarin ikisi de yok.
+   *
+   * @param {object} primitive ISeriesPrimitive uyumlu nesne
+   */
+  function attachPrimitive(primitive) {
+    if (destroyed || !primitive) return false;
+    if (typeof candleSeries.attachPrimitive !== 'function') return false;
+    candleSeries.attachPrimitive(primitive);
+    return true;
+  }
+
+  /** Baglanan cizim eklentisini kaldirir. */
+  function detachPrimitive(primitive) {
+    if (!primitive || typeof candleSeries.detachPrimitive !== 'function') return;
+    try { candleSeries.detachPrimitive(primitive); } catch (_e) { /* yoksay */ }
+  }
+
+  /**
+   * Grafik uzerine tiklama dinleyicisi.
+   * `param.point` pane koordinatlarindadir, yani eklentinin cizim uzayiyla
+   * ayni; boylece isabet testi icin ek ofset hesabi gerekmez.
+   * @param {(param:object)=>void} cb
+   * @returns {()=>void} Aboneligi biten fonksiyon
+   */
+  function onChartClick(cb) {
+    if (typeof cb !== 'function') return () => {};
+    const sarmal = (param) => { try { cb(param); } catch (_e) { /* dinleyici hatasi yayilmasin */ } };
+    chart.subscribeClick(sarmal);
+    return () => {
+      try { chart.unsubscribeClick(sarmal); } catch (_e) { /* yoksay */ }
+    };
+  }
+
   return {
     chart,
     candleSeries,
     volumeSeries,
+    attachPrimitive,
+    detachPrimitive,
+    onChartClick,
     setBars,
     updateBar,
     setMarkers,
