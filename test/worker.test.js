@@ -18,6 +18,11 @@
 //   3. Kullanici ayari hafizanin izinden farkliysa cfgMatch false olmali,
 //      yoksa "gecmiste %X tuttu" rakami eski etiketlere ait olur.
 //   4. Olcum ozeti diske yazilmali: uygulama kapaninca kaybolmasin.
+//   5. Canli kontrol AYNI BARDAKI tum olaylari degerlendirmeli. Onceden
+//      yalnizca son olay aliniyordu ve `sinceTime` onun zamanina cekildigi
+//      icin digerleri kalici olarak kayboluyordu.
+//   6. Canli uretilen sinyaller diske yazilmali (JSON Lines gunlugu), aksi
+//      halde canli performans Test sekmesindeki olcumle karsilastirilamaz.
 
 const test = require('node:test')
 const assert = require('node:assert/strict')
@@ -113,6 +118,89 @@ async function isciyle (govde) {
     await w.terminate()
     fs.rmSync(dataDir, { recursive: true, force: true })
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* Canli tik icin sentetik mum serisi                                  */
+/* ------------------------------------------------------------------ */
+
+/** Canli seride ilk barin zamani (hafiza fixture'indan cok sonrasi). */
+const CANLI_T0 = 1700000000
+/** Canli seri uzunlugu. */
+const CANLI_BAR = 600
+/**
+ * Dev barin indeksi. Bu bar hem pivot tepe hem pivot dip olacak kadar disa
+ * tasar ve hacmi ortalamanin 6 katidir; boylece AYNI onay barinda (505) hem
+ * direnc hem destek kutusu dogar ve ikisi de olay uretir.
+ */
+const CANLI_SICRAMA = 500
+/** Iki olayin olustugu onay bari: pivot bari + pivotLen. */
+const CANLI_OLAY_BAR = CANLI_SICRAMA + 5
+
+/**
+ * Canli tike gonderilen sutunsal seri. Dar aralikta gezen duz bir seridir,
+ * tek istisnasi `CANLI_SICRAMA` barindaki dev dis bardir.
+ * @returns {{length:number, time:number[], open:number[], high:number[],
+ *            low:number[], close:number[], volume:number[]}}
+ */
+function canliSeri () {
+  const s = { length: CANLI_BAR, time: [], open: [], high: [], low: [], close: [], volume: [] }
+  for (let i = 0; i < CANLI_BAR; i++) {
+    const taban = 2000 + Math.sin(i / 17) * 1.0
+    const o = taban
+    const c = taban + Math.sin(i / 5) * 0.3
+    let h = taban + 1.2
+    let l = taban - 1.2
+    let v = 1000 + Math.sin(i / 7) * 50
+    if (i === CANLI_SICRAMA) {
+      // Fitiller hem BB bantlarinin disina tasar hem de komsu barlarin
+      // uzerine/altina gecer; kapanis yerinde durdugu icin bantlar dar kalir.
+      // Kutu kenarlari boylece fiyata yakin olur ve form riski 3 ATR sinirini
+      // asmaz, yani olaylar etiketlenebilir.
+      h = taban + 5
+      l = taban - 5
+      v = 6000
+    }
+    s.time.push(CANLI_T0 + i * 900)
+    s.open.push(o)
+    s.high.push(h)
+    s.low.push(l)
+    s.close.push(c)
+    s.volume.push(v)
+  }
+  return s
+}
+
+/** Canli tik yuku. Butun barlar KAPANMIS sayilir (fetchedAt son barin otesi). */
+function canliYuk (ek) {
+  const seri = canliSeri()
+  return Object.assign({
+    tf: TF,
+    series: seri,
+    providerId: 'test-saglayici',
+    isProxy: false,
+    fetchedAt: seri.time[seri.length - 1] + 900 + 5,
+    sinceTime: 0,
+    // Indikator ayari hafizanin kuruldugu ayarla AYNI olmali, aksi halde iz
+    // uyusmaz ve sinyal uretilmez.
+    params: INDIKATOR_AYARI,
+    // Sentetik hafiza kucuk ve benzerlikler dusuk oldugu icin esikler
+    // indirilir; amac esik mantigini degil olay secimini ve gunlugu olcmek.
+    cfgPatch: {
+      signalCfg: { minMatches: 1, minWinRate: 0, minSimilarity: 0, minRr: 0, minExpectancy: -5 },
+    },
+  }, ek || {})
+}
+
+/** Canli gunluk dosyasinin satirlarini okur. */
+function gunlukSatirlari (dataDir) {
+  const dosya = pathsCore.memoryPath(TF, undefined, dataDir) + '.live.jsonl'
+  if (!fs.existsSync(dosya)) return []
+  return fs.readFileSync(dosya, 'utf8')
+    .split('\n')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((s) => JSON.parse(s))
 }
 
 /** Testlerde kullanilan esikler: sentetik hafiza kucuk oldugu icin dusuruldu. */
@@ -238,6 +326,108 @@ test('data:status ayar izini ve olcum dosyasinin varligini bildirir', async () =
     // Kullanicinin ayari hafizadan farkliysa durum satiri da uyarir.
     const farkli = await cagir('data:status', { cfgPatch: { outcomeCfg: { targetAtr: 2.5 } } })
     assert.equal(farkli.byTf[TF].memoryCfgMatch, false)
+  })
+})
+
+test('engine:live-tick: ayni bardaki iki olayin IKISI DE degerlendirilir', async () => {
+  await isciyle(async (cagir) => {
+    const r = await cagir('engine:live-tick', canliYuk())
+    assert.ok(r.added > 0, 'kapanmis barlar depoya yazilmali')
+    assert.ok(Array.isArray(r.events), 'events dizisi donmeli')
+    assert.equal(r.events.length, 2, 'ayni bardaki iki olay da degerlendirilmeli')
+
+    // Iki olay AYNI barda: biri direnc kutusunun dogumu, digeri destek.
+    const a = r.events[0]
+    const b = r.events[1]
+    assert.equal(a.touch.time, b.touch.time, 'iki olay ayni barda olmali')
+    assert.equal(a.touch.bar, CANLI_OLAY_BAR)
+    assert.equal(a.touch.kind, 'form')
+    assert.equal(b.touch.kind, 'form')
+    assert.notEqual(a.key, b.key, 'olay anahtarlari ayri olmali')
+    assert.notEqual(a.touch.direction, b.touch.direction, 'biri BUY biri SELL')
+    assert.ok(a.signal, 'birinci olay icin sinyal uretilmeli')
+    assert.ok(b.signal, 'ikinci olay icin de sinyal uretilmeli')
+
+    // Geriye uyum: tekil alanlar dizinin SONUNCU elemanidir (arayuz ve
+    // live.js bunlari okur).
+    assert.equal(r.signal, r.events[1].signal)
+    assert.equal(r.touch.time, r.events[1].touch.time)
+
+    // Gecikme: olay bari cekim aninin cok gerisinde kaldi.
+    assert.ok(a.ageBars > 1, 'gecikme bar cinsinden hesaplanmali')
+    assert.equal(a.signal.stale, true, 'gecikmeli sinyal isaretlenmeli')
+    assert.ok(
+      a.signal.reasons.some((x) => /Gecikmeli degerlendirildi/.test(x)),
+      'gecikme gerekce olarak yazilmali'
+    )
+  })
+})
+
+test('engine:live-tick canli gunluge satir yazar, engine:live-log ozet dondurur', async () => {
+  await isciyle(async (cagir, dataDir) => {
+    const once = await cagir('engine:live-log', { tf: TF })
+    assert.equal(once.found, false, 'kayit yoksa bos ozet donmeli')
+    assert.equal(once.count, 0)
+    assert.deepEqual(once.records, [])
+
+    const r = await cagir('engine:live-tick', canliYuk())
+    assert.equal(r.events.length, 2)
+
+    const satirlar = gunlukSatirlari(dataDir)
+    const olaylar = satirlar.filter((s) => s.type === 'event')
+    const sonuclar = satirlar.filter((s) => s.type === 'outcome')
+    assert.equal(olaylar.length, 2, 'her olay icin bir satir yazilmali')
+    assert.equal(olaylar[0].tf, TF)
+    assert.equal(olaylar[0].providerId, 'test-saglayici', 'saglayici yuke eklenmeli')
+    assert.equal(olaylar[0].isProxy, false)
+    assert.ok(olaylar[0].key, 'olay anahtari yazilmali')
+    assert.ok(olaylar[0].cfgHash, 'hafizanin ayar izi yazilmali')
+    assert.ok(olaylar[0].ageBars > 1)
+    assert.ok(olaylar[0].touch, 'olayin kendisi yazilmali')
+    // Sinyal OZET tasir: agir alanlar (topMatches) gunluge girmez.
+    assert.equal(typeof olaylar[0].signal.fired, 'boolean')
+    assert.equal(olaylar[0].signal.topMatches, undefined)
+    for (const alan of ['direction', 'kind', 'winRate', 'matchCount', 'confidence',
+      'expectancy', 'entry', 'tp1', 'sl', 'rr', 'atr']) {
+      assert.ok(alan in olaylar[0].signal, alan + ' ozette olmali')
+    }
+
+    // Ufku dolmus olaylar AYNI tikte etiketlenir: olay bari 505, ufuk 48 bar,
+    // seri 600 bar.
+    assert.equal(r.labeled, 2, 'ufku dolan iki kayit etiketlenmeli')
+    assert.equal(sonuclar.length, 2)
+    assert.equal(sonuclar[0].key, olaylar[0].key, 'sonuc satiri olayla ayni anahtari tasir')
+    assert.ok(['respect', 'break', 'timeout', 'nofill'].indexOf(sonuclar[0].outcome) >= 0)
+    assert.equal(typeof sonuclar[0].realizedR, 'number')
+    assert.equal(typeof sonuclar[0].barsToOutcome, 'number')
+
+    const ozet = await cagir('engine:live-log', { tf: TF, limit: 10 })
+    assert.equal(ozet.found, true)
+    assert.equal(ozet.tf, TF)
+    assert.equal(ozet.count, 2, 'iki kayit gorunmeli')
+    assert.equal(ozet.records.length, 2)
+    assert.equal(ozet.stale, 2, 'iki olay da gecikmeli degerlendirildi')
+    assert.equal(ozet.firstTime, ozet.lastTime, 'ikisi ayni barda')
+    // Tetiklenen sinyaller: isabet ve net ATR YALNIZCA onlar uzerinden.
+    const tetiklenen = olaylar.filter((s) => s.signal && s.signal.fired).length
+    assert.equal(tetiklenen, 2, 'esikler indirildigi icin iki sinyal de tetiklenmeli')
+    assert.equal(ozet.fired, tetiklenen)
+    assert.equal(ozet.labeled, tetiklenen, 'tetiklenen kayitlarin sonucu belli')
+    assert.ok(ozet.winRate >= 0 && ozet.winRate <= 1, 'isabet orani 0..1 arasinda')
+    assert.equal(ozet.wins, ozet.records.filter((k) => k.win === true).length)
+    assert.ok(Number.isFinite(ozet.netAtr))
+    // Beklenti = net ATR / etiketlenen sinyal (test ozetiyle ayni taban).
+    assert.ok(Math.abs(ozet.expectancyAtr - ozet.netAtr / ozet.labeled) < 1e-12)
+    // Kayitlarin sonucu ozette de gorunur.
+    assert.ok(ozet.records[0].outcome, 'kaydin sonucu ozete gecmeli')
+
+    // TARAMA VE HAFIZA SILME GUNLUGE DOKUNMAZ: canli olcu taramadan
+    // bagimsiz birikir.
+    await cagir('engine:memory-delete', { tf: TF })
+    assert.equal(gunlukSatirlari(dataDir).length, satirlar.length,
+      'hafiza silinince canli gunluk silinmemeli')
+    const silmeSonrasi = await cagir('engine:live-log', { tf: TF })
+    assert.equal(silmeSonrasi.count, 2)
   })
 })
 

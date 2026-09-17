@@ -152,6 +152,7 @@ src/core/learn/similarity.js      A5
 src/core/learn/cluster.js         A5
 src/core/learn/memory.js          A6
 src/core/learn/signal.js          A6
+src/core/learn/liveEvents.js      A6
 src/core/learn/backtest.js        A7
 src/core/data/provider.js         A8
 src/core/data/yahoo.js            A8
@@ -768,6 +769,31 @@ Plan hesabi:
 - `reasons` her zaman doldurulur, ornegin `'12 benzer kayit bulundu, ortalama benzerlik 0.87'`,
   `'Yeterli benzer kayit yok (3 < 5)'`.
 
+### `src/core/learn/liveEvents.js` (A6)
+
+Canli dongunun "bu tikte yeni olan olaylar" secimi. Saf modul, dosya ve ag
+bilmez.
+
+```js
+module.exports = {
+  /**
+   * Olayin kayan pencereden ETKILENMEYEN kimligi:
+   * `kind + '|' + time + '|' + zoneTop.toFixed(5) + '|' + zoneBottom.toFixed(5)`
+   * zoneId KULLANILMAZ: proZones her calismada kutulari sifirdan numaralandirir
+   * ve canli kuyruk her barda kaydigi icin ayni bolge her tikte baska bir
+   * zoneId alir.
+   */
+  eventKey(event),
+  /**
+   * `since` degerinden SONRAKI, `seen` icinde OLMAYAN tum olaylari zaman
+   * sirasiyla dondurur. Ayni barda birden fazla olay varsa HEPSI doner
+   * (olculdu: 15m'de 5378 olayin 60'i ayni barda baska bir olayla birlikte).
+   * `seen` Set veya dizi olabilir ve DEGISTIRILMEZ.
+   */
+  selectNewEvents(touches, since, seen),
+}
+```
+
 ## 16. `src/core/learn/backtest.js` (A7)
 
 ```js
@@ -856,7 +882,8 @@ module.exports = {
 ## 18. `src/main/*` (A9)
 
 - `paths.js`: `dataDir()` = `app.getPath('userData')/data`, `candlePath(tf)`,
-  `memoryPath(tf)`, `settingsPath()`. Klasorleri olusturur. Yol birlestirme,
+  `memoryPath(tf)`, `settingsPath()`, `liveLogPath(tf)` (= `memoryPath(tf)` +
+  `.live.jsonl`, canli sinyal gunlugu). Klasorleri olusturur. Yol birlestirme,
   ortam degiskeni onceligi ve klasor olusturma `src/core/paths-core.js`
   icindedir; `paths.js` yalnizca Electron'un `userData` degerini varsayilan
   kok olarak verir, betikler (`scripts/*.mjs`) ayni cekirdegi kullanir.
@@ -887,7 +914,8 @@ module.exports = {
   `data:status`, `data:doctor`, `data:import`, `data:sync`, `data:candles`,
   `engine:scan`, `engine:zones`, `engine:touches`, `engine:signals`,
   `engine:backtest`, `engine:backtest-last`, `engine:prototypes`,
-  `engine:memory-summary`, `engine:memory-delete`, `engine:live-tick`.
+  `engine:memory-summary`, `engine:memory-delete`, `engine:live-tick`,
+  `engine:live-log`.
   Uzun islerde `{type:'progress', id, pct, msg}` mesaji gonderir.
 
   **Ayar birlestirme (tek nokta).** `engine:scan`, `engine:backtest` ve
@@ -906,13 +934,53 @@ module.exports = {
   `stillValid:false` doner. `engine:scan` test sinyallerini ve bu ozeti
   YALNIZCA ayar izi degistiyse siler.
 
+  **`engine:live-tick` birden fazla olay dondurur.** Yuk:
+  `{tf, series, isProxy, providerId, basis, volScale, basisWarned, fetchedAt,
+  sinceTime, seenKeys, params, cfgPatch, tailBars}`. Sonuc `events` dizisi
+  tasir: `[{key, touch, signal, ageBars}]`. Onceden yalnizca SON olay aliniyor
+  ve `sinceTime` onun zamanina cekildigi icin ayni bardaki diger olaylar
+  kalici olarak kayboluyordu; aday secimi artik
+  `core/learn/liveEvents.selectNewEvents` ile yapilir. Tekil `signal` ve
+  `touch` alanlari GERIYE UYUM icin dizinin sonuncusuyla doldurulur.
+  `ageBars = (fetchedAt - (time + tfSec)) / tfSec`; 1'den buyukse sinyale
+  `stale: true` konur ve `reasons` dizisine gecikme notu eklenir.
+
+  **Canli sinyal gunlugu: `<ad>_memory.live.jsonl` (JSON Lines).** Her canli
+  olay, tetiklenmemis olsa bile, bir satir olarak EKLENIR (dosya hic
+  yeniden yazilmaz). Iki satir tipi vardir:
+
+  ```
+  {type:'event',   key, tf, time, fetchedAt, ageBars, providerId, isProxy,
+                   basis, volScale, cfgHash, touch, signal}
+  {type:'outcome', key, outcome, win, realizedR, pnlAtr, barsToOutcome}
+  ```
+
+  `signal` yalnizca ozet tasir: `fired, direction, kind, winRate, matchCount,
+  confidence, expectancy, entry, tp1, sl, rr, atr, stale`. Sonuc satiri, olayin
+  ufku dolunca (`time + horizonBars * tfSec <= son kapanmis bar`) yazilir:
+  olay bari `series.lastIndexAtOrBefore` ile bulunur, etiket
+  `learn/outcome.labelTouch` ile, kazanc `learn/backtest.tradeResult` ile
+  hesaplanir (ayri bir kopya YOKTUR). Etiketleme tanimi hafizanin
+  `outcomeCfg`sidir (`presets.resolveCfg` -> `planOutcomeCfg`).
+  `engine:scan` ve `engine:memory-delete` bu dosyaya DOKUNMAZ: canli olcu
+  taramadan bagimsiz birikir.
+
+  `engine:live-log` (yuk: `{tf, limit}`) dosyayi okuyup ozet dondurur:
+  `{tf, found, count, fired, labeled, wins, winRate, netAtr, expectancyAtr,
+  stale, firstTime, lastTime, records}`. `winRate` ve `netAtr` YALNIZCA
+  tetiklenmis ve etiketlenmis kayitlar uzerinden olculur (test ozetiyle ayni
+  taban). Dosya yoksa `found:false` ve sifirli ozet doner.
+
   Kaldirilan komut: `engine:evaluate` (renderer'dan hic cagrilmiyordu ve
   ambargosuz, farkli ayarla sinyal uretiyordu).
 - `ipc.js`: `ipcMain.handle('api:call', (e, {cmd, payload}) => ...)`.
   Ilerleme ve canli olaylar `webContents.send('api:event', {type, data})` ile gider.
 - `live.js`: secili saglayicidan `livePollSeconds` araliginda son barlari ceker,
   depoya ekler, yeni KAPANMIS bar olustuysa indikatoru son pencerede calistirir,
-  yeni ilk dokunus varsa `evaluateTouch` cagirir ve sinyali renderer'a yollar.
+  yeni olaylar varsa `evaluateTouch` cagirir ve sinyalleri renderer'a yollar.
+  Donen `events` dizisindeki HER sinyal icin ayri bir `live:signal` olayi
+  yayinlanir; degerlendirilen olay anahtarlari bir Set'te tutulur ve bir
+  sonraki tike `seenKeys` olarak gonderilir (tekrar degerlendirme olmaz).
   Vekil kaynak kullaniliyorsa `computeBasis` ile fiyat kaydirmasi uygular ve
   bunu sinyalin `reasons` alanina not dusuer.
 - `preload.js`:
@@ -962,7 +1030,11 @@ Bir sinyale tiklaninca sag panelde detay acilir: giris/TP1/TP2/SL fiyat cizgiler
 grafige dusler ve benzer gecmis ornekler mini grafik (sparkline canvas) olarak listelenir.
 
 `Test` sekmesi: yuruyen ileri test sonuclari, ozet tablo, yillara gore kirilim
-ve sermaye egrisi (basit canvas cizimi).
+ve sermaye egrisi (basit canvas cizimi). Panelin ALTINA `renderLiveLog` ile
+"Canlı sinyal günlüğü" bolumu cizilir: kayit sayisi, tetiklenen, etiketlenen,
+canli isabet orani ve net ATR; ayrica "Testte olculen" degerler ve aradaki
+fark (drift). Veri yoksa `'Henüz canlı sinyal kaydı yok.'` yazar. Ozet
+`engine:live-log` ile zaman dilimi yuklenirken alinir (`durum.canliGunluk`).
 
 Tema: TradingView koyu temasi. Arka plan `#131722`, izgara `#1e222d`,
 yukselen mum `#26a69a`, dusen mum `#ef5350`, metin `#d1d4dc`.

@@ -19,7 +19,7 @@
  *
  * CONTRACTS.md 19. bolum disa acilan API:
  *   renderSignals, renderSignalDetail, renderZones, renderMemory,
- *   renderSettings, renderBacktest, drawSparkline
+ *   renderSettings, renderBacktest, renderLiveLog, drawSparkline
  * (Ek olarak app.js'in de kullandigi bicimlendirme yardimcilari disa acilir.)
  */
 
@@ -1658,4 +1658,103 @@ export function renderBacktest(el, result, opts) {
     }
     el.appendChild(tablo(['Zaman', 'Yön', 'Tür', 'Beklenen', 'Sonuç', 'Kazanç', 'Birikim'], satirlar))
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* renderLiveLog                                                       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Canli sinyal gunlugunun ozeti. Test panelinin ALTINA cizilir.
+ *
+ * Neden: canli uretilen sinyaller hicbir yere kaydedilmiyordu, bu yuzden
+ * canli performans ile Test sekmesinde olculen rakam hic karsilastirilamiyordu.
+ * Ayni satirda "canli" ve "testte olculen" degerler yan yana durur, aradaki
+ * fark (drift) acikca yazilir.
+ *
+ * @param {HTMLElement} el Govde kabi (Test panelinin icine eklenir)
+ * @param {object|null} log `engine:live-log` ozeti
+ * @param {{test?:object|null}} [opts] test: son `engine:backtest` sonucu
+ */
+export function renderLiveLog(el, log, opts) {
+  if (!el) return
+  const o = opts || {}
+  el.appendChild(bolumBasligi('Canlı sinyal günlüğü'))
+
+  const g = log || null
+  if (!g || !g.found || sayi(g.count, 0) === 0) {
+    el.appendChild(h('div', 'small muted', 'Henüz canlı sinyal kaydı yok.'))
+    return
+  }
+
+  const etiketlenen = sayi(g.labeled, 0)
+  const canliOran = Number.isFinite(g.winRate) ? g.winRate : null
+  const canliBeklenti = Number.isFinite(g.expectancyAtr) ? g.expectancyAtr : null
+
+  el.appendChild(statIzgara([
+    stat('Kayıt', tam(g.count)),
+    stat('Tetiklenen', tam(g.fired)),
+    stat('Etiketlenen', tam(etiketlenen)),
+    stat('Canlı başarı oranı', canliOran === null ? '-' : formatPercent(canliOran, 1),
+      canliOran === null ? 'muted' : (canliOran >= 0.5 ? 'up' : 'down')),
+    stat('Net ATR', formatNumber(g.netAtr, 2), sayi(g.netAtr, 0) >= 0 ? 'up' : 'down'),
+    stat('Gecikmeli', tam(g.stale)),
+  ]))
+
+  // KARSILASTIRMA: ayni olcuyu test ozeti de verir. Etiketlenen kayit yoksa
+  // kiyas yapilmaz, cunku canli tarafta daha hicbir sonuc belli degil.
+  const test = o.test && o.test.summary ? o.test.summary : null
+  const testOran = test && Number.isFinite(test.winRate) ? test.winRate : null
+  const testBeklenti = test && Number.isFinite(test.expectancyAtr) ? test.expectancyAtr : null
+
+  el.appendChild(kv('Testte ölçülen başarı oranı',
+    testOran === null ? '-' : formatPercent(testOran, 1), 'muted'))
+  el.appendChild(kv('Testte ölçülen beklenti',
+    testBeklenti === null ? '-' : formatNumber(testBeklenti, 3) + ' ATR', 'muted'))
+
+  if (etiketlenen === 0) {
+    el.appendChild(h('div', 'small muted',
+      'Canlı kayıtların ufku henüz dolmadı, sonuçlar belli olunca karşılaştırma yazılacak.'))
+  } else {
+    const oranFark = canliOran !== null && testOran !== null ? (canliOran - testOran) * 100 : null
+    const beklentiFark = canliBeklenti !== null && testBeklenti !== null
+      ? canliBeklenti - testBeklenti
+      : null
+    el.appendChild(kv('Fark (isabet)',
+      oranFark === null ? '-' : (oranFark >= 0 ? '+' : '') + formatNumber(oranFark, 1) + ' puan',
+      oranFark === null ? 'muted' : (oranFark >= 0 ? 'up' : 'down')))
+    el.appendChild(kv('Fark (beklenti)',
+      beklentiFark === null ? '-' : (beklentiFark >= 0 ? '+' : '') + formatNumber(beklentiFark, 3) + ' ATR',
+      beklentiFark === null ? 'muted' : (beklentiFark >= 0 ? 'up' : 'down')))
+    el.appendChild(h('div', 'small muted',
+      'Canlı beklenti ' + formatNumber(canliBeklenti, 3) + ' ATR, ' + tam(etiketlenen) +
+      ' sonuçlanmış sinyal üzerinden. Az sayıda kayıtta fark tesadüf olabilir.'))
+  }
+
+  const kayitlar = Array.isArray(g.records) ? g.records : []
+  if (kayitlar.length > 0) {
+    const satirlar = []
+    const sinir = Math.min(kayitlar.length, 50)
+    for (let i = 0; i < sinir; i++) {
+      const k = kayitlar[i]
+      satirlar.push([
+        formatDateTime(k.time),
+        k.direction === 'SELL' ? 'SAT' : 'AL',
+        k.kind === 'form' ? 'Oluşum' : 'Dokunuş',
+        k.fired ? 'Evet' : 'Hayır',
+        k.outcome ? sonucAdi(k.outcome) : 'Bekliyor',
+        Number.isFinite(k.pnlAtr) ? formatNumber(k.pnlAtr, 2) : '-',
+        sayi(k.ageBars, 0) > 1 ? formatNumber(k.ageBars, 1) : '-',
+      ])
+    }
+    el.appendChild(tablo(['Zaman', 'Yön', 'Tür', 'Tetik', 'Sonuç', 'Kazanç', 'Gecikme'], satirlar))
+  }
+}
+
+/** Sonuc etiketinin Turkce adi. */
+function sonucAdi(outcome) {
+  if (outcome === 'respect') return 'Bölge tuttu'
+  if (outcome === 'break') return 'Bölge kırıldı'
+  if (outcome === 'nofill') return 'Emir dolmadı'
+  return 'Zaman aşımı'
 }

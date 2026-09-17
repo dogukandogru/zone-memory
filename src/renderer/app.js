@@ -24,6 +24,7 @@ import {
   renderMemory,
   renderSettings,
   renderBacktest,
+  renderLiveLog,
   formatNumber,
   formatPercent,
   formatPrice,
@@ -78,6 +79,9 @@ const durum = {
   hafizaOzeti: null,
   prototipler: [],
   testSonucu: null,
+  // Canli sinyal gunlugunun ozeti (`engine:live-log`). Canli performans ile
+  // Test sekmesinde olculen rakam ancak boylece karsilastirilabilir.
+  canliGunluk: null,
   testCalisiyor: false,
   taramaCalisiyor: false,
   canli: false,
@@ -847,6 +851,10 @@ async function hafizayiYukle() {
   const sonTest = await cagirGuvenli('engine:backtest-last', { tf: durum.tf }, null)
   if (sonTest && sonTest.found) durum.testSonucu = sonTest
   else durum.testSonucu = null
+  // Canli sinyal gunlugu: canli uretilen sinyaller ve sonuclanan etiketleri.
+  // Bu dosya taramadan ve hafiza silmeden bagimsiz birikir.
+  const canliGunluk = await cagirGuvenli('engine:live-log', { tf: durum.tf, limit: 50 }, null)
+  durum.canliGunluk = canliGunluk && canliGunluk.found ? canliGunluk : null
   hafizaPaneliniCiz()
   testPaneliniCiz()
 }
@@ -1821,6 +1829,9 @@ function testPaneliniCiz() {
     running: durum.testCalisiyor,
     onRun: () => testCalistir(),
   })
+  // Test ozetinin ALTINA canli gunluk bolumu eklenir: "olculen" ile "canlida
+  // olan" yan yana durmadikca aradaki sapma gorunmez.
+  renderLiveLog(kap, durum.canliGunluk, { test: durum.testSonucu })
 }
 
 /** Yuruyen ileri testi calistirir. */

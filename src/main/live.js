@@ -298,21 +298,33 @@ async function tick() {
     } else if (res && res.added > 0) {
       state.needsSync = false
     }
-    if (res && res.touch && typeof res.touch.time === 'number') {
-      // Ayni olayin tekrar degerlendirilmesini onle.
-      if (res.touch.time > state.sinceTime) state.sinceTime = res.touch.time
-    }
-    if (res && res.signal) {
+    // BU TIKTE YENI OLAN TUM OLAYLAR. Onceden yalnizca bir tanesi
+    // yayinlaniyordu ve `sinceTime` onun zamanina cekildigi icin ayni bardaki
+    // diger olaylar kalici olarak kayboluyordu.
+    const yeniOlaylar = res && Array.isArray(res.events) ? res.events : []
+    for (const olay of yeniOlaylar) {
+      if (!olay) continue
+      const anahtar = olay.key ? String(olay.key) : ''
+      if (anahtar) state.seenKeys.add(anahtar)
+      const zaman = olay.touch && typeof olay.touch.time === 'number' ? olay.touch.time : null
+      if (zaman !== null && zaman > state.sinceTime) state.sinceTime = zaman
+      if (!olay.signal) continue
       state.signals += 1
-      emitEvent('live:signal', { tf: state.tf, signal: res.signal, touch: res.touch || null })
-      const dir = res.signal.direction === 'BUY' ? 'ALIS' : 'SATIS'
-      if (res.signal.fired) {
-        const tur = res.signal.kind === 'form' ? 'kutu olusumu' : 'bolge dokunusu'
+      emitEvent('live:signal', { tf: state.tf, signal: olay.signal, touch: olay.touch || null })
+      const dir = olay.signal.direction === 'BUY' ? 'ALIS' : 'SATIS'
+      if (olay.signal.fired) {
+        const tur = olay.signal.kind === 'form' ? 'kutu olusumu' : 'bolge dokunusu'
         logLine('Yeni sinyal: ' + dir + ' (' + tur + '), basari beklentisi %' +
-          Math.round((res.signal.winRate || 0) * 100) + '.')
+          Math.round((olay.signal.winRate || 0) * 100) +
+          (olay.signal.stale ? ', gecikmeli degerlendirildi' : '') + '.')
       } else {
         logLine('Yeni bolge olayi bulundu ama esikler gecilmedi, sinyal yayinlanmadi.')
       }
+    }
+    // Hafizanin sinirini as: eski anahtarlar dusurulur.
+    if (state.seenKeys.size > MAX_SEEN_KEYS) {
+      const hepsi = Array.from(state.seenKeys)
+      state.seenKeys = new Set(hepsi.slice(hepsi.length - MAX_SEEN_KEYS))
     }
   } catch (err) {
     const message = err && err.message ? err.message : String(err)
