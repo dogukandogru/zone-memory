@@ -279,7 +279,9 @@ function yuruyenIleriTest(memory, prototypes, cfg, onProgress, sinyalUret) {
     ['touch', { total: 0, fired: 0, wins: 0, losses: 0, pnlAtr: 0, baseN: 0, baseWins: 0, baseNetAtr: 0, timeouts: 0, timeoutPnlAtr: 0, nofill: 0 }],
   ])
   const kindOf = (e) => (e && e.kind === 'form' ? 'form' : 'touch')
-  const costCfg = { costPct: costPct, costUsd: costUsd }
+  let slippageAtr = Number(conf.slippageAtr)
+  if (!Number.isFinite(slippageAtr) || slippageAtr < 0) slippageAtr = 0
+  const costCfg = { costPct: costPct, costUsd: costUsd, slippageAtr: slippageAtr }
   // Istatistik icin ham kayitlar (Wilson, bootstrap, permutasyon, kalibrasyon).
   const istatistikKayitlari = []
   const tabanHavuzu = { form: { win: [], net: [] }, touch: { win: [], net: [] } }
@@ -796,6 +798,7 @@ function yuruyenIleriTest(memory, prototypes, cfg, onProgress, sinyalUret) {
       // asabilir, yani sistem kagit uzerinde kazanirken gercekte kaybeder.
       costUsd: costUsd,
       costPct: costPct,
+      slippageAtr: slippageAtr,
       grossExpectancyAtr: fired > 0 ? grossPnlAtr / fired : 0,
       costPerTradeAtr: fired > 0 ? costTotalAtr / fired : 0,
       grossPnlAtr: grossPnlAtr,
@@ -959,7 +962,11 @@ function tradeResult (ev, sig, costCfg) {
   const costUsd = Number(costCfg && costCfg.costUsd) || 0
   const fiyat = Number(sig.entry) || Number(ev.price) || 0
   const costPrice = costPct > 0 ? fiyat * costPct : costUsd
-  const costAtr = costPrice > 0 ? costPrice / atr : 0
+  // Kayma: limit emrin beklenenden kotu dolmasi. Girisi aleyhe kaydirmak ile
+  // ayni sonucu verir (odul kadar azalir, risk kadar artar) ama tek bir
+  // maliyet kalemi olarak eklemek hesabi basit tutar.
+  const slipAtr = Math.max(0, Number(costCfg && costCfg.slippageAtr) || 0)
+  const costAtr = (costPrice > 0 ? costPrice / atr : 0) + slipAtr
 
   return {
     ok: true,

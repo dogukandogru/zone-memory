@@ -20,7 +20,10 @@ destek kutusunda ALIŞ, direnç kutusunda SATIŞ.
    öngörür. Kutu pivot barından `pivotLen` bar sonra onaylanır; pivot ancak o
    zaman kesinleşir, yani ileriye bakma yoktur. Giriş, onay barının kapanışıdır.
 2. **Bölge dokunuşu (DOKUNUŞ).** Kutuya yapılan ilk dokunuşta sinyal verir.
-   Giriş, bölgenin yakın kenarına limit emirdir.
+   Karar dokunuş barının **kapanışında** verilir, giriş o kapanıştan **sonra**
+   gelir: kapanış kenarın lehte tarafındaysa bir sonraki bardan itibaren kenara
+   limit emir, kapanış bölgenin içindeyse kapanıştan, kapanış geçersizliğin
+   ötesindeyse işlem yoktur. Emir dolmazsa işlem yazılmaz.
 
 Bu sinyallerin bir kısmı tutar, bir kısmı tutmaz. Zone Memory tam olarak bu
 farkı öğrenir:
@@ -29,7 +32,8 @@ farkı öğrenir:
 2. Her kutu için en fazla bir oluşum ve bir dokunuş olayı kaydeder
    (sistemin öğrenme birimi budur).
 3. Her olayın sonucunu geriye dönük etiketler: bölge tuttu mu (`respect`),
-   kırıldı mı (`break`), yoksa hiçbir şey olmadan ufuk mu doldu (`timeout`).
+   kırıldı mı (`break`), hiçbir şey olmadan ufuk mu doldu (`timeout`), yoksa
+   limit emir hiç dolmadı mı (`nofill`).
 4. Her olay anının "parmak izini" çıkarır: son 32 barın şekli, getiri profili
    ve bağlam bilgileri (RSI, ATR, trend, seans, bölge yaşı, bandın dışına taşma
    derinliği, hacim oranı, skor bileşenleri).
@@ -278,6 +282,52 @@ Uygulamayı açın; alt şeritte kaç mum yüklendiği ve ilk/son tarih görün�
 Tüm zamanlar UTC'dir. Aynı klasördeki `.bin` dosyalarının toplam boyutu
 yaklaşık 360 MB'tır.
 
+### 3.4 Bakım ve tanı betikleri
+
+Dördü de Electron olmadan çalışır ve `ZONE_MEMORY_USER_DIR` /
+`ZONE_MEMORY_DATA_DIR` değişkenlerine uyar. Her birinin `--help` çıktısı vardır.
+
+**`node scripts/data-doctor.mjs` (veri doktoru).** Depodaki serinin sağlık
+raporunu basar: iç boşluklar, aylık kapsama oranı, hafta sonu barları, sıfır
+hacimli barlar, tekrar eden veya sırasız zaman damgaları ve hacim rejimi
+kırılmaları. Boşluk sayarken kural tabanlı piyasa takvimini kullanır, yani
+hafta sonu ve günlük ara (New York 17:00-18:00) boşluk sayılmaz. Bu rapor
+gereklidir çünkü kod iç boşlukları hiç görmüyordu; ölçüldü ki 2023-02-20 ile
+2023-07-28 arasında sistematik bir "bir saat var, bir saat yok" deseni var
+(yaklaşık 479 tam saat eksik). Aynı rapor uygulama içinden `data:doctor`
+komutuyla da alınır. Seçenekler: `--tf`, `--from`, `--to`, `--min-gap`, `--json`.
+
+**`node scripts/repair-proxy.mjs` (vekil onarımı).** Canlı döngü bir dönem
+basis ve hacim ölçeği uygulamadan ham PAXG barlarını depoya yazdı. Ham bar bir
+kez girince fiyat kaydırması hesabı sıfır çıkıp düzeltme kalıcı olarak
+kapanıyor, senkron da kilitleniyordu. Bu betik vekil kaynakla yazılmış bölümü
+bulup keser ve türetilmiş zaman dilimlerini 1 dakikalıktan yeniden üretir.
+Kesim noktasını sırasıyla `--cut`, `XAUUSD_<tf>.proxy.json` kaydı ve hacim
+damgası (HistData hacmi tam sayıdır, Binance PAXG hacmi kesirlidir) verir.
+**Varsayılan olarak hiçbir şey yazmaz**; `--apply` ile önce
+`<ad>.bak-YYYYMMDD-HHMMSS` yedeği alınır. Koddaki kalıcı düzeltme
+`loader.normalizeProxy` içindedir: düzeltme hesaplanamazsa artık hiçbir bar
+yazılmaz.
+
+**`node scripts/fix-dst.mjs` (yaz saati göçü).** Tek seferliktir. Eski
+ayrıştırıcı HistData dosya saatlerini sabit UTC-5 sayıyordu; gerçekte yaz saati
+uygulanıyor ve kural 2019'da değişmiş (2018 ve öncesi ABD, 2019 ve sonrası
+Avrupa tarihleri). Bu yüzden yılın yedi sekiz ayında depodaki her bar bir saat
+geç etiketliydi. Ayrıştırıcı düzeltildi
+(`src/core/data/histdata.js` içindeki `dosyaOfsetiSn`); bu betik daha önce
+yazılmış barları düzeltir. Bitince `<ad>.dst.json` işaret dosyası yazar ve
+işaret varken yeniden çalışmayı **reddeder**, çünkü çift kaydırma seriyi bozar.
+Sıra önemlidir: önce `repair-proxy`, sonra bu göç, en son yeni ayrıştırıcıyla
+eksik ay indirilir. `--apply` verilmezse yalnızca rapor basar.
+
+**`node scripts/measure-all.mjs` (ölçüm).** Tüm zaman dilimlerinde yürüyen
+ileri testi çalıştırıp tek bir karşılaştırma tablosu üretir. 1. bölümdeki ölçüm
+tablosu bu betiğin çıktısıdır. Varsayılan olarak yalnızca test eder (hafıza
+zaten kuruluysa), `--scan` ile önce hafızaları yeniden kurar. `--tfs 5m,15m,1h`
+ile alt küme, `--json` ve `--out` ile makine okunur çıktı alınır. Kullanıcının
+`settings.json` içindeki ayar yaması okunur, yani ölçüm gerçekten kullanılan
+ayarla yapılır.
+
 ---
 
 ## 4. Kullanım
@@ -296,6 +346,20 @@ düğmesine basın. Uygulama:
 Uzun bir seride bu işlem birkaç dakika sürer ve on binlerce olay üretir.
 Bir kez yapılır, sonra artımlı olarak güncellenir. İlerleme çubuğu üst şeritte
 görünür.
+
+Taramanın iki sessiz kuralı vardır:
+
+- **Hafıza kendi ayar izini taşır.** Hangi indikatör ayarı, hangi etiket tanımı
+  ve hangi özellik sürümüyle kurulduğu hafıza dosyasına yazılır (`cfgHash`).
+  Ayarı değiştirip yeniden taramazsanız canlı mod sinyal üretmez ve Test
+  sekmesi sonucun eski ayara ait olduğunu söyler.
+- **Tarama ölçümünüzü silmez.** Eski test sinyalleri ve son test özeti
+  **yalnızca ayar izi değiştiyse** silinir. Eskiden her taramada siliniyordu;
+  canlı akış depoya bar ekledikçe otomatik tarama başlıyor ve ölçtüğünüz sonuç
+  sessizce kayboluyordu.
+
+Penceresinde gerçek veri boşluğu olan olaylar hafızaya **alınmaz**, yalnızca
+sayılır (hafıza özetinde `lowCoverage`). Sebebi 6.2'de anlatılıyor.
 
 ### 4.2 Bölgelerin okunması
 
@@ -326,14 +390,26 @@ Bir sinyale tıklayınca sağ panelde detay açılır:
 | Alan | Anlamı |
 | --- | --- |
 | Sinyal türü | Kutu oluşumu mu, bölgeye geri dönüş mü; girişin nereden alındığı |
+| Kanıt durumu | Bu **türün** katma değeri son ölçümde kanıtlandı mı (aşağıda) |
 | Eşleşme sayısı | Benzerlik eşiğini geçen, aynı türdeki geçmiş kayıt sayısı |
 | Ortalama benzerlik | Bu eşleşmelerin ortalama benzerlik puanı (0 ile 1) |
 | Kazanma oranı | Eşleşmelerin kaçı bölgeye saygı göstermiş |
-| Güven | Eşleşme sayısı, oranın 0,5'ten uzaklığı ve benzerliğin bileşimi |
+| Güven skoru | Eşleşme sayısı, oranın 0,5'ten uzaklığı ve benzerliğin bileşimi |
+| Beklenen lehte / aleyhte hareket | Eşleşmelerin ortalama MFE ve MAE değeri, ATR cinsinden |
+| Durum | Sinyal üretildi mi, yoksa eşikler mi geçilmedi |
 | Giriş / TP1 / TP2 / SL | Bölge geometrisinden türetilen plan, TP2 eşleşmelerin dağılımından |
 | R/R | (TP1 - giriş) / (giriş - SL) mutlak değeri |
+| Gerçekleşen sonuç | Yalnızca testte üretilen sinyallerde; bölgenin durumu ve net kazanç |
 | Prototip | Kurulumun benzediği örüntü kümesinin adı |
 | Gerekçeler | Sinyalin neden oluştuğu veya neden oluşmadığı, Türkçe |
+
+**Kanıt rozeti.** Sinyal kartında `KANITLI` / `ZAYIF` / `KANIT YOK` etiketi
+vardır. Kaynağı son yürüyen ileri testin **o sinyal türü için** ölçtüğü net
+beklentidir (R biriminde, %95 bootstrap aralığıyla): aralığın alt sınırı
+sıfırın üstündeyse `KANITLI`, yalnızca ortalama pozitifse `ZAYIF`, aksi halde
+`KANIT YOK`. Hiç ölçüm yoksa ya da hafızanın ayar izi ölçümdekinden farklıysa
+`KANIT YOK` kabul edilir ve gerekçelere bir uyarı satırı eklenir. 1. bölümdeki
+tabloya göre şu an hiçbir tür `KANITLI` değildir.
 
 Önemli: eşikleri geçemeyen olaylar da listelenir, ama `fired: false`
 durumundadır. Böylece "neden sinyal vermedi" sorusunun cevabı görünür kalır.
@@ -342,35 +418,95 @@ durumundadır. Böylece "neden sinyal vermedi" sorusunun cevabı görünür kal�
 
 Yürüyen ileri test (walk forward) sonuçlarını gösterir. Her olay yalnızca
 **kendinden önceki** hafızayla değerlendirilir, yani ileriye bakma yoktur.
-Sekmede özet tablo, yıllara göre kırılım ve sermaye eğrisi bulunur.
+Sekmede özet tablo, istatistik kırılımı, kalibrasyon tablosu, sinyal türüne
+göre kırılım, yıllara göre kırılım, sermaye eğrisi ve canlı sinyal günlüğü
+bulunur.
 
-Burada bakılacak en önemli sayı `Taban başarı oranı` ile `Başarı oranı`
-farkıdır: birincisi tüm olayların ham başarı oranı, ikincisi sistemin
-seçtiklerinin oranıdır. Aradaki fark sistemin katma değeridir. Fark yoksa sistem
-bir şey katmıyordur.
+**Taban artık aynı türün tabanıdır.** `Taban başarı oranı (aynı tür)` satırı,
+"hiçbir seçim yapmadan bu türün olaylarını al" senaryosunun oranıdır: ısınma
+sonrası dönemden, aynı işlem planıyla ve tetiklenen işlemlerin tür karışımıyla
+ağırlıklandırılarak hesaplanır. `Tabana göre katkı` bu ikisinin farkıdır. Eski
+"tüm etiketlenmiş olayların ham oranı" tanımı iki türü karıştırdığı için ekranda
+sahte katkı gösteriyordu; o sayı hâlâ hesaplanıyor ama artık yalnızca bilgi
+amaçlı ayrı bir alanda duruyor (`rawWinRate`).
+
+**Tek bir sayıya bakmayın, belirsizliğe bakın.** Özet şunları da gösterir:
+
+| Satır | Ne söyler |
+| --- | --- |
+| İsabet %95 aralığı | Wilson skor aralığı, isabet oranının belirsizliği |
+| Tabandan farkın p değeri | İki yönlü binom testi; büyük p "fark yok" demektir |
+| Net beklenti %95 aralığı | Günlük blok bootstrap; aynı gün içindeki işlemler bağımlı sayılır |
+| Aynı türden rastgele seçim bu kadar iyi olabilir mi | Permütasyon olasılığı; 1'e yakın değer "seçim bir şey katmıyor" demektir |
+| Katma değer kanıtlandı mı | Net beklentinin alt sınırı tabanın üstünde mi |
+| Beklenti (R) | Her işlemin kendi riskine bölünmüş sonucu; ATR birimi işlemler arası riski eşitlemez, R eşitler |
+| Brüt / Maliyet / işlem, maliyetin payı, maliyet iki kat olsaydı, başa baş isabet | Maliyet kırılımı |
+| Zaman aşımı, Limit emir dolmadı | Kaç işlem ufuk sonunda kapandı, kaç emir hiç dolmadı |
+| Değerlendirilen dönem, Isınma | Ölçümün hangi aralığı kapsadığı ve tür/yön başına asgari aday sayısı |
+
+**Kalibrasyon tablosu** sistemin söylediği oran ile gerçekleşen oranı yan yana
+koyar ("sistem %62 dedi, gerçekleşen %50"). Altındaki **Brier skoru** küçükse
+tahminler daha iyidir; sabit taban tahmininin Brier skoru da yanında yazar,
+karşılaştırma için.
 
 Hemen altındaki **"Sinyal türüne göre"** tablosu iki sinyal türünü ayrı ayrı
-gösterir. Toplam rakam, türlerden birinin diğerini taşıdığı durumları gizler:
-kutu oluşumu zarar ederken bölge dokunuşu kazanıyor olabilir ve toplamda ikisi
-birden makul görünebilir. Hangi sinyalin gerçekten çalıştığına bu tabloya
-bakarak karar verin. Bir tür işinize yaramıyorsa Ayarlar ekranından
+gösterir; her türün tabanı **kendi türünün** tabanıdır. Toplam rakam, türlerden
+birinin diğerini taşıdığı durumları gizler: kutu oluşumu zarar ederken bölge
+dokunuşu kazanıyor olabilir ve toplamda ikisi birden makul görünebilir. Hangi
+sinyalin gerçekten çalıştığına bu tabloya bakarak karar verin. Bir tür işinize
+yaramıyorsa Ayarlar ekranından
 (`Kutu oluşumunda sinyal üret` / `Bölgeye dokunuşta sinyal üret`) kapatın ve
 yeniden tarayın.
+
+Örneklem yetersizse özet, katkı rakamının yerine bir **uyarı** gösterir
+(`yetersiz hafıza`, `işlem yok`, `yetersiz örneklem`). Az sayıda işlemle çıkan
+yüksek bir oran istatistiksel olarak anlamsızdır.
+
+**Ölçüm diske yazılır.** Test bitince sonuç `<ad>_memory.backtest.json`
+dosyasına kaydedilir (kullanılan ayar, hafızanın ayar izi, özet, yıllık kırılım,
+sermaye eğrisi ve tür başına kanıt durumu). Uygulamayı kapatıp açtığınızda
+panel bu dosyadan doldurulur; hafızanın izi değiştiyse sonucun artık geçerli
+olmadığı yazılır.
+
+**Canlı sinyal günlüğü** panelin altında ayrı bir bölümdür: canlıda üretilen
+kayıt sayısı, tetiklenen, etiketlenen, canlı başarı oranı ve net ATR; yanında
+"testte ölçülen" değerler ve aradaki fark. Böylece canlı davranışın ölçümden
+sapıp sapmadığı görünür. Kayıt yoksa "Henüz canlı sinyal kaydı yok." yazar.
 
 ### 4.5 Canlı mod
 
 Üst şeritten sağlayıcı seçip **Canlı** anahtarını açın. Uygulama seçilen
 aralıkta (varsayılan 20 saniye) son mumları çeker, depoya ekler ve yeni bir
-mum **kapandığında** indikatörü son pencerede çalıştırır. Yeni bir bölge olayı
-(kutu oluşumu veya ilk dokunuş) oluşursa hafızayla karşılaştırıp sinyali panele
-düşer.
+mum **kapandığında** indikatörü son pencerede çalıştırır. Yeni bölge olayları
+(kutu oluşumu veya ilk dokunuş) oluşursa hafızayla karşılaştırıp sinyalleri
+panele düşer.
+
+Bilinmesi gereken beş şey:
+
+1. **Aynı tikte birden fazla olay değerlendirilir.** Önceden yalnızca son olay
+   alınıyor ve pencere kaydığı için aynı bardaki diğer olaylar kalıcı olarak
+   kayboluyordu. Artık "bu tikte yeni olanların hepsi" seçilir
+   (`src/core/learn/liveEvents.js`); ölçüldü, 15 dakikalıkta 5378 olayın 60'ı
+   aynı barda başka bir olayla birlikte oluşuyor.
+2. **Hafızanın ayar izi tutmuyorsa sinyal üretilmez.** Ayarları değiştirip
+   yeniden taramadıysanız yeni tanımla üretilen olay eski tanımla etiketlenmiş
+   geçmişle karşılaştırılırdı; bu durum artık sessizce geçmez, günlüğe
+   "Geçmişi Tara çalıştırın" notu düşer.
+3. **Gecikmiş değerlendirme işaretlenir.** Olay barının kapanışından
+   değerlendirme anına kadar birden fazla bar geçtiyse sinyal `stale`
+   işaretlenir ve gerekçelerine gecikme notu eklenir. Fiyat çoktan kaçmış
+   olabilir.
+4. **Kanıt rozeti eklenir.** Her canlı sinyale, son ölçümde o **türün** katma
+   değerinin kanıtlanıp kanıtlanmadığı iliştirilir (bkz. 4.3).
+5. **Her canlı olay günlüğe yazılır**, tetiklenmemiş olsa bile:
+   `<ad>_memory.live.jsonl`. Ufku dolan kayıtların sonucu sonradan aynı dosyaya
+   eklenir ve testteki kazanç kuralının **aynısı** kullanılır. Bu dosya tarama
+   ve hafıza silme işlemlerinden etkilenmez; canlı ölçü taramadan bağımsız
+   birikir.
 
 Vekil bir kaynak kullanıyorsanız (Yahoo GC=F, Binance PAXG, OKX XAUT) fiyat
 farkı otomatik olarak `computeBasis` ile ölçülür ve seri spot seviyesine
 kaydırılır. Bu durum sinyalin gerekçelerine not düşülür.
-
----
-
 
 ### 4.6 Güncel veri ve canlı akış
 
@@ -384,19 +520,28 @@ Bu düğme şunları yapar:
    taban seri** üzerinden yapılır, sonra 5m, 15m, 1h ve 4h ondan yeniden üretilir.
    Böylece zaman dilimleri birbiriyle tutarlı kalır.
 2. Sağlayıcı bir **vekil** ise (Binance PAXG, OKX XAUT, Yahoo GC=F) üç düzeltme
-   uygulanır:
+   **tek bir yerde** uygulanır (`loader.normalizeProxy`):
    - **Fiyat kaydırması:** depodaki seriyle çakışan bölgeden medyan fark
      hesaplanır ve yeni barlara uygulanır. Ölçüldü: PAXG ile spot arasındaki
-     fark 1 dakikalıkta yalnızca 0,38 dolar. Çakışma bulunamazsa **ekleme
-     yapılmaz** ve hata verilir; düzeltmesiz eklemek seriye sahte bir sıçrama
-     yazardı.
+     fark 1 dakikalıkta yalnızca 0,38 dolar. Çakışma bulunamazsa **hiçbir bar
+     yazılmaz**; düzeltmesiz eklemek seriye sahte bir sıçrama yazardı ve bir
+     kez yazılınca sonraki basis hesabı sıfır çıkıp düzeltmeyi kalıcı olarak
+     kapatıyordu.
    - **Piyasa saatleri:** kripto vekilleri 7/24 işlem görür, spot altın görmez.
-     Hangi saatlerin açık olduğu depodaki son 8 haftadan **veriye bakılarak**
-     çıkarılır ve kapalı saatlerdeki barlar elenir. Ölçüldü: 18 günlük boşlukta
-     9.360 bar (yaklaşık üçte biri) bu şekilde elendi.
+     Hangi saatlerin açık olduğu artık **kural tabanlı** belirlenir
+     (`session.createMarketCalendar`, New York yerel saati): piyasa Pazar
+     18:00'de açılır, Cuma 17:00'de kapanır, her gün 17:00-18:00 arası aradır,
+     Noel ve yılbaşı tam gün kapalıdır. Önceden takvim depodaki son 8 haftadan
+     **veriye bakılarak** çıkarılıyordu; depoya bir kez kirli (hafta sonu) bar
+     girince o saatler "açık" sayılıyor ve süzgeç kendi kendini bozuyordu.
    - **Hacim ölçeği:** HistData hacmi dakikadaki tick sayısıdır (~95), Binance
      ise PAXG miktarını verir (~0,4). İndikatörün flow bileşeni hacme bağlı
      olduğu için çakışma bölgesindeki medyan orana göre ölçeklenir.
+
+   Vekil veriyle doldurulan aralıklar `XAUUSD_<tf>.proxy.json` dosyasına
+   kaydedilir, böylece o dönem sonradan spot veriyle değiştirilebilir. Geçmişte
+   kirlenmiş bir depoyu temizlemek için `scripts/repair-proxy.mjs` vardır
+   (bkz. 3.4).
 
 **Canlı** anahtarı açıldığında seçili sağlayıcı `livePollSeconds` aralığıyla
 (varsayılan 20 saniye) yoklanır, aynı düzeltmeler uygulanır, kapanan her yeni
@@ -439,6 +584,15 @@ Açıklamalar:
   indikatörün flow hesabı hacme bağlıdır. Tick dosyalarından üretilen mumlarda
   hacim = dakikadaki tick sayısıdır. TradingView'in XAUUSD hacmi de tick
   hacmidir, yani aynı cinstendir. HistData içinde bulunulan ayı yayımlamaz.
+- **HistData dosya saatleri sabit UTC-5 değildir.** Yaz saati uygulanır ve
+  uygulanan kural 2019'da değişmiştir: 2018 ve öncesinde ABD
+  (America/New_York), 2019 ve sonrasında Avrupa yaz saati tarihleri. Dönüşüm
+  `src/core/data/histdata.js` içindeki `dosyaOfsetiSn` fonksiyonundadır.
+  Ölçüldü: sabit UTC-5 varsayımı yılın yaklaşık %63'ündeki barları bir saat
+  ileri kaydırıyordu. Sınır 2018-11-04 ile 2019-03-10 arasında herhangi bir gün
+  olabilir, çünkü o aralıkta iki kural da beş saat verir. Eski ayrıştırıcıyla
+  indirilmiş bir depo varsa `scripts/fix-dst.mjs` ile bir kez düzeltilir
+  (bkz. 3.4).
 - **Vekil kaynaklar** (`isProxy: true`) spot XAUUSD değildir. Şekil ve örüntü
   bilgisi kullanılabilir, ama mutlak fiyat seviyesi kayar. Basis düzeltmesi bu
   kaymayı kapatır; yine de canlı takip için spot bir kaynak tercih edilmelidir.
@@ -478,10 +632,14 @@ Kutu geometrisi, `zH = atr[pivot] * zoneAtrMult` (0,35 ATR) olmak üzere:
 
 Kutunun ömrü boyunca:
 
-- **Birleştirme:** aktif listede aynı yönde ve orta noktası `atr * mergeAtrMult`
-  (0,55 ATR) mesafesinden yakın bir kutu varsa yeni kutu açılmaz; mevcut kutu
-  iki pivotu da kapsayacak şekilde genişler ve akış gücü artar. Aynı seviyenin
-  defalarca sayılması böyle engellenir. Birleşme yeni bir sinyal üretmez.
+- **Birleştirme:** aktif listede aynı yönde ve orta noktası **pivot fiyatına**
+  `atr * mergeAtrMult` (0,55 ATR) mesafesinden yakın bir kutu varsa yeni kutu
+  açılmaz; yakın olan **bütün** kutular iki pivotu da kapsayacak şekilde
+  genişler ve akış güçleri artar (tavan 10). Aynı seviyenin defalarca sayılması
+  böyle engellenir. Birleşme yeni bir sinyal üretmez. Mesafenin pivot fiyatından
+  ölçülmesi ve döngünün ilk eşleşmede durmaması Pine'daki davranışın birebir
+  karşılığıdır; ölçüldü, bu iki fark 15 dakikalıkta kutuların yaklaşık %1'ini
+  değiştiriyordu.
 - **Dokunuş:** kutuya her dokunuşta (aynı kutu için `touchCooldown` = 12 bar
   aralığıyla) akış gücü 0,35 artar, tavan 10.
 - **Kırılma:** destekte kapanış alt kenarın `atr * 0,15` kadar altına inerse,
@@ -518,6 +676,22 @@ geçmişteki oluşum olaylarıyla, bir dokunuşu yalnızca geçmişteki dokunuş
 karşılaştırır. Girişleri, riskleri ve tipik sonuçları farklı olduğu için
 karıştırmak istatistiği anlamsızlaştırırdı.
 
+**Veri boşluğunda kalan olaylar hafızaya girmez.** Olayın penceresinde (50 bar
+öncesi, ufuk kadar sonrası) piyasanın **açık olduğu** bir saatte eksik bar varsa
+olay kaydedilmez, yalnızca sayılır. Sebebi: böyle bir bölgede pivot, ATR, hacim
+ortalaması ve 48 barlık sonuç ufku gerçekte çok daha uzun bir zamana yayılır,
+yani olay hafızaya başka bir şey ölçen bir kayıt olarak girerdi. Hafta sonu ve
+günlük ara zaman atlaması yaratır ama veri boşluğu **değildir**; ayrım kural
+tabanlı piyasa takvimiyle yapılır. Bu ayrım yapılmadığında 15 dakikalıkta 6890
+olayın 6485'i atılıyordu.
+
+**Etiketlenemeyen olaylar da hafızaya girmez** ve nedeni ayrı ayrı sayılır:
+ufuk serinin sonuna sığmadıysa (`noLabelHorizon`, veri geldikçe kendiliğinden
+çözülür) veya kurulum gerçekte işlenemezse (`formRiskBlocked`: oluşum olayında
+risk `maxFormRiskAtr` eşiğini aştı, ya da karar barının kapanışı geçersizlik
+tarafında kaldı). Bu ayrım olmadan "olayların yüzde kırkı nereye gitti" sorusu
+cevapsız kalıyordu.
+
 **Skor.** Kutu oluşumunun kapısı (hacim + Bollinger) kesin olduğu için o iki
 kriter her kutuda doğrudur ve skor bileşeni olarak bilgi taşımaz. Bu yüzden skor
 olayın **olduğu barda** değişen beş şeyi ölçer: akış gücü, üst zaman dilimi
@@ -535,15 +709,38 @@ türünün girişi farklı olduğu için hedef hesabı da farklıdır:
 
 |  | dokunuş olayı | oluşum olayı |
 | --- | --- | --- |
-| Giriş | bölgenin yakın kenarı, limit emir | onay barının kapanışı |
+| Karar anı | dokunuş barının kapanışı | onay barının kapanışı |
+| Giriş | kapanıştan **sonra** (aşağıdaki üç dal) | onay barının kapanışı |
 | Geçersizlik | bölgenin uzak kenarından `breakBufferAtr` \* ATR dışarıda | aynı |
 | Hedef | kenardan `targetAtr` \* ATR uzakta | girişten `formTargetRr` \* risk kadar uzakta |
 | Ödül | her zaman `targetAtr` | her zaman `formTargetRr` risk birimi |
 
 - **Ufuk:** `horizonBars`, varsayılan 48 bar (her iki türde de).
 
-**Dokunuşta giriş neden kenar.** Dokunuş tanımı gereği fiyat o kenarı geçmiştir,
-yani limit emir dolar. Risk ve ödül yalnızca bölge geometrisine bağlı kalır.
+**Dokunuşta giriş: karar kapanışta, giriş sonra.** Karar dokunuş barının
+kapanışında verilir (`touchEntryMode = 'afterClose'`) ve kapanışın konumu üç
+daldan birini seçer:
+
+1. **Kapanış kenarın lehte tarafında** ise bir **sonraki** bardan itibaren
+   kenara limit emir konur. Emrin dolmuş sayılması için fiyatın kenarı
+   `fillOffsetAtr` (0,05 ATR) kadar geçmesi gerekir; kenara tam değen fiyat
+   gerçekte doldurmayabilir.
+2. **Kapanış bölgenin içinde** ise kapanıştan girilir.
+3. **Kapanış geçersizliğin ötesinde** ise bölge o barda zaten kırılmıştır,
+   olay işlem üretmez ve etiketlenmez.
+
+**Dolmayan emir: `nofill`.** Limit emir ufuk boyunca dolmazsa, ya da dolmadan
+fiyat hedefe giderse ortada işlem yoktur. Kayıt hafızada **kalır** ama komşu
+havuzuna, isabet oranına ve taban hesabına **girmez**; yalnızca dolum oranı
+olarak raporlanır.
+
+**Neden değişti.** Önceki model (`zoneEdge`) girişi dokunuş barının **içinde**
+kenardan dolmuş sayıyordu. Bu bar içi ileriye bakmaydı: karar bar kapanışındaki
+bilgiyle (fitil reddi, penetrasyon, hacim) veriliyor ama giriş o bilgi oluşmadan
+önceki bir fiyattan yazılıyordu. Ölçüldü: 5 dakikalıkta fitil reddi alt kümesi
+eski modelde %58,4 isabet ve +0,490 ATR veriyordu, gerçekleştirilebilir modelde
+%30,9 ve -0,117 ATR. Eski mod karşılaştırma için `outcomeCfg.touchEntryMode`
+ile hâlâ seçilebilir.
 
 **Oluşumda giriş neden kapanış.** Kutu doğduğunda fiyat kutunun içinde değildir
 ve oraya hiç dönmeyebilir, dolayısıyla kenara limit emir konamaz. Bunun bedeli
@@ -566,12 +763,20 @@ canlıda böyle bir olay geldiğinde sinyal üretilmez ve gerekçesi yazılır.
 | `respect` | Geçersizlik görülmeden hedefe ulaşıldı, bölge tuttu, `success = true` |
 | `break` | Önce geçersizlik seviyesi görüldü, bölge kırıldı |
 | `timeout` | Ufuk boyunca hiçbiri olmadı |
+| `nofill` | Limit emir ufuk boyunca hiç dolmadı, ortada işlem yok |
 
 Aynı barda ikisi de olduysa **muhafazakâr** davranılır ve kırılma sayılır.
-Bar içi sıralama bilinmediği için iyimser varsayım yapılmaz. Dokunuş olayında
-aynı kural olay barının kendisi için de geçerlidir: emir o bar içinde
-dolduğundan, o bar geçersizlik seviyesini de gördüyse anında kırılma yazılır.
-Oluşum olayında böyle bir kural yoktur, çünkü emir bar kapanınca dolar.
+Bar içi sıralama bilinmediği için iyimser varsayım yapılmaz. Aynı kural emrin
+**dolduğu** bar için de geçerlidir: o bar geçersizlik seviyesini de gördüyse
+anında kırılma yazılır. Oluşum olayında böyle bir kural yoktur, çünkü emir bar
+kapanınca dolar.
+
+**Zaman aşımı tam stop zararı değildir.** `timeout` sonucunda pozisyondan ufuk
+sonu kapanışından çıkılır; çıkış fiyatı `exitPrice`, risk birimi cinsinden
+sonuç `realizedR` alanında durur. Önceden her zaman aşımı `-1R` yazılıyordu ve
+oluşum olayında risk 1,2 ile 2,8 ATR arasında olduğu için bu ortalama -2,5 ATR
+sahte zarar demekti. Test, taban oranı ve canlı günlük artık **tek bir kazanç
+tanımı** kullanır (`backtest.tradeResult`).
 
 **Neden bu tanım önemli.** Sinyal planındaki TP1 ve SL, etiketin kullandığı
 seviyelerin **aynısıdır**. Yani "bölge tuttu" ile "TP1 vuruldu" aynı olaydır.
@@ -596,11 +801,13 @@ Her olay üç parçadan oluşan bir parmak izi taşır:
 1. **shape (16 değer):** olay barıyla biten son 32 kapanış. Önce 5'lik
    hareketli ortalamayla yumuşatılır, sonra 16 kovaya bölünüp her kovanın
    ortalaması alınır, sonra min-max ile 0 ile 1 arasına normalize edilir.
-   Bu sıkıştırma önceki projede ölçüldü: ham 32 barlık vektöre göre sinyal
-   başına yaklaşık **3 kat daha fazla anlamlı eşleşme** üretti. Sebebi,
-   normalize edilmiş şeklin fiyat seviyesinden ve mutlak oynaklıktan bağımsız
-   hale gelmesidir; 2011'in 1900 dolarındaki bir yapı 2015'in 1100 dolarındaki
-   yapıyla karşılaştırılabilir olur.
+   Bu sıkıştırma önceki projede, yani **eski indikatörle (MASTER 1 TOUCH)**
+   ölçüldü: ham 32 barlık vektöre göre sinyal başına yaklaşık **3 kat daha
+   fazla anlamlı eşleşme** üretmişti. Yeni indikatörde bu karşılaştırma
+   tekrarlanmadı, yani sayı doğrulanmış değildir. Yöntemin gerekçesi ise
+   ölçümden bağımsız geçerlidir: normalize edilmiş şekil fiyat seviyesinden ve
+   mutlak oynaklıktan bağımsız hale gelir, böylece 2011'in 1900 dolarındaki bir
+   yapı 2015'in 1100 dolarındaki yapıyla karşılaştırılabilir olur.
 2. **ret (32 değer):** son 33 kapanışın logaritmik getirileri, z-score ile
    normalize edilmiş. Hareketin hızını ve ritmini taşır.
 3. **ctx (24 değer):** bağlam. RSI, ATR yüzdesi, SMA20 ve SMA50'ye ATR
@@ -628,15 +835,25 @@ hafıza dosyası yeni olaylarla karşılaştırılamaz; motor bunu yakalar ve
 Hepsi 0 ile 1 arasına taşınır. DTW pahalı olduğu için önce ucuz `shapeSim` ile
 ön eleme yapılır (en iyi `k * 8` aday), DTW yalnızca o adaylarda hesaplanır.
 
-Üç filtre vardır:
+**Aday havuzu kuralı.** Bir hafıza kaydı ancak şunların hepsi doğruysa aday
+olabilir:
 
+- Sonucu hesaplanmış olmalı (`outcome` tanımlı) ve özellik vektörü bulunmalı.
+- **`nofill` olmamalı.** Limit emrin hiç dolmadığı olaydan gerçekte bir işlem
+  çıkmamıştır: ne kazanç ne kayıp. Havuzda tutulsaydı "geçmişte bu yapı %X
+  tuttu" oranı yanlış hesaplanırdı.
 - `kind`: yalnızca **aynı türdeki** olaylar aday olur. Kutu oluşumu yalnızca
   geçmişteki oluşumlarla, dokunuş yalnızca geçmişteki dokunuşlarla
   karşılaştırılır.
+- `direction`: yalnızca aynı yöndeki olaylar.
 - `excludeWithinSec` (varsayılan 3 gün): sorgu zamanına çok yakın kayıtlar
   elenir. Aksi halde aynı kurulum kendisiyle eşleşir.
 - `beforeTime`: yalnızca belirtilen zamandan önceki kayıtlar aday olur.
   Yürüyen ileri testte bu şarttır, ileriye bakmayı imkânsız kılar.
+
+Sinyal katmanı komşu bulmayı (pahalı) ve karar vermeyi (ucuz) ayrı iki adımda
+yapar. Eşikler değiştiğinde komşular değişmediği için eşik taraması aynı komşu
+listesini yeniden kullanabilir.
 
 ### 6.6 Prototip kümeleme
 
@@ -654,33 +871,67 @@ tarafından okunabilir bir bağlam verir.
 
 Varsayılan değerler:
 
+Çekirdek varsayılanları (`DEFAULT_SIGNAL_CFG`):
+
 | Ayar | Varsayılan | Anlamı |
 | --- | --- | --- |
 | `k` | 25 | En fazla kaç komşu incelenir |
 | `minSimilarity` | 0,80 | Bir kaydın "benzer" sayılması için eşik |
 | `minMatches` | 15 | Eşiği geçen en az kaç kayıt gerekli |
-| `minWinRate` | 0,62 (1m) / 0,55 (5m, 15m) | Bu kayıtlarda en az tutma oranı |
+| `minWinRate` | 0,62 | Bu kayıtlarda en az tutma oranı |
 | `minExpectancy` | 0,10 | Asgari beklenen değer, risk birimi cinsinden |
 | `minRr` | 0 (kapalı) | Asgari risk/ödül oranı |
+| `useZoneStop` | açık | TP1 ve SL bölge geometrisinden alınır |
 | `tp2Pct` | 70 | Uzatma hedefi için MFE dağılımının yüzdeliği |
 
-Zaman dilimine göre değişen değerler `src/core/learn/presets.js` içindedir.
+Hazır ayar katmanı bu üç alanı zaman dilimine göre ezer
+(`src/core/learn/presets.js`):
+
+| TF | `minSimilarity` | `minMatches` | `minWinRate` | `targetAtr` |
+| --- | --- | --- | --- | --- |
+| 1m | 0,80 | 15 | 0,62 | 1,0 |
+| 5m | 0,80 | 15 | 0,55 | 1,5 |
+| 15m | 0,85 | 15 | 0,55 | 1,5 |
+| 30m | 0,85 | 10 | 0,55 | 2,0 |
+| 1h | 0,85 | 10 | 0,55 | 2,0 |
+| 4h | 0,85 | 8 | 0,55 | 2,0 |
+
 **Bu hazır ayarlar eski indikatörle (MASTER 1 TOUCH) yapılan taramadan gelir ve
-yeni indikatör için yeniden aranmalıdır.** Şimdilik makul bir başlangıç noktası
+yeni indikatör için yeniden aranmalıdır.** 30m, 1h ve 4h satırları o taramada
+bile ölçülmedi, 15 dakikalıktan türetildi. Şimdilik makul bir başlangıç noktası
 olarak duruyorlar; kendi ayarınızı bulmak için Test sekmesindeki yürüyen ileri
 testi farklı eşiklerle çalıştırın ve "Sinyal türüne göre" tablosuna bakın.
+
+Sıra şudur: çekirdek varsayılanı, sonra hazır ayar, en üstte sizin Ayarlar
+ekranından girdiğiniz değer. Tarama, Test ve canlı mod bu birleştirmenin
+**aynısını** kullanır (`presets.resolveCfg`); plan geometrisi ise her zaman
+hafızanın etiketlendiği `outcomeCfg` değerinden gelir.
 
 TP1 ve SL bölge geometrisinden gelir (bkz. 6.3), yüzdelikten değil. `tp1Pct` ve
 `slPct` yalnızca bölge bilgisi olmayan yedek yolda kullanılır.
 
 Kutu oluşumu olayında ek bir kapı vardır: fiyat pivottan `maxFormRiskAtr`
 (3,0 ATR) üstünde uzaklaştıysa sinyal hiç üretilmez ve gerekçesi yazılır.
+Hafıza da böyle bir olayı etiketlememiştir, yani öğrenilmiş bir istatistiği
+zaten yoktur.
 
 Sinyal ancak şu dördü birden sağlanırsa tetiklenir:
 `matchCount >= minMatches`, `winRate >= minWinRate`, `rr >= minRr` ve
-`winRate * rr - (1 - winRate) >= minExpectancy`. Son koşul isabet oranı ile
-risk/ödülü tek ölçüte bağlar: yüksek isabet tek başına yetmez, kurulumun
-matematiği de olumlu olmalıdır.
+`beklenen değer >= minExpectancy`.
+
+**Beklenen değer formülü** risk birimi cinsindendir:
+
+```
+bd = pR * rr - pB + pT * mT
+```
+
+`pR` eşleşmelerde bölgenin tuttuğu oran, `pB` kırılma oranı, `pT` zaman aşımı
+oranı, `mT` ise zaman aşımına uğrayan komşuların ortalama gerçekleşen R'sidir.
+Eski formül (`winRate * rr - (1 - winRate)`) zaman aşımını **tam zarar**
+sayıyordu, yani ufuk sonunda sıfıra yakın kapanan işlemler -1R gibi görünüyordu.
+Bu alanı taşımayan eski hafızalarda eski formüle düşülür. Koşulun anlamı
+değişmedi: yüksek isabet tek başına yetmez, kurulumun matematiği de olumlu
+olmalıdır.
 
 `minRr` varsayılan olarak **kapalıdır**. Eski indikatörle ölçülmüştü: kenardan
 girişte risk ve ödül zaten bölge geometrisine bağlı olduğu için ek bir oran
@@ -694,17 +945,51 @@ uzaklığı (0,35) ve ortalama benzerliğin eşiği ne kadar aştığı (0,25).
 ### 6.8 Yürüyen ileri test
 
 Hafızadaki her olay zaman sırasına konur ve her biri **yalnızca kendinden
-önceki** olaylarla değerlendirilir. Isınma için ilk `warmupEvents` olay
-atlanır, ayrıca sorgu zamanına çok yakın kayıtlar için ambargo uygulanır.
+önceki** olaylarla değerlendirilir.
+
+**Ambargo olay zamanına değil, sonucun belli olduğu zamana bakar.** Bir olayın
+etiketi ufuk dolana kadar bilinemez; dolayısıyla o olay daha erken bir sorguya
+komşu olamaz. Aday havuzu bu yüzden her kaydın `resolvedTime` değerini
+kullanır. Önceden ölçüt olayın başladığı zamandı, yani sonucu henüz belli
+olmayan kayıtlar komşu olarak kullanılabiliyordu.
+
+**Isınmanın iki ölçütü vardır.** `warmupEvents` (varsayılan 500) bir **alt
+sınırdır**; asıl ölçüt `warmupPerBucket` (varsayılan 100), yani havuzda **aynı
+tür ve aynı yönden** en az bu kadar aday görülmüş olmasıdır. Sabit olay sayısı
+tek başına yüksek zaman dilimlerinde testi anlamsız kılıyordu: 4 saatlikte 518
+olayın 500'ü ısınmaya gidiyor, geriye 18 olay kalıyordu.
+
+**Taban aynı türün tabanıdır.** `baselineWinRate`, "hiçbir seçim yapmadan al"
+senaryosunun oranıdır ve ısınma sonrası dönemden, olayın **kendi** etiket
+seviyeleriyle (aynı plan, aynı maliyet) ve tetiklenen işlemlerin **tür
+karışımıyla** ağırlıklandırılarak hesaplanır. Hiç işlem yoksa `null` döner. İki
+türün taban oranı birbirinden çok farklıdır (ölçüldü: oluşum %39-50, dokunuş
+%23-28) ve tetiklenen işlemlerin neredeyse tamamı oluşumdur; karışık taban
+kullanıldığında ekranda +9 ile +13 puanlık katkı görünüyordu, gerçek fark -1,5
+ile +3,6 puandı. Etiketlenmiş tüm olayların ham oranı artık ayrı bir alandadır:
+`rawWinRate`, yalnızca bilgi amaçlı.
+
+**`nofill` olaylar değerlendirilmez.** Ne değerlendirilen olay sayısına ne taban
+sayacına girerler; yalnızca dolum oranı (`fillRate`) için sayılırlar.
 
 Özet çıktısı: toplam olay, tetiklenen sinyal, kazanan, kaybeden, kazanma oranı,
-ATR cinsinden beklenti, kâr faktörü, azami geri çekilme, ortalama R/R,
-`baselineWinRate` ve **iki sinyal türünün ayrı kırılımı** (`byKind`).
+ATR ve R cinsinden beklenti, kâr faktörü, azami geri çekilme, ortalama R/R,
+`baselineWinRate` ve türlere göre katkı, güven aralıkları (Wilson ve bootstrap),
+tabandan farkın p değeri, permütasyon olasılığı, kalibrasyon tablosu, Brier
+skoru, maliyet kırılımı, dolum oranı, değerlendirilen dönem ve örneklem
+yetersizse bir uyarı. Ayrıca **iki sinyal türünün ayrı kırılımı** (`byKind`)
+ve yıllara göre kırılım (`byYear`) vardır; ikisinde de taban aynı kuralla
+hesaplanır.
+
+**Aynı testin iki koşu yolu vardır.** Biri her olayda komşuları baştan hesaplar
+(referans yol), diğeri komşuları önbellekten okur ve eşik taraması içindir.
+İkisi de aynı iç çekirdeği kullanır, yani muhasebe, taban oranı ve özet üretimi
+tek yerde yazılıdır; çıktıları birebir aynıdır ve bu bir testle kilitlenmiştir.
 
 **İşlem maliyeti teste dahildir.** Bu, küçük zaman dilimlerinde sonucu tamamen
 değiştirir. Ölçülen medyan ATR: 1 dakikalıkta tüm geçmişte yalnızca 0,35 dolar,
-5 dakikalıkta 0,94, 15 dakikalıkta 1,87 dolar (2025-2026'da sırasıyla 1,40, 3,92
-ve 6,55 dolar). Yani 1 dakikalıkta ATR biriminde görünen ince bir brüt beklenti,
+5 dakikalıkta 0,94, 15 dakikalıkta 1,87 dolar (2026'da sırasıyla 2,18, 5,97 ve
+9,49 dolar). Yani 1 dakikalıkta ATR biriminde görünen ince bir brüt beklenti,
 tipik bir spread karşısında kolayca eriyebilir.
 
 Maliyet iki şekilde verilebilir:
@@ -737,11 +1022,13 @@ Bunlar açıkça bilinen ve kabul edilmiş sınırlardır:
    ayarlar hâlâ eski indikatörden gelir ve yeniden aranmalıdır. Özellikle kutu
    oluşumu sinyalinin ölçülebilir bir üstünlüğü yoktur.
 3. **Kutu oluşumu sinyalinin riski sabit değildir.** Dokunuş olayında giriş
-   bölge kenarıdır, risk bölge yüksekliğine eşittir ve her kurulumda aynıdır.
-   Oluşum olayında giriş onay barının kapanışıdır; fiyat pivottan ne kadar
-   kaçtıysa risk o kadar büyür. `formTargetRr` hedefi riske orantılayarak
-   risk/ödülü sabitler ve `maxFormRiskAtr` aşırı olanları eler, ama bu türün
-   doğası gereği daha gürültülü olduğunu unutmayın.
+   çoğunlukla bölge kenarına konan limit emirdir, yani risk bölge
+   geometrisinden gelir; karar barının kapanışı bölgenin içinde kaldığında
+   giriş o kapanıştan olur ve risk biraz değişir. Oluşum olayında giriş her
+   zaman onay barının kapanışıdır; fiyat pivottan ne kadar kaçtıysa risk o
+   kadar büyür. `formTargetRr` hedefi riske orantılayarak risk/ödülü sabitler
+   ve `maxFormRiskAtr` aşırı olanları eler, ama bu türün doğası gereği daha
+   gürültülü olduğunu unutmayın.
 4. **Sinyal sayısı eşiklere çok duyarlıdır.** `minSimilarity` değerini 0,80'den
    0,85'e çekmek sinyal sayısını birkaç kat azaltabilir. Eşikleri değiştirdikten
    sonra mutlaka Test sekmesinden yürüyen ileri testi yeniden çalıştırın; az
@@ -753,12 +1040,18 @@ Bunlar açıkça bilinen ve kabul edilmiş sınırlardır:
    niteliğini zayıflattığını bilin.
 6. **Edim ince, maliyet belirleyici.** İşlem maliyeti küçük zaman dilimlerinde
    beklentinin çoğunu yiyebilir. Spreadiniz varsayılandan (fiyatın %0,0068'i)
-   belirgin biçimde yüksekse, ya da kayma (slippage) eklenirse pay hızla erir.
-   Test sekmesinde kendi maliyetinizi girip sonucu yeniden ölçün.
-7. **Limit emir varsayımı.** Dokunuş olayında plan girişi bölge kenarına konan
-   limit emirdir ve dokunuş tanımı gereği fiyat o kenarı geçtiği için emrin
-   dolduğu varsayılır. Gerçekte hızlı hareketlerde kısmi dolum veya hiç dolmama
-   olabilir; test bunu modellemez.
+   belirgin biçimde yüksekse pay hızla erir. Ayarlar ekranındaki
+   **İşlem maliyeti ve ölçüm** bölümünden kendi maliyetinizi girip Test
+   sekmesinden sonucu yeniden ölçün. Özette "maliyet iki kat olsaydı net" ve
+   "maliyet dahil başa baş isabet" satırları bu duyarlılığı gösterir.
+7. **Limit emir modeli gerçekçi ama kısmi dolumu kapsamaz.** Dokunuş olayında
+   karar bar kapanışında verilir, emir bir sonraki bardan itibaren kenara
+   konur ve dolum için fiyatın kenarı 0,05 ATR geçmesi aranır; dolmayan emir
+   `nofill` olur ve işlem sayılmaz (dolum oranı Test sekmesinde raporlanır).
+   Modellenmeyen şeyler: kısmi dolum, sıçramalı (gap) açılışta emrin daha kötü
+   fiyattan dolması ve kayma. Ayarlarda bir `Kayma (ATR)` alanı vardır ama
+   **şu an ölçüme girmiyor**; maliyet yalnızca `costPct` / `costUsd`
+   üzerinden modellenir.
 8. **Hacim kaynağa göre değişir.** HistData ve Polygon tick hacmi verir, Yahoo
    ve Binance gerçek hacim verir, Twelve Data hiç vermez, OKX çoğunlukla sıfır
    verir. Hafıza bir hacim cinsiyle kurulup başka bir hacim cinsiyle canlıya
@@ -771,7 +1064,12 @@ Bunlar açıkça bilinen ve kabul edilmiş sınırlardır:
 10. **Geçmiş performans geleceği garanti etmez.** Sistem geçmişteki
    koşullanmalı olasılıkları ölçer. Piyasa rejimi değişirse (2020 gibi) ölçülen
    oranlar bozulabilir.
-11. **Bu bir karar destek aracıdır, yatırım tavsiyesi değildir.** Emir
+11. **Veri kalitesi ölçümün tavanıdır.** Depoda kalıcı boşluklar olabilir;
+   ölçüldü, 2023-02-20 ile 2023-07-28 arasında yaklaşık 479 tam saat eksik ve
+   bu saatler HistData kaynağında da yok. Böyle bir pencerede kalan olaylar
+   hafızaya alınmaz, yani o dönem fiilen ölçüm dışıdır. Deponuzun durumunu
+   `node scripts/data-doctor.mjs` ile görün.
+12. **Bu bir karar destek aracıdır, yatırım tavsiyesi değildir.** Emir
    göndermez, pozisyon açmaz. Verdiği sayılar geçmiş verinin istatistiğidir,
    gelecek vaadi değildir. Alım satım kararları ve sonuçları kullanıcıya aittir.
 
@@ -792,18 +1090,41 @@ Klasör içeriği:
 
 ```
 Zone Memory/
-  settings.json                    Tüm ayarlar ve API anahtarları
+  settings.json                     Yalnızca sizin değiştirdiğiniz alanlar + settingsVersion
   data/
-    XAUUSD_1m.bin                  Mum deposu (ikili, ZMEM0001 biçimi)
+    XAUUSD_1m.bin                   Mum deposu (ikili, ZMEM0001 biçimi)
     XAUUSD_5m.bin
     XAUUSD_15m.bin
     XAUUSD_1h.bin
     XAUUSD_4h.bin
-    XAUUSD_15m_memory.json         Hafıza üst verisi (olaylar, sonuçlar)
-    XAUUSD_15m_memory.vec          Özellik vektörleri (float32)
-    XAUUSD_15m_memory.protos.json  Prototip kümeleri
-    XAUUSD_15m_memory.zones.json   Kayıtlı bölgeler
+    XAUUSD_1m.proxy.json            Vekil kaynakla doldurulan aralıkların kaydı
+    XAUUSD_1m.dst.json              Yaz saati göçünün yapıldığını gösteren işaret
+    XAUUSD_15m_memory.json          Hafıza üst verisi (olaylar, sonuçlar, ayar izi)
+    XAUUSD_15m_memory.vec           Özellik vektörleri (float32)
+    XAUUSD_15m_memory.protos.json   Prototip kümeleri
+    XAUUSD_15m_memory.zones.json    Kayıtlı bölgeler
+    XAUUSD_15m_memory.signals.json  Son testte üretilen sinyaller
+    XAUUSD_15m_memory.backtest.json Son yürüyen ileri test özeti
+    XAUUSD_15m_memory.live.jsonl    Canlı sinyal günlüğü (JSON Lines)
+    _eski_hafiza_yedek/             Aktarım sonrası taşınan eski hafıza dosyaları
 ```
+
+Birkaç not:
+
+- **`settings.json` yalnızca farkları tutar.** Dokunmadığınız bir alan dosyaya
+  yazılmaz; böylece o alanda hazır ayar ve çekirdek varsayılanı gerçekten
+  devreye girer ve varsayılan değişiklikleri size ulaşır. Dosyada bir de
+  `settingsVersion` alanı bulunur.
+- **`.bin` dışındaki her şey yeniden üretilebilir.** Hafıza, prototipler,
+  sinyaller ve test özeti "Geçmişi Tara" ve Test ile yeniden kurulur.
+- **`.live.jsonl` yeniden üretilemez.** Canlıda gerçekten ne olduğunun kaydıdır
+  ve tarama ile hafıza silme işlemlerinden etkilenmez; yalnızca yeni satır
+  eklenir, dosya hiç yeniden yazılmaz.
+- **`.proxy.json` ve `.dst.json`** bakım betiklerinin işaretleridir (bkz. 3.4).
+  `.dst.json` varken `fix-dst.mjs` yeniden çalışmayı reddeder, çünkü ikinci bir
+  kaydırma seriyi bozar.
+- Dosya adlarındaki `15m` örnektir; her zaman dilimi için ayrı bir takım
+  oluşur.
 
 Klasörü başka bir yere almak isterseniz ortam değişkenlerini kullanın:
 
@@ -818,6 +1139,7 @@ Bu değişkenler hem uygulamada hem de `scripts/` altındaki betiklerde geçerli
 3. bölümdeki veri kurulumunu tekrarlayın. Ayarları da sıfırlamak isterseniz
 `settings.json` dosyasını silin.
 
-**Yedekleme:** `data/` klasörü büyüktür (1m serisi yaklaşık 290 MB) ama
-tamamen yeniden üretilebilir. Yedeklenmeye değer tek dosya `settings.json`
-dosyasıdır.
+**Yedekleme:** `data/` klasörü büyüktür (1m serisi yaklaşık 290 MB) ama büyük
+kısmı yeniden üretilebilir. Yedeklenmeye değen iki şey vardır: `settings.json`
+ve canlı sinyal günlükleri (`*_memory.live.jsonl`). İkincisi canlıda gerçekten
+ne olduğunun tek kaydıdır ve yeniden üretilemez.

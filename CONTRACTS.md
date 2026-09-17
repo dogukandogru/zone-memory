@@ -107,14 +107,22 @@ sorunu dosyanin basindaki yorumda belirt.
  */
 
 /**
- * Etiketlenmis sonuc.
+ * Etiketlenmis sonuc. Tam alan listesi icin bolum 10'a bakin.
  * @typedef {Object} Outcome
- * @property {'respect'|'break'|'timeout'} outcome
+ * @property {'respect'|'break'|'timeout'|'nofill'} outcome
  * @property {boolean} success        outcome === 'respect'
+ * @property {boolean} filled         Limit emir doldu mu ('nofill' ise false)
+ * @property {'close'|'zoneEdge'|'limitAfterClose'} entryMode
  * @property {number} mfeAtr          Lehte azami hareket, ATR biriminde
  * @property {number} maeAtr          Aleyhte azami hareket, ATR biriminde
  * @property {number} fwdReturnPct    Ufuk sonundaki yonlu yuzde getiri
  * @property {number} barsToOutcome   Sonuca kac barda ulasildi, -1 ise timeout
+ * @property {number} barsToFill      Emrin kac barda doldugu (0 = olay bari)
+ * @property {number} resolvedBar     Sonucun BELLI OLDUGU bar (ambargo bunu kullanir)
+ * @property {number} entryPrice
+ * @property {number} exitPrice       respect: hedef, break: gecersizlik,
+ *                                    timeout: ufuk sonu kapanisi
+ * @property {number} realizedR       Cikisin risk birimi cinsinden karsiligi
  * @property {number} atr
  */
 
@@ -153,7 +161,11 @@ src/core/learn/cluster.js         A5
 src/core/learn/memory.js          A6
 src/core/learn/signal.js          A6
 src/core/learn/liveEvents.js      A6
+src/core/learn/presets.js         A6
 src/core/learn/backtest.js        A7
+src/core/learn/candcache.js       A7
+src/core/learn/stats.js           A7
+src/core/data/doctor.js           A8
 src/core/data/provider.js         A8
 src/core/data/yahoo.js            A8
 src/core/data/twelvedata.js       A8
@@ -179,7 +191,14 @@ src/renderer/panels.js            A10
 src/renderer/tradingview.html     A10
 scripts/import-legacy.mjs         A11
 scripts/fetch-history.mjs         A11
+scripts/repair-proxy.mjs          A11
+scripts/fix-dst.mjs               A11
+scripts/data-doctor.mjs           A11
+scripts/measure-all.mjs           A11
+scripts/userdata-path.mjs         A11
+scripts/stamp-build.mjs           A11
 README.md                         A11
+CONTRACTS.md                      A11
 test/*.test.js                    A12
 ```
 
@@ -465,23 +484,32 @@ aktif kutu listesi `maxZones` ile sinirli oldugu icin dogrusal tarama yeterlidir
 
 ## 10. `src/core/learn/outcome.js` (A4)
 
-> Bu bolum ilk insadan SONRA guncellendi. Ilk surumdeki tek mod (giris +- N ATR)
-> bolgeden bagimsiz oldugu icin "bolge calisti mi" sorusunu olcmuyordu ve gercek
-> veride yazi-tura uretiyordu (15m %48.0, 5m %50.4). Ayrica sinyal plani stop'u
-> MAE yuzdeliginden turetiyordu ve 30 ATR gibi anlamsiz degerler cikiyordu.
+> Bu bolum ilk insadan SONRA iki kez guncellendi.
+>
+> 1. Ilk surumdeki tek mod (giris +- N ATR) bolgeden bagimsiz oldugu icin
+>    "bolge calisti mi" sorusunu olcmuyordu ve gercek veride yazi-tura
+>    uretiyordu. (Parantez icindeki 15m %48.0 / 5m %50.4 oranlari ESKI
+>    indikatorle olculdu, yeni indikator icin dogrulanmadi.) Ayrica sinyal plani
+>    stop'u MAE yuzdeliginden turetiyordu ve 30 ATR gibi anlamsiz degerler
+>    cikiyordu.
+> 2. Dokunus olayindaki giris modeli degisti: giris artik karar barinin ICINDE
+>    degil, kapanisindan SONRA gercekleser (asagida). Eski model bar ici ileriye
+>    bakma iceriyordu.
 
 ```js
 const DEFAULT_OUTCOME_CFG = {
-  mode: 'zone',          // 'zone' (varsayilan) | 'atr' (eski)
+  mode: 'zone',              // 'zone' (varsayilan) | 'atr' (eski)
   horizonBars: 48,
-  targetAtr: 1.0,        // bolge modu: yakin kenardan hedef uzakligi
-  breakBufferAtr: 0.25,  // bolge modu: uzak kenardan tasma toleransi
-  minTargetAtr: 0.25,    // hedef en az bu kadar uzakta olur
-  entryMode: 'zoneEdge', // dokunus olayinda giris: 'zoneEdge' | 'close'
-  formTargetRr: 1.0,     // form olayinda hedef, riskin bu kati kadar uzakta
-  maxFormRiskAtr: 3.0,   // form olayinda kabul edilen azami risk (ATR)
-  tpAtr: 1.0,            // atr modu
-  slAtr: 1.0,            // atr modu
+  touchEntryMode: 'afterClose', // dokunus girisi: 'afterClose' | 'zoneEdge' (eski)
+  fillOffsetAtr: 0.05,       // limit emrin dolmus sayilmasi icin gereken pay
+  targetAtr: 1.0,            // bolge modu: yakin kenardan hedef uzakligi
+  breakBufferAtr: 0.25,      // bolge modu: uzak kenardan tasma toleransi
+  minTargetAtr: 0.25,        // hedef en az bu kadar uzakta olur
+  entryMode: 'zoneEdge',     // yalnizca 'close' verilirse baglayici (asagida)
+  formTargetRr: 1.0,         // form olayinda hedef, riskin bu kati kadar uzakta
+  maxFormRiskAtr: 3.0,       // form olayinda kabul edilen azami risk (ATR)
+  tpAtr: 1.0,                // atr modu
+  slAtr: 1.0,                // atr modu
 }
 
 module.exports = {
@@ -495,33 +523,62 @@ module.exports = {
 
 | | `kind = 'touch'` | `kind = 'form'` |
 | --- | --- | --- |
-| giris | bolgenin YAKIN kenari, limit emir | onay barinin KAPANISI |
+| karar ani | dokunus barinin KAPANISI | onay barinin KAPANISI |
+| giris | kapanistan SONRA (asagidaki uc dal) | onay barinin KAPANISI |
 | gecersizlik | bolgenin UZAK kenari -/+ `breakBufferAtr * atr` | ayni |
 | hedef | yakin kenardan `targetAtr * atr` | giristen `formTargetRr * risk` |
 | odul | her zaman `targetAtr` | her zaman `formTargetRr` risk birimi |
 
-Dokunus olayinda giris kenardadir cunku dokunus tanimi geregi fiyat o kenari
-gecmistir, yani limit emir dolar. Form olayinda fiyat kutunun icinde DEGILDIR,
-oraya donmeyebilir; bu yuzden giris kapanistir ve risk kurulumdan kuruluma
-degisir. Hedef sabit bir ATR mesafesi olsaydi risk/odul 0.3 ile 2.0 arasinda
-savrulur ve "gecmiste bu yapi %70 tuttu" cumlesi karsilastirilamaz seylerin
-ortalamasi olurdu. `formTargetRr` bunu tek eksene indirger: tum form olaylari
-ayni risk/odul oranini tasir, aralarindaki tek fark isabet oranidir.
+**Dokunus girisi: `touchEntryMode = 'afterClose'` (varsayilan).** Karar dokunus
+barinin kapanisinda verilir, giris o kapanistan SONRA gelir. Kapanisin konumu
+uc daldan birini secer (`zoneLevels` icinde, `entryMode` alaninda doner):
+
+1. kapanis kenarin LEHTE tarafinda -> `entryMode = 'limitAfterClose'`: bir
+   SONRAKI bardan itibaren kenara limit emir. Dolum kosulu fiyatin kenari
+   `fillOffsetAtr * atr` kadar gecmesidir (kenara tam degen fiyat gercekte
+   doldurmayabilir).
+2. kapanis bolgenin ICINDE -> `entryMode = 'close'`: kapanistan girilir.
+3. kapanis gecersizligin OTESINDE -> `zoneLevels` `null` doner, olay islem
+   uretmez.
+
+Eski `'zoneEdge'` modu girisi dokunus barinin ICINDE kenardan dolmus sayardi.
+Bu bar ici ILERIYE BAKMA idi: karar bar kapanisindaki bilgiyle (fitil reddi,
+penetration, hacim) veriliyor ama giris o bilgi olusmadan onceki bir fiyattan
+yaziliyordu. Yalnizca karsilastirma icin korundu. `entryMode: 'close'`
+verilirse dokunus olayinda da kapanistan girilir.
+
+**Dolmayan emir: `outcome = 'nofill'`.** Limit emir ufuk boyunca dolmazsa (ya
+da dolmadan hedefe gidilirse) ortada islem yoktur. Kayit hafizada KALIR ama:
+komsu havuzuna girmez (`similarity.js` eler), isabet oranina ve taban hesabina
+girmez (`backtest.js` `total` ve taban sayacina almaz), yalnizca dolum orani
+icin sayilir (`summary.nofill`, `summary.fillRate`).
+
+Form olayinda fiyat kutunun icinde DEGILDIR, oraya donmeyebilir; bu yuzden
+giris kapanistir ve risk kurulumdan kuruluma degisir. Hedef sabit bir ATR
+mesafesi olsaydi risk/odul 0.3 ile 2.0 arasinda savrulur ve "gecmiste bu yapi
+%70 tuttu" cumlesi karsilastirilamaz seylerin ortalamasi olurdu.
+`formTargetRr` bunu tek eksene indirger: tum form olaylari ayni risk/odul
+oranini tasir, aralarindaki tek fark isabet oranidir.
 
 `formTargetRr = 0` verilirse form olayinda da sabit `targetAtr` mesafesi
 kullanilir.
 
-**Form olayinda iki eleme.** `zoneLevels` su iki durumda `null` doner ve olay
-hafizaya HIC girmez (`noLabel` olarak sayilir):
-1. Giris zaten gecersizlik tarafindaysa (pivot onaylanana kadar fiyat kutunun
-   obur tarafina gecmis).
-2. Risk `maxFormRiskAtr` esigini asiyorsa (sivri bir fitil dibinden sonra fiyat
-   cok uzaga kacmis). Boyle bir kurulum gercekte islenmez; hafizaya girerse hem
-   kendi istatistigini bozar hem plan hedeflerini sisirir. `0` sinirı kapatir.
+**`zoneLevels` ne zaman `null` doner.** Bu durumlarda olay ETIKETLENMEZ ve
+hafizaya HIC girmez (`memory.js` `noLabel` ve `formRiskBlocked` olarak sayar):
+1. Giris zaten gecersizlik tarafindaysa. Form olayinda bu, pivot onaylanana
+   kadar fiyatin kutunun ta obur tarafina gecmis olmasidir; dokunus olayinda
+   ise karar barinin kapanisinin gecersizligin otesinde kalmasidir.
+2. Form olayinda risk `maxFormRiskAtr` esigini asiyorsa (sivri bir fitil
+   dibinden sonra fiyat cok uzaga kacmis). Boyle bir kurulum gercekte islenmez;
+   hafizaya girerse hem kendi istatistigini bozar hem plan hedeflerini sisirir.
+   `0` verilirse sinir uygulanmaz.
+3. ATR veya bolge kenarlari sonlu bir sayi degilse.
 
-Ayrica dokunus olayina ozgu kural: giris kenardan limit emirle OLAY BARI icinde
-dolar, o bar gecersizligi de gorduyse bar ici sirayi bilemedigimiz icin ANINDA
-kirilma yazilir. Form olayinda boyle bir kural yoktur, emir bar kapaninca dolar.
+Ayrica dolum barina ozgu kural: limit emrin doldugu bar gecersizligi de
+gorduyse, bar ici sirayi bilemedigimiz icin MUHAFAZAKAR davranilir ve ANINDA
+kirilma yazilir (`barsToOutcome = dolum bari - olay bari`). Eski `'zoneEdge'`
+modunda ayni kural OLAY BARININ kendisi icin isler. Form olayinda boyle bir
+kural yoktur, emir bar kapaninca dolar.
 
 **Bolge modu (varsayilan).** Destege yapilan dokunus icin:
 `gecersizlik = zoneBottom - breakBufferAtr * atr`,
@@ -535,12 +592,31 @@ stop'u tam olarak bu gecersizlik seviyesidir (`signal.js` `useZoneStop`),
 yani "bolge kirildi" ile "stop vuruldu" ayni olaydir.
 
 **Outcome alanlari:** `outcome, success, mfeAtr, maeAtr, mfeExitAtr, maeExitAtr,
-fwdReturnPct, barsToOutcome, atr, mode, targetPrice, invalidPrice, riskAtr, rewardAtr`.
+fwdReturnPct, barsToOutcome, barsToFill, resolvedBar, atr, mode, entryMode,
+filled, entryPrice, targetPrice, invalidPrice, exitPrice, realizedR, riskAtr,
+rewardAtr`. `'nofill'` kaydi ayrica `missedTarget` tasir (emir dolmadan hedefe
+gidildi mi).
+
+`outcome` degerleri: `'respect' | 'break' | 'timeout' | 'nofill'`.
 
 `mfeAtr` / `maeAtr` ufkun TAMAMINI olcer (ozellik olarak degerli).
 `mfeExitAtr` / `maeExitAtr` yalnizca SONUCA kadar olan kismi olcer; plan
 hedefleri ve yuruyen ileri testin kazanc kurali bunlari kullanir, cunku stop
 vurulduktan sonraki hareket gercekte yakalanamaz.
+
+**`exitPrice` ve `realizedR`: zaman asimi TAM STOP ZARARI DEGILDIR.** Cikis
+fiyati `respect` icinde hedef, `break` icinde gecersizlik, `timeout` icinde
+UFUK SONU KAPANISIDIR. `realizedR` bu cikisin risk birimi cinsinden
+karsiligidir: `respect` icin `odul/risk`, `break` icin `-1`, `timeout` icin
+ufuk sonu kapanisindan hesaplanan deger. Zaman asimi bir donem `-1R`
+sayiliyordu ve formda risk 1.2-2.8 ATR oldugu icin her timeout'a buyuk bir
+sahte zarar yaziyordu. Test, taban orani ve canli gunluk bu tek tanimi
+kullanir (`backtest.tradeResult`).
+
+**`resolvedBar`: sonucun BELLI OLDUGU bar.** Sonuc gorulduyse o bar, aksi
+halde ufuk sonu. `memory.js` bunu `resolvedTime` alanina cevirir ve ambargo
+(aday havuzu) olay zamanina degil BU zamana bakar: sonucu henuz cozulmemis bir
+olay baska bir olaya komsu olamaz.
 
 ## 11. `src/core/learn/features.js` (A4)
 
@@ -557,6 +633,9 @@ const CTX_NAMES = [
 ]
 
 module.exports = {
+  // Ozellik surumu. CTX_NAMES veya hesaplama kurallari degisince ARTIRILIR ve
+  // hafiza dosyasina yazilir (ayar izinin parcasi).
+  FEATURE_VERSION,   // = 2
   SHAPE_LEN, RET_LEN, WINDOW_BARS, CTX_NAMES,
   /**
    * @param {Series} s
@@ -576,8 +655,10 @@ Hesaplama kurallari:
   ortalama ile yumusatilir (baslangicta pencere kisaltilir), sonra `SHAPE_LEN`
   kovaya bolunup her kovanin ortalamasi alinir, sonra min-max ile 0..1'e
   normalize edilir. Duz seride (max == min) tum degerler 0.5 olur.
-  (Bu ayar onceki projede olculdu: ham 32 barlik vektore gore sinyal basina
-  yaklasik 3 kat daha fazla anlamli eslesme uretti.)
+  (Bu ayar ONCEKI PROJEDE, yani ESKI indikatorle (MASTER 1 TOUCH) olculdu: ham
+  32 barlik vektore gore sinyal basina yaklasik 3 kat daha fazla anlamli
+  eslesme uretmisti. Yeni indikatorde bu karsilastirma TEKRARLANMADI; yontem
+  korundu, sayi tasinamaz.)
 - `ret`: son `RET_LEN + 1` kapanisin log getirileri, z-score normalize.
   Standart sapma 1e-12'den kucukse hepsi 0.
 - `ctx`: sirasiyla
@@ -623,7 +704,7 @@ module.exports = {
    * @param {Features} query
    * @param {{events:MemoryEvent[]}} memory
    * @param {{k:number, direction:string, kind:string, excludeWithinSec:number,
-   *          beforeTime:number|null, weights:object}} opts
+   *          queryTime:number|null, beforeTime:number|null, weights:object}} opts
    * @returns {Array<{event:MemoryEvent, shapeSim, ctxSim, dtwSim, similarity}>}
    *          Benzerlige gore azalan sirali, en fazla k adet.
    */
@@ -632,8 +713,15 @@ module.exports = {
 ```
 
 `excludeWithinSec`: sorgu zamanina bu kadar yakin kayitlar elenir (komsu
-dislama; ayni kurulumun kendisiyle eslesmesini onler). `beforeTime` verilirse
-yalnizca o zamandan ONCEKI kayitlar aday olur (yuruyen ileri test icin sart).
+dislama; ayni kurulumun kendisiyle eslesmesini onler). Features nesnesi zaman
+tasimadigi icin sorgunun zamani ayrica `opts.queryTime` ile gecilir; verilmezse
+bu filtre UYGULANMAZ. `beforeTime` verilirse yalnizca o zamandan ONCEKI
+kayitlar aday olur (yuruyen ileri test icin sart).
+
+**Aday havuzu kurali.** Bir kayit ancak su uc kosulu birden saglarsa aday olur:
+`outcome` tanimli, `outcome !== 'nofill'` ve `features.shape` mevcut.
+`'nofill'` olaylarda limit emir hic dolmadi, yani ortada islem yoktur: ne
+kazanc ne kayip. Havuzda tutulsalardi isabet orani yanlis hesaplanirdi.
 
 `kind`: yalnizca ayni turdeki olaylar aday olur. Kutunun DOGDUGU an ile fiyatin
 ona GERI DONDUGU an iki farkli kurulumdur; girisleri, riskleri ve tipik
@@ -696,7 +784,31 @@ module.exports = {
 
 `stats` icinde en az: `bars, zonesCreated, zonesMerged, totalEvents, formEvents,
 touchEvents, formStored, touchStored, firstTouches, qualified, labeled,
-respected, broken, timeout, scoreHist`.
+respected, broken, timeout, stored, noFeatures, noLabel, noLabelHorizon,
+formRiskBlocked, lowCoverage, avgMfeAtr, avgMaeAtr, rawWinRate, scoreHist,
+firstTime, lastTime, indicator`.
+
+**Olaylarin nereye gittigini gosteren sayaclar.** "Olaylarin %40'i nereye
+gitti" sorusu tek bir `noLabel` sayacinda cevapsiz kaliyordu, bu yuzden ayrildi:
+
+| alan | anlami |
+| --- | --- |
+| `noFeatures` | Ozellik penceresi yetmedi (bar < 32) |
+| `noLabel` | `labelTouch` null dondu (toplam) |
+| `noLabelHorizon` | Ufuk serinin SONUNA sigmadi. Veri gelince kendiliginden cozulur |
+| `formRiskBlocked` | Kurulum gercekte islenemez: form olayinda risk `maxFormRiskAtr` esigini asti, ya da giris zaten gecersizlik tarafinda kaldi |
+| `lowCoverage` | Olayin penceresinde GERCEK veri boslugu var, olay hafizaya alinmadi |
+
+**Dusuk kapsama korumasi.** Olayin penceresinde (50 bar oncesi, `horizonBars`
+sonrasi) piyasanin ACIK oldugu bir saatte eksik bar varsa olay hafizaya
+ALINMAZ, yalnizca `lowCoverage` olarak sayilir. Hafta sonu ve gunluk ara
+(New York 17:00-18:00) zaman atlamasi yaratir ama veri boslugu DEGILDIR; bu
+ayrim kural tabanli piyasa takvimiyle yapilir (`session.createMarketCalendar`).
+Ayrim yapilmadiginda 15 dakikalikta 6890 olayin 6485'i atiliyordu.
+
+**Hafizaya yazilan her olay `resolvedTime` tasir.** `outcome.resolvedBar + 1`
+barinin zamanidir. Ambargo ve aday havuzu olay zamanina degil BUNA bakar:
+sonucu henuz belli olmamis bir olay baska bir olaya komsu olamaz.
 
 **Artimli taramada tekrar anahtari.** `extendMemory` seriyi bastan degil, son
 olayin epeyce oncesinden yeniden tarar ve yeniden taramada kimlikler sifirdan
@@ -707,9 +819,21 @@ asil koruma ise "hafizadaki son olay zamanindan SONRAKI olaylar" filtresidir.
 
 ```js
 const DEFAULT_SIGNAL_CFG = {
-  k: 25, minSimilarity: 0.80, minMatches: 5, minWinRate: 0.60,
-  excludeWithinSec: 86400 * 3, weights: { shape: 0.60, ctx: 0.25, dtw: 0.15 },
+  k: 25,
+  minSimilarity: 0.80,
+  minMatches: 15,
+  minWinRate: 0.62,
+  excludeWithinSec: 86400 * 3,
+  weights: { shape: 0.60, ctx: 0.25, dtw: 0.15 },
   tp1Pct: 40, tp2Pct: 70, slPct: 75,
+  // Stop bolgenin gecersizlik seviyesinden alinir: "bolge kirildi" ile
+  // "stop vuruldu" ayni olay. false yapilirsa eski davranis (MAE yuzdeligi).
+  useZoneStop: true,
+  // Plan geometrisini ureten etiket ayari. resolveCfg bunu HAFIZANIN
+  // outcomeCfg'sinden doldurur (bkz. bolum 18, presets.resolveCfg).
+  outcomeCfg: null,
+  minRr: 0.0,          // asgari risk/odul, 0 = kapali
+  minExpectancy: 0.10, // asgari beklenen deger, risk birimi cinsinden
 }
 
 module.exports = {
@@ -719,9 +843,19 @@ module.exports = {
    * YALNIZCA ayni turdeki (`event.kind`) gecmis olaylarla yapilir.
    * Esikleri gecemezse yine bir nesne doner ama `fired: false` olur; boylece
    * arayuz "neden sinyal olmadi" bilgisini gosterebilir.
+   * `findCandidates` + `decideFromCandidates` bilesimidir.
    * @returns {Signal}
    */
   evaluateTouch(event, features, memory, prototypes, cfg, beforeTime),
+  /** ADIM 1 (PAHALI): hafizadan komsulari bulur. Sonuc ESIKLERDEN BAGIMSIZDIR,
+   *  bu yuzden onbellege alinabilir. */
+  findCandidates(event, features, memory, cfg, beforeTime),
+  /** ADIM 2 (UCUZ, saf): verilen aday listesinden karari ve plani uretir.
+   *  Hafizaya erismez. Karar mantigi BASKA HICBIR YERDE tekrar yazilmaz. */
+  decideFromCandidates(event, candidates, levels, cfg, ek),
+  /** Yon ve tur tanimlari (aday havuzlarini bolen kural iki modulde
+   *  ayri yazilamaz). */
+  yonBelirle(event), turBelirle(event),
 }
 
 /**
@@ -752,22 +886,69 @@ module.exports = {
  * @property {string} prototypeLabel
  * @property {Array<{id,time,similarity,success,mfeAtr,maeAtr,price}>} topMatches
  * @property {string[]} reasons         Turkce aciklamalar, sinyal neden olustu/olusmadi
+ * @property {number} atr
+ * @property {number} tp1Atr
+ * @property {number} tp2Atr
+ * @property {number} slAtr
+ * @property {number} expectancy        Risk birimi cinsinden beklenen deger
+ * @property {number} respectRate       Eslesmelerde tutma orani (pR)
+ * @property {number} breakRate         Kirilma orani (pB)
+ * @property {number} timeoutRate       Zaman asimi orani (pT)
+ * @property {number} timeoutAvgR       Zaman asimina ugrayan komsularin
+ *                                      ortalama gerceklesen R'si (mT)
  */
 ```
 
 Plan hesabi:
 - Yalnizca `similarity >= minSimilarity` olan eslesmeler kullanilir.
+  `outcome === 'nofill'` adaylar ayrica elenir (ortada islem yok).
 - `winRate` = bu eslesmelerdeki `success` orani.
-- `tp1` = eslesmelerin `mfeAtr` degerlerinin `tp1Pct`. yuzdeligi (ATR carpani),
-  `tp2` = `tp2Pct`. yuzdeligi, `sl` = `maeAtr` degerlerinin `slPct`. yuzdeligi.
-  Fiyata cevrim: `entry + yon * carpan * atr`. SL icin ters yon.
+- **Birincil plan bolge geometrisinden gelir** (`useZoneStop`, varsayilan
+  acik): `tp1` = `zoneLevels().target`, `sl` = `zoneLevels().invalid`,
+  `entry` = `zoneLevels().entry`. Bunlar `outcome.js`'in etiket uretirken
+  kullandigi seviyelerin AYNISIDIR, yani "bolge tuttu" ile "TP1 vuruldu" ayni
+  olaydir. `tp2` yine eslesmelerin dagilimindan gelir ve yalnizca uzatma
+  hedefi olarak bilgilendiricidir.
+- Yedek yol (bolge bilgisi yoksa veya `useZoneStop` kapaliysa):
+  `tp1` = eslesmelerin `mfeExitAtr` degerlerinin `tp1Pct`. yuzdeligi (ATR
+  carpani), `tp2` = `tp2Pct`. yuzdeligi, `sl` = `maeExitAtr` degerlerinin
+  `slPct`. yuzdeligi. Alan yoksa `mfeAtr` / `maeAtr` kullanilir. Fiyata
+  cevrim: `entry + yon * carpan * atr`, SL icin ters yon.
 - `sl` carpani en az 0.3 ATR olacak sekilde tabanlanir.
 - `rr = (tp1 - entry) / (entry - sl)` mutlak degerle.
 - `confidence = 0.4 * min(matchCount/20, 1) + 0.35 * |winRate - 0.5| * 2 + 0.25 * ((avgSimilarity - minSimilarity) / (1 - minSimilarity))`,
   0..1 arasina kirpilir.
-- `fired = matchCount >= minMatches && winRate >= minWinRate`.
+- **Beklenen deger (risk birimi):** `expectancy = pR * rr - pB + pT * mT`.
+  `pR` tutma, `pB` kirilma, `pT` zaman asimi orani; `mT` zaman asimina ugrayan
+  komsularin ortalama `realizedR` degeri. Eski formul
+  (`winRate * rr - (1 - winRate)`) zaman asimini TAM ZARAR sayiyordu; bu alani
+  tasimayan eski hafizada hala ona dusulur (`matchCount === 0` hali).
+- `fired = matchCount >= minMatches && winRate >= minWinRate &&
+  rr >= minRr && expectancy >= minExpectancy && !formRiskBlocked`.
+  `formRiskBlocked`, form olayinda `zoneLevels` null dondugunde (fiyat
+  pivottan `maxFormRiskAtr` esiginden uzaga kacti) true olur: hafiza boyle bir
+  olayi etiketlemedi bile, dolayisiyla ogrenilmis bir istatistigi yoktur.
 - `reasons` her zaman doldurulur, ornegin `'12 benzer kayit bulundu, ortalama benzerlik 0.87'`,
-  `'Yeterli benzer kayit yok (3 < 5)'`.
+  `'Yeterli benzer kayit yok (3 < 15)'`.
+
+**`evidence` (kanit rozeti).** `signal.js` bu alani URETMEZ; canli akista
+`engine:live-tick` ekler (bkz. bolum 18). Son `engine:backtest` ciktisinin
+`<ad>_memory.backtest.json` icine yazilmis tur bazli kanit ozetidir:
+
+```js
+signal.evidence = {
+  n,        // bu turden kac islem olculdu
+  netR,     // net beklenti, R biriminde (bootstrap ortalamasi)
+  netRLo,   // %95 aralik alt siniri
+  netRHi,   // %95 aralik ust siniri
+  liftPts,  // isabetin ayni turun tabanina gore farki (puan)
+  status,   // 'kanitli' (netRLo > 0) | 'zayif' (netR > 0) | 'kanitlanmadi'
+}
+```
+
+Olcum dosyasi yoksa ya da hafizanin `cfgHash` izi olcumdekinden farkliysa
+`status: 'kanitlanmadi'` kabul edilir. `'kanitli'` disindaki her durumda
+`reasons` dizisine bir uyari satiri eklenir.
 
 ### `src/core/learn/liveEvents.js` (A6)
 
@@ -797,33 +978,108 @@ module.exports = {
 ## 16. `src/core/learn/backtest.js` (A7)
 
 ```js
+const DEFAULT_BACKTEST_CFG = {
+  warmupEvents: 500,      // ALT SINIR (asil olcut warmupPerBucket)
+  warmupPerBucket: 100,   // tur ve YON basina asgari aday
+  embargoSec,             // candcache.DEFAULT_EMBARGO_SEC
+  signalCfg: null,
+  costUsd: 0,
+  costPct: 0.000068,      // fiyata oranli maliyet; > 0 ise costUsd yerine bu
+}
+
 module.exports = {
+  DEFAULT_BACKTEST_CFG,
   /**
-   * Yuruyen ileri test. Her olay yalnizca KENDINDEN ONCEKI hafizayla
-   * degerlendirilir; ileriye bakma kesinlikle yasak.
+   * Yuruyen ileri test (REFERANS YOL: her olayda kNN bastan hesaplanir).
+   * Her olay yalnizca KENDINDEN ONCEKI hafizayla degerlendirilir; ileriye
+   * bakma kesinlikle yasak.
    * @param {{events:MemoryEvent[]}} memory
    * @param {{signalCfg:object, warmupEvents:number, embargoSec:number}} cfg
-   * @returns {{trades:Trade[], summary:Summary, byYear:Array, equity:Array<{time,value}>}}
+   * @returns {{trades:Trade[], summary:Summary, byYear:Array, equity:Array<{time,value,valueR}>}}
    */
   runBacktest(memory, prototypes, cfg, onProgress),
+  /** AYNI testi, komsulari onbellekten okuyarak. Esik taramasi icindir;
+   *  ciktisi runBacktest ile birebir aynidir (ikisi de ayni ic cekirdegi
+   *  kullanir, muhasebe tek yerde yazilmistir). */
+  runBacktestFromCache(memory, cache, prototypes, cfg, onProgress),
+  /** BIR ISLEMIN SONUCU, tek tanim (asagida). */
+  tradeResult(event, signal, costCfg),
+  /** TABAN ISLEMI: ayni olay, ayni maliyet, olayin KENDI etiket seviyeleri. */
+  baseResult(event, costCfg),
 }
 ```
 
-`Summary` icinde: `total, fired, wins, losses, winRate, expectancyAtr,
-profitFactor, maxDrawdownAtr, avgRr, baselineWinRate, byKind`
-(baseline = etiketlenmis TUM olaylarin ham basari orani; sistemin katma degerini
-gosterir).
+**Tek kazanc tanimi: `tradeResult`.** Test, taban orani, onbellekli test ve
+canli gunluk hep bu fonksiyonu cagirir; kazanc kurali bir donem birkac yerde
+ayri yazilmisti ve zaman asimi hesabi bunlarin birinde yanlisti.
+- Kazanc: olayin etiketi `'respect'` VE olayin SONUCA KADARKI lehte hareketi
+  (`mfeExitAtr`) planin `tp1Atr` carpanina ulasmis olmali. Plan TP1'i etiketin
+  hedefinden uzaga koyduysa o emir gercekte dolmazdi.
+- Zaman asimi TAM STOP ZARARI DEGILDIR: `realizedR * riskAtr` ile ufuk sonu
+  kapanisindan degerlenir ve `[-slAtr, tp1Atr]` araligina kirpilir.
+- Maliyet ATR birimine cevrilip dusulur: `costPct > 0` ise `fiyat * costPct`,
+  degilse `costUsd`. `pnlAtr = grossAtr - costAtr`.
+
+`baseResult`, ayni fonksiyonu olayin KENDI `entryPrice / targetPrice /
+invalidPrice` degerleriyle cagirir: "hicbir secim yapmadan bu olayi al"
+senaryosu, ayni plan ve ayni maliyetle.
+
+**Isinma iki olcutludur.** `warmupEvents` bir ALT SINIRDIR; asil olcut
+`warmupPerBucket`, yani havuzda AYNI TUR ve AYNI YONDEN en az bu kadar aday
+gorulmus olmasi. Sabit olay sayisi tek basina yuksek zaman dilimlerinde testi
+anlamsiz kiliyordu: 4h'de 518 olayin 500'u isinmaya gidiyor, geriye 18 olay
+kaliyordu.
+
+**Ambargo sonucun belli oldugu zamana gore isler.** Aday havuzu
+`ev.time - embargoSec` sinirini `resolvedTime` ile karsilastirir, olay zamaniyla
+DEGIL: bir olayin etiketi ufuk dolana kadar bilinemez, dolayisiyla o olay daha
+erken bir sorguya komsu olamaz.
+
+**`'nofill'` olaylar degerlendirilmez.** Ne `total`'a ne taban sayacina
+girerler; yalnizca `nofill` ve `fillRate` icin sayilirlar.
+
+`Summary` alanlari:
+
+| grup | alanlar |
+| --- | --- |
+| temel | `total, fired, wins, losses, winRate, expectancyAtr, profitFactor, maxDrawdownAtr, avgRr, totalPnlAtr, labeled` |
+| taban ve katki | `baselineWinRate, baselineExpectancyAtr, edgePts, edgeNetAtr, rawWinRate, edgeProven` |
+| istatistik | `winRateCI, baselinePValue, expectancyCI, expectancyRCI, permHitP, permNetP, calibration, brier` |
+| R birimi | `expectancyR, totalPnlR, maxDrawdownR` |
+| maliyet | `costUsd, costPct, grossExpectancyAtr, costPerTradeAtr, grossPnlAtr, costTotalAtr, costShare, expectancyAtrDoubleCost, breakEvenWinRate` |
+| dolum ve sonuc | `timeouts, timeoutPnlAtr, nofill, fillRate` |
+| kapsam | `warmupEvents, warmupPerBucket, embargoSec, evalFrom, evalTo, warning` |
+| tur kirilimi | `byKind` |
+
+**`baselineWinRate` ARTIK AYNI TURUN TABANIDIR.** Isinma sonrasi donemden,
+olayin KENDI etiket seviyeleriyle ve tetiklenen islemlerin TUR KARISIMIYLA
+agirliklanarak hesaplanir. Hic islem yoksa `null` doner. Iki olay turunun taban
+orani birbirinden cok farkli (olculdu: form %39-50, dokunus %23-28) ve
+tetiklenen islemlerin neredeyse tamami form; karisik taban kullanildiginda
+ekranda +9 ile +13 puan katki gorunuyordu, gercek fark -1.5 ile +3.6 puandi.
+Etiketlenmis TUM olaylarin ham orani artik ayri bir alandadir: `rawWinRate`
+(yalnizca bilgi amacli, taban olarak KULLANILMAZ).
 
 `byKind`, iki sinyal turunun ayri kirilimidir:
-`[{kind, total, fired, wins, losses, winRate, expectancyAtr, totalPnlAtr}]`.
+`[{kind, total, fired, wins, losses, winRate, expectancyAtr, totalPnlAtr,
+baseN, baselineWinRate, baselineExpectancyAtr, edgePts, edgeNetAtr, timeouts,
+timeoutPnlAtr, nofill, winRateCI, expectancyRCI, baselinePValue, lowSample}]`.
 Toplam rakam, turlerden birinin digerini tasidigi durumlari gizler; hangi
 sinyalin gercekten calistigina bu tabloya bakilarak karar verilir.
-`Trade` kayitlari da `kind` alani tasir.
+`expectancyRCI` kanit rozetinin kaynagidir (alt sinir sifirin ustundeyse
+"kanitli"). `Trade` kayitlari da `kind` alani tasir.
 
-`equity`: her islemde `success ? +tp1Atr : -slAtr` birikimli toplami.
+`byYear` satirlari: `{year, fired, wins, losses, winRate, expectancyAtr,
+baselineWinRate, baselineExpectancyAtr, baseN, edgePts, edgeNetAtr}`. Yilin
+tabani da O YIL tetiklenen islemlerin tur karisimiyla agirliklanir.
+
+`equity`: her islemin `pnlAtr` degerinin birikimli toplami
+(`{time, value, valueR}`). Nokta olayin BASLADIGI zamana degil, sonucun belli
+oldugu zamana (`resolvedTime`) yazilir: kar islem acilisinda degil kapanisinda
+gerceklesir.
 
 Performans: 20 bin olayda tam yuruyen ileri test 60 saniyeyi gecmemeli.
-Gerekiyorsa hafizayi zaman sirali tutup artimli aday havuzu kullan.
+Hafiza zaman sirali tutulur ve aday havuzu artimli buyutulur.
 
 ## 17. `src/core/data/*` (A8)
 
@@ -882,8 +1138,11 @@ module.exports = {
 ## 18. `src/main/*` (A9)
 
 - `paths.js`: `dataDir()` = `app.getPath('userData')/data`, `candlePath(tf)`,
-  `memoryPath(tf)`, `settingsPath()`, `liveLogPath(tf)` (= `memoryPath(tf)` +
-  `.live.jsonl`, canli sinyal gunlugu). Klasorleri olusturur. Yol birlestirme,
+  `memoryPath(tf)`, `settingsPath()`, `zonesPath(tf)` (`.zones.json`),
+  `protosPath(tf)` (`.protos.json`), `signalsPath(tf)` (`.signals.json`),
+  `backtestPath(tf)` (`.backtest.json`, kalici test ozeti),
+  `liveLogPath(tf)` (`.live.jsonl`, canli sinyal gunlugu); son besi
+  `memoryPath(tf)` uzerine ek alir. Klasorleri olusturur. Yol birlestirme,
   ortam degiskeni onceligi ve klasor olusturma `src/core/paths-core.js`
   icindedir; `paths.js` yalnizca Electron'un `userData` degerini varsayilan
   kok olarak verir, betikler (`scripts/*.mjs`) ayni cekirdegi kullanir.
@@ -891,9 +1150,21 @@ module.exports = {
   `set(key, val)`, `applySetPayload(p)`, `varsayilanlaraDon()`, `DEFAULTS`,
   `SINIRLAR`. DEFAULTS icinde: `symbol:'XAUUSD'`, `timeframe:'5m'`,
   `indicatorParams`, `outcomeCfg`, `signalCfg`,
+  `backtestCfg:{costPct:0.000068, costUsd:0, slippageAtr:0, warmupPerBucket:100}`,
   `providers:{history:'histdata', live:'binance'}`,
   `apiKeys:{twelvedata:'', polygon:''}`, `livePollSeconds:20`,
   `autoStartLive:true`, `autoPrepareOnTfChange:true`, `theme:'dark'`.
+  (`slippageAtr` ayar ve sinir tablosunda vardir ama su an motor tarafindan
+  KULLANILMAZ; maliyet yalnizca `costPct` / `costUsd` uzerinden modellenir.)
+
+  **Diske yalnizca FARKLAR yazilir.** `settingsVersion` (= 2) disinda, dosyaya
+  yalnizca DEFAULTS'tan farkli alanlar konur. Tam ayar diske yazilirken iki sey
+  bozuluyordu: (1) cekirdek varsayilani degistiginde kullaniciya hic
+  ulasmiyordu, (2) hazir ayarlar fiilen hic devreye girmiyordu, cunku dosyadaki
+  her alan "kullanici boyle istedi" sayiliyordu. Hazir ayarin yonettigi alanlar
+  (`outcomeCfg.targetAtr`, `signalCfg.minSimilarity`, `signalCfg.minMatches`,
+  `signalCfg.minWinRate`) varsayilana esit olsalar bile korunur, cunku acikca
+  secilmis olabilirler.
 
   **`settings:set` yuk sozlesmesi.** Uc bicim de kabul edilir ve tek yerde
   (`applySetPayload`) cozulur: `{key:'apiKeys.polygon', value:'...'}`,
@@ -914,8 +1185,8 @@ module.exports = {
   `data:status`, `data:doctor`, `data:import`, `data:sync`, `data:candles`,
   `engine:scan`, `engine:zones`, `engine:touches`, `engine:signals`,
   `engine:backtest`, `engine:backtest-last`, `engine:prototypes`,
-  `engine:memory-summary`, `engine:memory-delete`, `engine:live-tick`,
-  `engine:live-log`.
+  `engine:memory-summary`, `engine:memory-delete`, `engine:clear-cache`,
+  `engine:live-tick`, `engine:live-log`.
   Uzun islerde `{type:'progress', id, pct, msg}` mesaji gonderir.
 
   **Ayar birlestirme (tek nokta).** `engine:scan`, `engine:backtest` ve
@@ -1061,8 +1332,33 @@ yukselen mum `#26a69a`, dusen mum `#ef5350`, metin `#d1d4dc`.
   altina TASINIR ve hafizalarin yeniden taranmasi gerektigi bildirilir
   (aktarilan mumlarla eski hafizanin bar indeksleri uyusmaz).
 - `scripts/fetch-history.mjs`: saglayici uzerinden gecmis indirir (Electron'suz).
+- `scripts/repair-proxy.mjs`: vekil kaynakla (PAXG, XAUT, GC=F) yazilmis kirli
+  bolumu keser ve turetilmis zaman dilimlerini 1 dakikaliktan yeniden uretir.
+  Kesim noktasi sirasiyla `--cut`, `<sembol>_<tf>.proxy.json` kaydi ve hacim
+  damgasindan (HistData hacmi tam sayidir, PAXG hacmi kesirlidir) bulunur.
+  VARSAYILAN OLARAK HICBIR SEY YAZMAZ; `--apply` verilince once
+  `<ad>.bak-YYYYMMDD-HHMMSS` yedegi alinir.
+- `scripts/fix-dst.mjs`: tek seferlik goc. Eski ayristiricinin sabit UTC-5
+  varsaydigi HistData barlarini 1 saat geri alir. Bitince `<ad>.dst.json`
+  isaret dosyasi yazar ve isaret varken yeniden calismayi REDDEDER (cift
+  kaydirma seriyi bozar). SIRA: once `repair-proxy`, sonra bu goc, en son yeni
+  ayristiriciyla eksik ay. `--apply` olmadan yalnizca rapor verir.
+- `scripts/data-doctor.mjs`: `core/data/doctor.js` raporunu basar (ic
+  bosluklar, aylik kapsama, hafta sonu ve sifir hacimli barlar, hacim rejimi
+  kirilmalari). `--tf`, `--from`, `--to`, `--min-gap`, `--json`. Ayni rapor
+  isci komutu olarak da vardir: `data:doctor`.
+- `scripts/measure-all.mjs`: tum zaman dilimlerinde yuruyen ileri testi
+  calistirip tek olcum tablosu uretir. Varsayilan olarak yalnizca TEST eder,
+  `--scan` ile once hafizayi yeniden kurar. `--tfs`, `--json`, `--out`.
+  README 1. bolumdeki tablo bu betikle uretilir.
+- `scripts/userdata-path.mjs`: betikler icin kullanici veri klasoru yolu.
+  Govdesi `src/core/paths-core.js` icindedir.
+- Betiklerin ortak arguman ayristirici ve bicimleyicileri `src/core/util/cli.js`
+  icindedir; `.mjs` dosyalari bunu `createRequire` ile yukler.
 - `README.md`: Turkce. Kurulum (macOS ve Windows), calistirma, ilk veri kurulumu,
   saglayici secimi ve anahtarlar, sistemin nasil calistigi, bilinen sinirlar.
+  1. bolumdeki OLCUM TABLOSU `measure-all.mjs` ciktisidir; elle degistirilmez,
+  yeniden olculerek guncellenir.
 
 ## 21. `test/*.test.js` (A12)
 
@@ -1079,7 +1375,9 @@ yukselen mum `#26a69a`, dusen mum `#ef5350`, metin `#d1d4dc`.
   BIR olay, olaylarin zaman sirasi, HTF trendinde ileriye bakma olmadigi.
 - `outcome.test.js`: TP once, SL once, ayni barda ikisi (SL kazanir), timeout;
   form olayinda girisin kapanis oldugu, hedefin riskin kati oldugu
-  (`formTargetRr`), asiri riskin `maxFormRiskAtr` ile elendigi.
+  (`formTargetRr`), asiri riskin `maxFormRiskAtr` ile elendigi; dokunus
+  olayinda kararin bar kapanisinda verildigi, dolmayan emrin `'nofill'`
+  oldugu, zaman asiminin ufuk sonu kapanisindan degerlendigi.
 - `similarity.test.js`: pearson/cosine/dtw bilinen degerler, knn siralamasi,
   `beforeTime` filtresinin ileriye bakmayi engelledigi.
 - `signal.test.js`: esik altinda `fired:false`, plan fiyatlarinin yonu dogru.
@@ -1087,8 +1385,21 @@ yukselen mum `#26a69a`, dusen mum `#ef5350`, metin `#d1d4dc`.
 
 ## 22. Kullanilabilir referans dosyalar (salt okunur)
 
-- `/Users/dogukandogru/dev/indicator/indicator.pine` - Pine v6 kaynagi
-- `/Users/dogukandogru/dev/indicator2/backend/app/services/indicator/master_touch.py` - Python portu
+Bu dosyalarin HICBIRI depoda degildir, KULLANICININ MAKINESINDE durur. Depoda
+`docs/pine/` diye bir klasor yoktur; baska bir makinede calisiliyorsa bu
+yollarin bulunmayacagi varsayilmalidir.
+
+Su anda kullanilan indikatorun kaynagi:
+
+- `~/Downloads/son pro.txt` - Pine v6, "proje son versiyon 3".
+  `src/core/indicator/proZones.js` bunun portudur.
+
+Asagidakiler ESKI indikatore (MASTER 1 TOUCH) aittir. Yontem referansi olarak
+okunabilir ama uygulamanin bugunku davranisini TANIMLAMAZLAR:
+
+- `/Users/dogukandogru/dev/indicator/indicator.pine` - eski Pine v6 kaynagi
+  ("XAUUSD MASTER son + Orderflow Footprint")
+- `/Users/dogukandogru/dev/indicator2/backend/app/services/indicator/master_touch.py` - eski Python portu
 - `/Users/dogukandogru/dev/indicator2/backend/app/services/features.py`
 - `/Users/dogukandogru/dev/indicator2/backend/app/services/similarity.py`
 - `/Users/dogukandogru/dev/indicator2/backend/app/services/outcomes.py`

@@ -42,16 +42,22 @@
  *   "bolge calisti mi" sorusunu OLCMEZ, genel fiyat hareketini olcer.
  *   Karsilastirma ve geriye donuk uyumluluk icin korundu.
  *
- * Gercek XAUUSD verisinde olculen ham oranlar (2009-2026, ilk dokunuslar):
+ * ESKI INDIKATORLE (MASTER 1 TOUCH, kaldirilan masterTouch.js) olculen ham
+ * oranlar. Bu sayilar YENI indikator ("proje son versiyon 3") icin
+ * DOGRULANMIS DEGILDIR; yontem tekrarlanabilir, sayilar tasinamaz. Yeni
+ * indikatorun gercek olcumu README 1. bolumdeki tablodadir.
+ *   XAUUSD 2009-2026, ilk dokunuslar:
  *   15m  atr modu %48.0  |  zone modu (hedef 1.0, tampon 0.25) %48.1
  *   5m   atr modu %50.4  |  zone modu (hedef 1.0, tampon 0.25) %53.5
- * Iki mod da dengeli sinif dagilimi verir; bu ogrenme icin iyidir, cunku
- * %65/%35 gibi carpik bir dagilimda model tembellesip hep cogunlugu soyler.
+ * O olcumden cikan ve modu secerken hala gecerli olan gozlem su: iki mod da
+ * dengeli sinif dagilimi verir, bu ogrenme icin iyidir, cunku %65/%35 gibi
+ * carpik bir dagilimda model tembellesip hep cogunlugu soyler.
  *
- * Ufuk uzunlugu bolge modunda neredeyse etkisizdir (24 bar ile 96 bar ayni
- * sonucu verir), cunku bolge siniri yakin oldugu icin sonuc hizla belli olur.
- * Bu yuzden varsayilan ufuk 48 bardir: serinin sonuna daha yakin olaylar da
- * etiketlenebilir, yani hafiza daha guncel kalir.
+ * Ufuk uzunlugu ESKI indikatorde bolge modunda neredeyse etkisizdi (24 bar
+ * ile 96 bar ayni sonucu veriyordu), cunku bolge siniri yakin oldugu icin
+ * sonuc hizla belli oluyordu. Yeni indikatorde bu OLCULMEDI. Varsayilan ufuk
+ * yine 48 bardir ve bu tercihin gerekcesi olcumden bagimsizdir: serinin
+ * sonuna daha yakin olaylar da etiketlenebilir, yani hafiza daha guncel kalir.
  *
  * Referans: ../indicator2/backend/app/services/outcomes.py
  * Fark: burada ATR disaridan verilir (indikator zaten hesapliyor), boylece her
@@ -79,29 +85,37 @@ const DEFAULT_OUTCOME_CFG = {
   // Limit emrin dolmus sayilmasi icin fiyatin kenari gecmesi gereken pay.
   fillOffsetAtr: 0.05,
   // 'zone' modu.
-  // targetAtr varsayilani 1 DAKIKALIK grafik icin secildi (uygulamanin
-  // varsayilan zaman dilimi). Ornek disi olculdu (ayar 2009-2018 / dogrulama
-  // 2019-2026, kenardan giris, minSim 0.80 minEslesme 15 minBasari 0.62):
+  // targetAtr varsayilani 1 DAKIKALIK grafik icin secildi.
+  //
+  // DIKKAT: asagidaki sayilar ESKI INDIKATORLE (MASTER 1 TOUCH) olculdu ve
+  // YENI indikator icin dogrulanmadi. Yontem (ayar donemi 2009-2018 /
+  // dogrulama donemi 2019-2026, kenardan giris, minSim 0.80, minEslesme 15,
+  // minBasari 0.62) aynen tekrarlanabilir; sayilar tasinamaz. Yeni
+  // indikatorun gercek olcumu README 1. bolumdedir ve hicbir zaman diliminde
+  // kanitlanmis katma deger gostermiyor.
   //   1m,  hedef 1.0 -> taban %52.4, sistem %72.0, kar faktoru 2.10 (n=478)
   //   5m,  hedef 1.5 -> taban %43.2, sistem %60.2, kar faktoru 1.68 (n=93)
   //   5m,  hedef 1.0 -> taban %52.0, sistem %57.5, kar faktoru 1.06 (n=87)
-  // Yani daha uzun zaman diliminde hedefi buyutmek gerekir: bolge genisligi
-  // ATR'ye gore buyudugu icin 1.0 ATR hedef yeterli risk/odul vermiyor.
-  // 5m veya 15m kullanacaksaniz Ayarlar ekranindan hedefi 1.5'e cikarin.
+  // Bundan cikarilan kural (olcumden bagimsiz, geometrik gerekce): daha uzun
+  // zaman diliminde hedefi buyutmek gerekir, cunku bolge genisligi ATR'ye
+  // gore buyudugu icin 1.0 ATR hedef yeterli risk/odul birakmaz. Hazir
+  // ayarlar (presets.js) bu yuzden 5m ve uzerinde hedefi 1.5'e cikarir;
+  // o degerler de yeni indikator icin yeniden aranmalidir.
   targetAtr: 1.0,
   breakBufferAtr: 0.25,
   minTargetAtr: 0.25,
-  // Giris modeli. 'zoneEdge' (varsayilan): bolgenin YAKIN kenarina limit emirle
-  // girilir (destekte zoneTop, dirençte zoneBottom). Dokunus tanimi geregi fiyat
-  // o kenari gecmistir, yani emir dolar.
-  // 'close': dokunus barinin kapanisindan girilir (eski davranis).
+  // ESKI giris secimi. Artik dokunus olayinin girisini `touchEntryMode`
+  // belirler (yukariya bakin); bu alan yalnizca `'close'` verilirse baglayici
+  // olur ve dokunus olayinda da kapanistan girilir.
   //
-  // Neden degisti: kapanistan giris, risk/odulu kapanisin bolge icindeki
-  // konumuna baglar ve TERS SECIM yaratir. Kapanis bolge dibine yakinsa stop
-  // 0.25 ATR kadar yakin olur, risk/odul 8'e cikar ama gurultu stop'u aninda
-  // vurur. Olculdu (15m): risk/odul kapisi bu yuzden isabet oranini %52'den
-  // %25'e dusuruyordu. Kenardan giris ile risk ve odul yalnizca bolge
-  // geometrisine baglidir, sabittir ve ters secim ortadan kalkar.
+  // Neden kapanistan giris tercih edilmiyor: kapanis girisi risk/odulu
+  // kapanisin bolge icindeki konumuna baglar ve TERS SECIM yaratir. Kapanis
+  // bolge dibine yakinsa stop 0.25 ATR kadar yakin olur, risk/odul 8'e cikar
+  // ama gurultu stop'u aninda vurur. ESKI INDIKATORLE olculmustu (15m):
+  // risk/odul kapisi bu yuzden isabet oranini %52'den %25'e dusuruyordu. Bu
+  // sayi YENI indikator icin dogrulanmadi; ters secim gerekcesi ise
+  // geometriktir ve olcumden bagimsiz gecerlidir. Yeni indikatorun gercek
+  // olcumu icin README 1. bolume bakin.
   entryMode: 'zoneEdge',
   // KUTU OLUSUM (kind = 'form') OLAYLARINDA HEDEF
   // ---------------------------------------------------------------------

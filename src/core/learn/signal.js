@@ -41,13 +41,17 @@ const { knn, DEFAULT_WEIGHTS } = require('./similarity')
 const { matchPrototype } = require('./cluster')
 const { zoneLevels, DEFAULT_OUTCOME_CFG } = require('./outcome')
 
-// Varsayilanlar gecmisin ILK YARISINDA (2009-2018) yapilan parametre
-// taramasiyla secildi, sonra IKINCI YARIDA (2019-2026) dogrulandi. Secim
-// dogrulama donemine bakilarak yapilmadi.
-// 1 dakikalik, hedef 1.0 ATR, kenardan giris:
-//   ayar donemi      n=366  isabet %68.9  beklenti +0.302 ATR  kar faktoru 1.78
-//   dogrulama donemi n=478  isabet %72.0  beklenti +0.377 ATR  kar faktoru 2.10
-//   ayni donemde secim yapilmasaydi taban isabet %52.4 idi.
+// DIKKAT: Asagidaki varsayilanlar ESKI indikatorle (MASTER 1 TOUCH) ve ESKI
+// giris modeliyle (bar ici kenardan dolum) secildi. Yontem gecerlidir ve
+// aynen tekrarlanabilir: gecmisin ILK YARISINDA (2009-2018) parametre
+// taramasi, IKINCI YARIDA (2019-2026) dogrulama. Ama SAYILAR yeni indikatore
+// TASINAMAZ.
+//   eski olcum, 1 dakikalik, hedef 1.0 ATR, bar ici kenardan giris:
+//     ayar donemi      n=366  isabet %68.9  beklenti +0.302 ATR
+//     dogrulama donemi n=478  isabet %72.0  beklenti +0.377 ATR
+// Yeni indikatorun gercek olcumu README 1. bolumdedir (17 Eylul 2026):
+// hicbir zaman diliminde kanitlanmis katma deger yok. Tekrar uretmek icin
+// `node scripts/measure-all.mjs`.
 const DEFAULT_SIGNAL_CFG = {
   k: 25,
   minSimilarity: 0.80,
@@ -429,10 +433,13 @@ function decideFromCandidates (ev, candidates, levels, cfg, ek) {
   // Cok dar stop gurultuye takilir, en az 0.3 ATR.
   if (!(slAtr > MIN_SL_ATR)) slAtr = MIN_SL_ATR
 
-  // Plan girisi: bolge modunda bolgenin YAKIN kenarina limit emir
-  // (destekte zoneTop, dirençte zoneBottom). Dokunus tanimi geregi fiyat o
-  // kenari gectigi icin emir dolar. Dokunus barinin kapanisi giris olarak
-  // kullanilmaz, cunku kapanisin bolge icindeki konumu risk/odulu carpitir.
+  // Plan girisi zoneLevels'tan gelir ve DOKUNUS GIRIS MODELINE uyar:
+  // kapanis kenarin lehte tarafindaysa giris o kenara konan limit emirdir
+  // (dolum bir sonraki barlarda, dolmazsa islem yoktur), kapanis bolgenin
+  // icindeyse giris kapanistir. "Dokunus tanimi geregi emir dolar" varsayimi
+  // ARTIK GECERLI DEGILDIR: o varsayim bar ici ileriye bakma uretiyordu
+  // (olculdu: 5m fitil reddi alt kumesi %58.4 isabet gosteriyor, gercekci
+  // giriste %30.9).
   const planEntry = zoneStopUsed ? seviyeler.entry : entry
 
   const tp1 = zoneStopUsed ? seviyeler.target : planEntry + sign * tp1Atr * atr

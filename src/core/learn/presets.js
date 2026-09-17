@@ -16,8 +16,14 @@
  * yuruyen ileri testi farkli esiklerle calistirin ve ozetteki `byKind`
  * tablosuna (iki sinyal turunun ayri kirilimi) bakin.
  *
+ * YENI INDIKATORUN GERCEK OLCUMU: README 1. bolumdeki tablo (17 Eylul 2026,
+ * tum gecmis yeniden tarandi). Ozeti: bu hazir ayarlarla hicbir zaman
+ * diliminde kanitlanmis katma deger yok, net beklentinin %95 araligi hicbir
+ * yerde sifirin ustunde kalmiyor. Tekrar uretmek icin
+ * `node scripts/measure-all.mjs`.
+ *
  * Yontemin kendisi gecerlidir ve aynen tekrarlanabilir; asagidaki aciklama
- * bu yuzden korundu.
+ * bu yuzden korundu. Sayilar ise ESKI indikatore aittir, tasinamaz.
  * ----------------------------------------------------------------------------
  * ESKI INDIKATORUN OLCUMU
  * ----------------------------------------------------------------------------

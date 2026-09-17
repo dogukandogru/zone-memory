@@ -606,6 +606,9 @@ async function liveLogEtiketle(tf, s, tfSec, outcomeCfg, logs, maliyetAyari) {
     costUsd: Number.isFinite(maliyetAyari && maliyetAyari.costUsd)
       ? maliyetAyari.costUsd
       : num(bt.DEFAULT_BACKTEST_CFG.costUsd, 0),
+    slippageAtr: Number.isFinite(maliyetAyari && maliyetAyari.slippageAtr)
+      ? maliyetAyari.slippageAtr
+      : 0,
   }
 
   let yazilan = 0
@@ -1152,6 +1155,7 @@ handlers['engine:backtest'] = async function (payload, ctx) {
   })
   if (Number.isFinite(bcfg.costPct)) cfg.costPct = bcfg.costPct
   if (Number.isFinite(bcfg.costUsd)) cfg.costUsd = bcfg.costUsd
+  if (Number.isFinite(bcfg.slippageAtr)) cfg.slippageAtr = bcfg.slippageAtr
   if (Number.isFinite(bcfg.warmupPerBucket)) cfg.warmupPerBucket = bcfg.warmupPerBucket
   delete cfg.cfgPatch
 
