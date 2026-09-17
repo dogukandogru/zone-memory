@@ -17,7 +17,15 @@
 // tick hacmidir, yani ayni cinstendir.
 //
 // Tick dosya bicimi (ASCII):  YYYYMMDD HHMMSSmmm,bid,ask,0
-// Zaman dilimi SABIT UTC-5'tir, yaz saati UYGULANMAZ.
+//
+// ZAMAN DILIMI: dosya saatleri sabit UTC-5 DEGILDIR, yaz saati uygulanir ve
+// uygulanan kural 2019'da degismistir. Olculdu (depodaki seri ile Binance
+// PAXGUSDT 1m getirilerinin gecikme taramasi ve ABD 08:30 ET veri aciklamasi
+// dakikasi): 2018 ve oncesinde ABD (America/New_York) yaz saati tarihleri,
+// 2019 ve sonrasinda AVRUPA yaz saati tarihleri kullanilmis. Sabit UTC-5
+// varsayimi yilin 7-8 ayinda tum barlari 1 saat ileri kaydiriyordu.
+// Sinir 2018-11-04 ile 2019-03-10 arasinda herhangi bir gun olabilir, cunku
+// o aralikta iki kural da 5 saat verir.
 //
 // Zip acmak icin harici bagimlilik yoktur: asagida zlib.inflateRawSync
 // uzerine kurulu minimal bir ZIP okuyucu vardir.
@@ -31,8 +39,52 @@ const TEMEL = 'https://www.histdata.com'
 const SAYFA_URL = TEMEL + '/download-free-forex-historical-data/?/ascii/tick-data-quotes/'
 const POST_URL = TEMEL + '/get.php'
 const TK_RE = /name="tk"\s+id="tk"\s+value="([^"]*)"/
-// HistData ASCII verisi sabit UTC-5: UTC'ye cevirmek icin 5 saat EKLENIR.
-const UTC_OFSET_SN = 5 * 3600
+// Kis saatinde (her iki kuralda da) dosya saati UTC-5'tir.
+const KIS_OFSET_SN = 5 * 3600
+const YAZ_OFSET_SN = 4 * 3600
+// 2019'dan itibaren AB yaz saati kurali gecerli (bkz. yukaridaki not).
+const AB_KURALI_ILK_YIL = 2019
+
+/** Ayin verilen gun sayisini (1..7 = Pazartesi..Pazar) son gununu bulur. */
+function ayinSonGunu(yil, ay, haftaninGunu) {
+  // Ayin son gunu: bir sonraki ayin 0. gunu.
+  const son = new Date(Date.UTC(yil, ay, 0))
+  const fark = (son.getUTCDay() - haftaninGunu + 7) % 7
+  return son.getUTCDate() - fark
+}
+
+/**
+ * Dosya saatinin UTC ofsetini (saniye) verir. Donusum: UTC = dosya + ofset.
+ *
+ * 2018 ve oncesi: ABD kurali (Mart ikinci pazar 02:00 yerel - Kasim ilk pazar).
+ * 2019 ve sonrasi: AB kurali (Mart son pazar - Ekim son pazar).
+ * Gun bazinda calisir; gecis gunundeki saat dilimi kirilmasi tick'lerin bir
+ * saatlik bir bolumunu etkiler, bu da hafta sonuna denk geldigi icin veri
+ * icermez.
+ *
+ * @param {number} yil
+ * @param {number} ay 1..12
+ * @param {number} gun 1..31
+ * @returns {number} saniye
+ */
+function dosyaOfsetiSn(yil, ay, gun) {
+  let yazBaslangic
+  let yazBitis
+  if (yil >= AB_KURALI_ILK_YIL) {
+    // AB: Mart son pazar, Ekim son pazar.
+    yazBaslangic = { ay: 3, gun: ayinSonGunu(yil, 3, 0) }
+    yazBitis = { ay: 10, gun: ayinSonGunu(yil, 10, 0) }
+  } else {
+    // ABD: Mart ikinci pazar, Kasim ilk pazar (2007'den beri).
+    const martIlkPazar = 1 + ((7 - new Date(Date.UTC(yil, 2, 1)).getUTCDay()) % 7)
+    yazBaslangic = { ay: 3, gun: martIlkPazar + 7 }
+    yazBitis = { ay: 11, gun: 1 + ((7 - new Date(Date.UTC(yil, 10, 1)).getUTCDay()) % 7) }
+  }
+  const anahtar = ay * 100 + gun
+  const bas = yazBaslangic.ay * 100 + yazBaslangic.gun
+  const bit = yazBitis.ay * 100 + yazBitis.gun
+  return anahtar >= bas && anahtar < bit ? YAZ_OFSET_SN : KIS_OFSET_SN
+}
 
 /* ------------------------------------------------------------------ */
 /* Minimal ZIP okuyucu                                                 */
@@ -263,7 +315,7 @@ function ticklerden1m(buf, tampon, from, to) {
         const anahtar = yil * 10000 + ay * 100 + gun
         if (anahtar !== gunAnahtar) {
           gunAnahtar = anahtar
-          gunEpoch = Date.UTC(yil, ay - 1, gun) / 1000 + UTC_OFSET_SN
+          gunEpoch = Date.UTC(yil, ay - 1, gun) / 1000 + dosyaOfsetiSn(yil, ay, gun)
         }
         const t = gunEpoch + saat * 3600 + dk * 60 + sn
         const yeniKova = t - (t % 60)
@@ -446,13 +498,15 @@ module.exports = {
   isProxy: false,
   note:
     'Anahtarsiz ve ucretsiz. Aylik tick dosyalarindan 1 dakikalik mum uretir, ' +
-    'hacim dakikadaki tick sayisidir. Zaman dilimi sabit UTC-5 kabul edilir. ' +
+    'hacim dakikadaki tick sayisidir. Dosya saatleri yaz saatine gore cevrilir ' +
+    '(2018 ve oncesi ABD, 2019 ve sonrasi Avrupa kurali). ' +
     'Icinde bulunulan ay yayinlanmadigi icin en fazla gecen aya kadar veri gelir. ' +
     'Canli veri icin uygun degildir.',
   fetchCandles: fetchCandles,
   // Test ve betikler icin acilan ic yardimcilar:
   _zipCsvOku: zipCsvOku,
   _aylariListele: aylariListele,
+  _dosyaOfsetiSn: dosyaOfsetiSn,
   /**
    * Tick CSV tamponunu dogrudan 1 dakikalik Series'e cevirir.
    * @param {Buffer} csv

@@ -108,3 +108,26 @@ test('piyasa takvimi: New York kuralina gore acilis ve kapanis', () => {
   assert.strictEqual(acikMi(Date.UTC(2026, 11, 25, 16) / 1000), false, 'Noel kapali')
   assert.strictEqual(acikMi(Date.UTC(2026, 0, 1, 16) / 1000), false, 'Yilbasi kapali')
 })
+
+// V2 - veri doktoru: ic bosluklari ve aylik kapsamayi raporlar.
+test('veriDoktoru: acik saatlerdeki ic bosluklari bulur, hafta sonunu saymaz', () => {
+  const { veriDoktoru } = require('../src/core/data/doctor')
+  // Pazartesi 10:00 UTC'den itibaren 240 dakika, ortada 60 dakika eksik.
+  const bas = Date.UTC(2026, 8, 7, 10, 0) / 1000
+  const n = 240
+  const s = series.createSeries(n - 60)
+  let k = 0
+  for (let i = 0; i < n; i++) {
+    if (i >= 100 && i < 160) continue // 60 dakikalik bosluk
+    const t = bas + i * DK
+    s.time[k] = t
+    s.open[k] = 2000; s.high[k] = 2001; s.low[k] = 1999; s.close[k] = 2000; s.volume[k] = 50
+    k++
+  }
+  const rapor = veriDoktoru(s, DK, { minGapMinutes: 30 })
+  assert.strictEqual(rapor.gaps.length, 1)
+  assert.strictEqual(rapor.gaps[0].missingBars, 60)
+  assert.strictEqual(rapor.weekendBars, 0)
+  assert.strictEqual(rapor.duplicateTimes, 0)
+  assert.ok(rapor.monthly.length >= 1)
+})

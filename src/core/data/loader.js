@@ -8,7 +8,7 @@
 
 const path = require('node:path')
 const fsp = require('node:fs/promises')
-const { tfSeconds } = require('../tf')
+const { tfSeconds, TURETILEN_TF } = require('../tf')
 const series = require('../series')
 const binstore = require('../store/binstore')
 const { getProvider, bildir } = require('./provider')
@@ -553,6 +553,30 @@ function applyBasis(s, offset) {
 }
 
 /**
+ * Turetilmis zaman dilimi dosyalarini 1 dakikalik seriden yeniden uretir.
+ * Taban seri degistiginde (indirme, onarim, goc) cagrilmalidir; aksi halde
+ * 5m/15m/1h/4h dosyalari 1m ile senkronsuz kalir ve yukleyici eski dosyayi
+ * tercih ettigi icin hafiza yanlis seriyle kurulur.
+ *
+ * @param {string} dataDir
+ * @param {string} [symbol]
+ * @param {string[]} [tfs] varsayilan TURETILEN_TF
+ * @returns {Promise<Array<{tf:string, count:number, lastTime:number}>>}
+ */
+async function rebuildDerived(dataDir, symbol, tfs) {
+  const liste = Array.isArray(tfs) && tfs.length ? tfs : TURETILEN_TF
+  const taban = await binstore.readSeries(mumYolu(dataDir, '1m', symbol))
+  if (!taban || taban.length === 0) return []
+  const sonuc = []
+  for (const tf of liste) {
+    const s = series.resample(taban, tfSeconds(tf))
+    await binstore.writeSeries(mumYolu(dataDir, tf, symbol), s)
+    sonuc.push({ tf: tf, count: s.length, lastTime: s.length ? s.time[s.length - 1] : 0 })
+  }
+  return sonuc
+}
+
+/**
  * Depodan seri okur. Istenen zaman diliminin dosyasi yoksa 1 dakikalik
  * dosyadan yeniden ornekler. `from` / `to` verilirse sonuc o araliga kirpilir.
  *
@@ -596,6 +620,7 @@ module.exports = {
   hacimOlcegi: hacimOlcegi,
   applyBasis: applyBasis,
   loadSeries: loadSeries,
+  rebuildDerived: rebuildDerived,
   MIN_ORTAK_BAR: MIN_ORTAK_BAR,
   vekilAraligiKaydet: vekilAraligiKaydet,
   vekilAraliklariOku: vekilAraliklariOku,

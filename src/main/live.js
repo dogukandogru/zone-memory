@@ -189,7 +189,15 @@ async function tick() {
     // ani kullaniriz: isci uzun bir isle mesgulse mesaj dakikalar sonra
     // islenebilir ve o sirada acik olan bar kapanmis sayilirdi.
     const now = Math.floor(Date.now() / 1000)
-    const from = now - tfSec * (FETCH_BARS + 5)
+    let from = now - tfSec * (FETCH_BARS + 5)
+    // Ilk turda ve iki tur arasi sure beklenenin iki katini astiysa (uyku,
+    // uzun surmus bir is, ag kesintisi) 200 barlik pencere yetmez: depodaki
+    // son bardan itibaren cekeriz, yoksa aradaki barlar kalici olarak eksik
+    // kalir ve seride delik olusur.
+    const gecen = state.lastPollTime ? now - state.lastPollTime : Infinity
+    if (gecen > state.pollSeconds * 2 && state.lastBarTime) {
+      from = Math.min(from, state.lastBarTime)
+    }
 
     const fetched = await provider.fetchCandles({
       tfSec: tfSec,

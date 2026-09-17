@@ -821,7 +821,11 @@ Saglayicilar:
   gerekir, spot dogru fiyat ve tick sayisi hacmi. Onerilen ucretli secenek.
 - `histdata`: aylik tick zip indirir ve 1m muma cevirir. Referans:
   `/Users/dogukandogru/dev/indicator2/backend/app/services/histdata.py`.
-  Zaman dilimi sabit UTC-5. Zip acmak icin Node `zlib.inflateRawSync` ile
+  Dosya saatleri sabit UTC-5 DEGILDIR: yaz saati uygulanir ve kural 2019'da
+  degismistir (2018 ve oncesi ABD, 2019 ve sonrasi Avrupa yaz saati tarihleri).
+  Donusum `dosyaOfsetiSn(yil, ay, gun)` icindedir; olculdu, sabit UTC-5
+  varsayimi yilin yaklasik %63'undeki barlari 1 saat ileri kaydiriyordu.
+  Zip acmak icin Node `zlib.inflateRawSync` ile
   minimal ZIP okuyucu yaz (harici bagimlilik yok). Hacim = dakikadaki tick sayisi.
   Icinde bulunulan ay yayinlanmaz.
 

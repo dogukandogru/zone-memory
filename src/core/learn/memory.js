@@ -113,8 +113,29 @@ function buildMemory (s, cfg, onProgress) {
   let timeout = 0
   let noFeatures = 0
   let noLabel = 0
+  let lowCoverage = 0
   let sumMfe = 0
   let sumMae = 0
+
+  // DUSUK KAPSAMA KORUMASI
+  // Depoda gecmiste kalici bosluklar var (olculdu: 2023-02 ile 2023-07 arasi
+  // "bir saat var bir saat yok" deseniyle yaklasik 479 tam saat eksik ve bu
+  // eksik saatler HistData kaynaginda da yok). Boyle bir bolgede pivot, ATR,
+  // hacim ortalamasi ve 48 barlik sonuc ufku gercekte cok daha uzun bir
+  // zamana yayilir; olay hafizaya farkli bir sey olcen bir kayit olarak
+  // girer. Bu yuzden olayin penceresinde 2 bardan uzun bir zaman atlamasi
+  // varsa olay hafizaya ALINMAZ, yalnizca sayilir.
+  const oncekiBar = 50
+  const sonrakiBar = num(outcomeCfg.horizonBars, 48)
+  /** Olayin penceresinde zaman atlamasi var mi. */
+  function penceredeBosluk(bar) {
+    const bas = Math.max(1, bar - oncekiBar)
+    const bit = Math.min(s.length - 1, bar + sonrakiBar)
+    for (let k = bas; k <= bit; k++) {
+      if (s.time[k] - s.time[k - 1] > 2 * tfSec) return true
+    }
+    return false
+  }
 
   const labelProgress = scaleProgress(onProgress, 60, 100)
   if (labelProgress) labelProgress(0, 'Olaylar etiketleniyor')
@@ -155,10 +176,15 @@ function buildMemory (s, cfg, onProgress) {
     }
 
     // Ikisi de yoksa bu olay hafizaya girmez, yalnizca sayilir.
+    // Veri boslugunun icinde kalan olaylar da alinmaz (bkz. yukaridaki not).
     if (features && outcome) {
-      events.push(Object.assign({}, t, outcome, { features: features }))
-      if (form) formStored++
-      else touchStored++
+      if (penceredeBosluk(t.bar)) {
+        lowCoverage++
+      } else {
+        events.push(Object.assign({}, t, outcome, { features: features }))
+        if (form) formStored++
+        else touchStored++
+      }
     }
 
     if (labelProgress && ((i & 127) === 0 || i === n - 1)) {
@@ -184,6 +210,8 @@ function buildMemory (s, cfg, onProgress) {
     stored: events.length,
     noFeatures: noFeatures,
     noLabel: noLabel,
+    // Veri boslugu yuzunden hafiza disinda birakilan olay sayisi.
+    lowCoverage: lowCoverage,
     avgMfeAtr: labeled > 0 ? sumMfe / labeled : 0,
     avgMaeAtr: labeled > 0 ? sumMae / labeled : 0,
     rawWinRate: labeled > 0 ? respected / labeled : 0,

@@ -346,6 +346,25 @@ async function getSignals(tf, force) {
 const handlers = {}
 
 /** Veri ve hafiza durumu. */
+/**
+ * Veri saglik raporu: ic bosluklar, aylik kapsama, hafta sonu ve sifir
+ * hacimli barlar, hacim rejimi kirilmalari. Depoda gecmiste kalici bosluklar
+ * oldugu icin (2023-02..07'de yaklasik 479 saat) bu rapor olculebilir olmali.
+ * Yuk: {tf, minGapMinutes}
+ */
+handlers['data:doctor'] = async function (payload) {
+  const tf = requireTf(payload.tf)
+  const tfSec = core('tf').tfSeconds(tf)
+  const s = await getSeries(tf, false)
+  if (!s || s.length === 0) {
+    return { tf: tf, bars: 0, gaps: [], monthly: [], message: 'Depoda bu zaman dilimi icin veri yok.' }
+  }
+  const rapor = core('data/doctor').veriDoktoru(s, tfSec, {
+    minGapMinutes: num(payload.minGapMinutes, 30),
+  })
+  return Object.assign({ tf: tf }, rapor)
+}
+
 handlers['data:status'] = async function () {
   const tfmod = core('tf')
   const binstore = core('store/binstore')
