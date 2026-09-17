@@ -9,12 +9,15 @@ build/*.blockmap
 
 # Veri deposu (mumlar ve hafiza vektorleri)
 # Not: gercek depo uygulama veri klasorundedir, bunlar yerel denemeler icindir.
-data/
+# Kural koke sabitlenmistir: src/core/data kaynak kodudur, yok sayilmamalidir.
+/data/
 *.bin
 *.bin.tmp
 *.vec
 *.vec.tmp
 *_memory.json
+# Testlerin kullandigi kucuk ornek dosyalar izlenir.
+!test/fixtures/**
 
 # Gecici ve gunluk dosyalari
 tmp/
