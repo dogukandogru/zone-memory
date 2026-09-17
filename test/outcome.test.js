@@ -48,14 +48,24 @@ const CFG = { mode: 'atr', horizonBars: 5, tpAtr: 1, slAtr: 1 }
 const ALIS = { bar: 5, direction: 'BUY', isSupport: true }
 const SATIS = { bar: 5, direction: 'SELL', isSupport: false }
 
-// Bolge modu icin ornek dokunuslar. Varsayilan giris modeli 'zoneEdge':
-// destekte giris = zoneTop, dirençte giris = zoneBottom.
+// Bolge modu icin ornek dokunuslar.
 //
-// ALIS_BOLGE, ATR 1 ve targetAtr 1.0 ile:
-//   giris = 100.20, gecersizlik = 99.4 - 0.25 = 99.15, hedef = 100.2 + 1.0 = 101.20
-//   riskAtr = 1.05, rewardAtr = 1.00
-// SATIS_BOLGE, ayni ayarlarla:
-//   giris = 99.80, gecersizlik = 100.6 + 0.25 = 100.85, hedef = 99.8 - 1.0 = 98.80
+// DIKKAT: DOKUNUS GIRIS MODELI DEGISTI. Varsayilan artik 'afterClose':
+// karar dokunus barinin KAPANISINDA verilir, giris o kapanistan SONRA gelir.
+// Kapanisin konumu giris modunu belirler:
+//   kapanis kenarin LEHTE tarafinda  -> 'limitAfterClose' (kenara limit emir,
+//                                       en erken bir sonraki barda dolar)
+//   kapanis bolgenin ICINDE          -> 'close' (kapanistan girilir)
+//   kapanis gecersizligin otesinde   -> olay etiketlenmez (null)
+// Eski model (giris dokunus barinin ICINDE kenardan dolmus sayilir) bar ici
+// ILERIYE BAKMA idi ve karsilastirma icin `touchEntryMode: 'zoneEdge'` ile
+// hala secilebilir; asagidaki eski testler bu bayragi acikca veriyor.
+//
+// ALIS_BOLGE: kapanis 100, bolge 99.4 - 100.2, yani kapanis bolgenin ICINDE.
+//   afterClose -> giris = 100 (kapanis), gecersizlik = 99.15, hedef = 101.20
+//                 (hedef her zaman YAKIN KENARDAN olculur), risk 0.85, odul 1.20
+//   zoneEdge   -> giris = 100.20, risk 1.05, odul 1.00
+// SATIS_BOLGE: kapanis 100, bolge 99.8 - 100.6, kapanis yine bolgenin ICINDE.
 const ALIS_BOLGE = {
   bar: 5, direction: 'BUY', isSupport: true,
   price: 100, zoneTop: 100.2, zoneBottom: 99.4,
@@ -65,11 +75,17 @@ const SATIS_BOLGE = {
   price: 100, zoneTop: 100.6, zoneBottom: 99.8,
 }
 const ZCFG = { horizonBars: 5, targetAtr: 1.0 }
+/** Eski (bar ici) giris modelini acan ayar. */
+const KENAR = { horizonBars: 5, targetAtr: 1.0, touchEntryMode: 'zoneEdge' }
 
 test('DEFAULT_OUTCOME_CFG sozlesmedeki degerler', () => {
   assert.deepEqual(DEFAULT_OUTCOME_CFG, {
     mode: 'zone',
     horizonBars: 48,
+    // Dokunus olayinda giris kararin verildigi kapanistan SONRA gelir.
+    touchEntryMode: 'afterClose',
+    // Limit emrin dolmus sayilmasi icin fiyatin kenari gecmesi gereken pay.
+    fillOffsetAtr: 0.05,
     targetAtr: 1.0,
     breakBufferAtr: 0.25,
     minTargetAtr: 0.25,
@@ -273,7 +289,12 @@ test('cfg verilmezse DEFAULT_OUTCOME_CFG kullanilir (48 bar ufuk, 1.0 ATR hedef)
   assert.equal(o.mode, 'zone')
   assert.equal(o.outcome, 'respect')
   assert.equal(o.barsToOutcome, 45)
-  assert.equal(o.entryPrice, 100.2, 'giris bolgenin ust kenari')
+  // Kapanis (100) bolgenin ICINDE oldugu icin giris kapanistir; kenara limit
+  // emir konmaz, cunku fiyat zaten kenarin ic tarafindadir.
+  assert.equal(o.entryMode, 'close')
+  assert.equal(o.entryPrice, 100, 'giris dokunus barinin kapanisi')
+  // Hedef yine YAKIN KENARDAN olculur, giristen degil.
+  assert.ok(Math.abs(o.targetPrice - 101.2) < 1e-9, 'hedef = zoneTop + 1.0 ATR')
 })
 
 // ===========================================================================
@@ -281,7 +302,8 @@ test('cfg verilmezse DEFAULT_OUTCOME_CFG kullanilir (48 bar ufuk, 1.0 ATR hedef)
 // ===========================================================================
 
 test('zoneLevels kenardan giriste seviyeleri bolge geometrisinden uretir', () => {
-  const lv = zoneLevels(ALIS_BOLGE, 1, { targetAtr: 1.0 })
+  // ESKI MODEL (touchEntryMode: 'zoneEdge'). Karsilastirma icin korundu.
+  const lv = zoneLevels(ALIS_BOLGE, 1, { targetAtr: 1.0, touchEntryMode: 'zoneEdge' })
   assert.equal(lv.sign, 1)
   assert.equal(lv.entryMode, 'zoneEdge')
   assert.ok(Math.abs(lv.entry - 100.2) < 1e-9, 'giris = zoneTop')
@@ -290,7 +312,7 @@ test('zoneLevels kenardan giriste seviyeleri bolge geometrisinden uretir', () =>
   assert.ok(Math.abs(lv.riskAtr - 1.05) < 1e-9)
   assert.ok(Math.abs(lv.rewardAtr - 1.0) < 1e-9, 'kenardan giriste odul tam targetAtr')
 
-  const sv = zoneLevels(SATIS_BOLGE, 1, { targetAtr: 1.0 })
+  const sv = zoneLevels(SATIS_BOLGE, 1, { targetAtr: 1.0, touchEntryMode: 'zoneEdge' })
   assert.equal(sv.sign, -1)
   assert.ok(Math.abs(sv.entry - 99.8) < 1e-9, 'giris = zoneBottom')
   assert.ok(Math.abs(sv.invalid - 100.85) < 1e-9, 'gecersizlik = zoneTop + 0.25 ATR')
@@ -301,8 +323,8 @@ test('zoneLevels kenardan giriste seviyeleri bolge geometrisinden uretir', () =>
 test('kenardan giriste risk/odul kapanisin konumundan BAGIMSIZDIR', () => {
   // Ayni bolge, kapanis cok farkli iki yerde. Kenardan giriste risk ve odul
   // ayni kalmali; ters secim sorunu bu yuzden ortadan kalkar.
-  const a = zoneLevels({ direction: 'BUY', price: 100.19, zoneTop: 100.2, zoneBottom: 99.4 }, 1, {})
-  const b = zoneLevels({ direction: 'BUY', price: 99.45, zoneTop: 100.2, zoneBottom: 99.4 }, 1, {})
+  const a = zoneLevels({ direction: 'BUY', price: 100.19, zoneTop: 100.2, zoneBottom: 99.4 }, 1, { touchEntryMode: 'zoneEdge' })
+  const b = zoneLevels({ direction: 'BUY', price: 99.45, zoneTop: 100.2, zoneBottom: 99.4 }, 1, { touchEntryMode: 'zoneEdge' })
   assert.ok(Math.abs(a.riskAtr - b.riskAtr) < 1e-12)
   assert.ok(Math.abs(a.rewardAtr - b.rewardAtr) < 1e-12)
 
@@ -320,10 +342,10 @@ test('kapanistan giriste hedef en az minTargetAtr kadar uzaga konur', () => {
 })
 
 test('kenardan giriste dokunus barinda gecersizlik gorulduyse ANINDA kirilma', () => {
-  // Emir dokunus bari icinde dolar; ayni bar gecersizligi de gordiyse bar ici
-  // sirayi bilemeyiz, muhafazakar davranilir.
+  // ESKI MODEL: emir dokunus bari icinde dolar; ayni bar gecersizligi de
+  // gordiyse bar ici sirayi bilemeyiz, muhafazakar davranilir.
   const s = seriKur(20, { 5: { low: 99.0 } })
-  const o = labelTouch(s, ALIS_BOLGE, 1, ZCFG)
+  const o = labelTouch(s, ALIS_BOLGE, 1, KENAR)
   assert.equal(o.outcome, 'break')
   assert.equal(o.barsToOutcome, 0)
 })
@@ -389,10 +411,161 @@ test('bolge modu bolge bilgisi olmayan dokunusta null doner', () => {
 
 test('riskAtr ve rewardAtr plan ile ayni seviyeleri tasir', () => {
   const s = seriKur(20)
+  // Varsayilan model: kapanis bolgenin icinde, giris kapanistan (100).
   const o = labelTouch(s, ALIS_BOLGE, 1, ZCFG)
-  assert.ok(Math.abs(o.entryPrice - 100.2) < 1e-9)
+  assert.ok(Math.abs(o.entryPrice - 100) < 1e-9)
   assert.ok(Math.abs(o.invalidPrice - 99.15) < 1e-9)
   assert.ok(Math.abs(o.targetPrice - 101.2) < 1e-9)
-  assert.ok(Math.abs(o.riskAtr - 1.05) < 1e-9)
-  assert.ok(Math.abs(o.rewardAtr - 1.0) < 1e-9)
+  assert.ok(Math.abs(o.riskAtr - 0.85) < 1e-9, 'risk = |giris - gecersizlik|: ' + o.riskAtr)
+  assert.ok(Math.abs(o.rewardAtr - 1.2) < 1e-9, 'odul = |hedef - giris|: ' + o.rewardAtr)
+
+  // Eski model: giris kenardan, risk/odul bolge geometrisinden.
+  const k = labelTouch(s, ALIS_BOLGE, 1, KENAR)
+  assert.ok(Math.abs(k.entryPrice - 100.2) < 1e-9)
+  assert.ok(Math.abs(k.riskAtr - 1.05) < 1e-9)
+  assert.ok(Math.abs(k.rewardAtr - 1.0) < 1e-9)
+})
+
+// ===========================================================================
+// DOKUNUS GIRIS MODELI: 'afterClose' (VARSAYILAN)
+// ===========================================================================
+// Eski model girisi dokunus barinin ICINDE, kenardan dolmus sayiyordu. Karar
+// ise bar KAPANISINDAKI bilgiyle (fitil reddi, penetration, hacim) veriliyor.
+// Yani islem, kararin dayandigi bilgi olusmadan onceki bir fiyattan
+// yaziliyordu: bar ici ileriye bakma. Olculdu (5m fitil reddi alt kumesi):
+// eski modelde %58.4 isabet / +0.490 ATR, gerceklestirilebilir modelde
+// %30.9 / -0.117 ATR. Asagidaki testler yeni modeli kilitler.
+
+/** Kapanis kenarin lehte tarafinda: kenara limit emir konur. */
+const ALIS_LIMIT = {
+  bar: 5, direction: 'BUY', isSupport: true,
+  price: 100.5, zoneTop: 100.2, zoneBottom: 99.4,
+}
+
+test('afterClose: kapanis kenarin lehte tarafindaysa kenara limit emir konur', () => {
+  const lv = zoneLevels(ALIS_LIMIT, 1, {})
+  assert.notEqual(lv, null)
+  assert.equal(lv.entryMode, 'limitAfterClose')
+  assert.ok(Math.abs(lv.entry - 100.2) < 1e-9, 'giris bolgenin yakin kenari')
+})
+
+test('afterClose: kapanis bolge icindeyse giris KAPANISTAN olur', () => {
+  const lv = zoneLevels(ALIS_BOLGE, 1, {})
+  assert.equal(lv.entryMode, 'close')
+  assert.ok(Math.abs(lv.entry - 100) < 1e-9)
+})
+
+test('afterClose: kapanis gecersizligin otesindeyse olay ETIKETLENMEZ', () => {
+  // Kapanis 99.1, gecersizlik 99.15: bolge o barda zaten kirilmis.
+  const kirik = Object.assign({}, ALIS_BOLGE, { price: 99.1 })
+  assert.equal(zoneLevels(kirik, 1, {}), null)
+  assert.equal(labelTouch(seriKur(20), kirik, 1, ZCFG), null)
+})
+
+// (a) Dokunus barinin high/low degeri artik dolumu ve sonucu ETKILEMEZ:
+// karar kapanista verilir, emir sonraki barlarda dolar.
+test('afterClose: dokunus barinin high/low degeri dolumu ve sonucu ETKILEMEZ', () => {
+  // Ayni kapanis, olay barinda cok farkli fitiller. Bar 6'da dolum, bar 8'de hedef.
+  const temiz = seriKur(20, { 5: { close: 100.5, high: 100.6 }, 6: { low: 100.1 }, 8: { high: 101.3 } })
+  const fitilli = seriKur(20, {
+    5: { close: 100.5, high: 104, low: 99.0 },   // olay barinda hem hedef hem gecersizlik seviyesi
+    6: { low: 100.1 },
+    8: { high: 101.3 },
+  })
+
+  const a = labelTouch(temiz, ALIS_LIMIT, 1, ZCFG)
+  const b = labelTouch(fitilli, ALIS_LIMIT, 1, ZCFG)
+  assert.notEqual(a, null)
+  assert.notEqual(b, null)
+  assert.equal(a.outcome, 'respect')
+  assert.equal(b.outcome, a.outcome, 'olay barinin fitili sonucu degistirmemeli')
+  assert.equal(b.barsToFill, a.barsToFill)
+  assert.equal(b.barsToOutcome, a.barsToOutcome)
+  assert.equal(b.entryPrice, a.entryPrice)
+})
+
+// (b) Dolum en erken BIR SONRAKI barda olur.
+test('afterClose: limit emir en erken bir sonraki barda dolar', () => {
+  // Dolum fiyati = kenar - 0.05 ATR = 100.15. Bar 6 bunu gorur.
+  const s = seriKur(20, { 5: { close: 100.5, low: 100.1 }, 6: { low: 100.1 }, 8: { high: 101.3 } })
+  const o = labelTouch(s, ALIS_LIMIT, 1, ZCFG)
+  assert.equal(o.filled, true)
+  assert.ok(o.barsToFill >= 1, 'dolum olay barinda olamaz: ' + o.barsToFill)
+  assert.equal(o.barsToFill, 1)
+  assert.equal(o.entryMode, 'limitAfterClose')
+})
+
+// (c) Dolmadan hedefe giden olay 'nofill' olur ve kazanc sayilmaz.
+test('afterClose: dolmadan hedefe gidilirse sonuc nofill olur, kazanc degil', () => {
+  // Fiyat kenara hic donmez, dogruca hedefe (101.2) gider.
+  const s = seriKur(20, { 5: { close: 100.5, low: 100.4 }, 6: { low: 100.4, high: 101.3 } })
+  const o = labelTouch(s, ALIS_LIMIT, 1, ZCFG)
+  assert.notEqual(o, null)
+  assert.equal(o.outcome, 'nofill')
+  assert.equal(o.success, false, 'dolmayan emir kazanc sayilmaz')
+  assert.equal(o.filled, false)
+  assert.equal(o.realizedR, 0, 'islem acilmadigi icin sonuc sifir')
+  assert.equal(o.missedTarget, true, 'hedefe dolmadan gidildigi isaretlenmeli')
+  assert.equal(o.mfeAtr, 0)
+  assert.equal(o.barsToOutcome, -1)
+})
+
+test('afterClose: ufuk boyunca hic dolum olmazsa sonuc nofill olur', () => {
+  // Fiyat ne kenara doner ne hedefe gider.
+  const s = seriKur(20, { 5: { close: 100.5, low: 100.45 } })
+  for (let i = 6; i <= 10; i++) s.low[i] = 100.45
+  const o = labelTouch(s, ALIS_LIMIT, 1, ZCFG)
+  assert.equal(o.outcome, 'nofill')
+  assert.equal(o.filled, false)
+  assert.equal(o.missedTarget, false)
+})
+
+test('afterClose: dolum barinda gecersizlik de gorulduyse MUHAFAZAKAR kirilma', () => {
+  // Bar 6 hem dolum fiyatini (100.15) hem gecersizligi (99.15) gorur.
+  const s = seriKur(20, { 5: { close: 100.5 }, 6: { low: 99.0 } })
+  const o = labelTouch(s, ALIS_LIMIT, 1, ZCFG)
+  assert.equal(o.outcome, 'break')
+  assert.equal(o.filled, true)
+  assert.equal(o.realizedR, -1)
+  assert.equal(o.barsToOutcome, 1)
+})
+
+test('afterClose: sonuc alanlari sozlesmeyi tasir (entryMode, filled, resolvedBar, exitPrice, realizedR)', () => {
+  const tuttu = labelTouch(
+    seriKur(20, { 5: { close: 100.5 }, 6: { low: 100.1 }, 8: { high: 101.3 } }),
+    ALIS_LIMIT, 1, ZCFG
+  )
+  assert.equal(tuttu.outcome, 'respect')
+  assert.equal(tuttu.entryMode, 'limitAfterClose')
+  assert.equal(tuttu.filled, true)
+  assert.equal(tuttu.exitPrice, tuttu.targetPrice, 'tutan islem hedeften cikar')
+  assert.ok(Math.abs(tuttu.realizedR - tuttu.rewardAtr / tuttu.riskAtr) < 1e-12,
+    'gerceklesen R odul/risk olmali: ' + tuttu.realizedR)
+  assert.equal(tuttu.resolvedBar, 8, 'sonuc hedefin vuruldugu barda bellidir')
+
+  const zamanAsimi = labelTouch(
+    seriKur(20, { 5: { close: 100.5 }, 6: { low: 100.1 } }),
+    ALIS_LIMIT, 1, ZCFG
+  )
+  assert.equal(zamanAsimi.outcome, 'timeout')
+  assert.equal(zamanAsimi.resolvedBar, 10, 'zaman asiminda sonuc ufuk sonunda bellidir')
+  assert.equal(zamanAsimi.exitPrice, 100, 'ufuk sonu kapanisindan cikilir')
+})
+
+// (d) Zaman asimi TAM STOP ZARARI DEGIL: ufuk sonu kapanisindan degerlenir.
+test('zaman asiminda gerceklesen R ufuk sonu kapanisindan hesaplanir', () => {
+  // Giris 100.2 (eski kenar modeli ile sabit), gecersizlik 99.15 -> risk 1.05.
+  // Ufuk sonunda kapanis 100.62: lehte 0.42 ATR, yani +0.4 risk birimi.
+  const s = seriKur(20, { 10: { close: 100.62 } })
+  const o = labelTouch(s, ALIS_BOLGE, 1, KENAR)
+  assert.equal(o.outcome, 'timeout')
+  assert.ok(o.realizedR > 0, 'lehte kapanan zaman asimi zarar yazmamali: ' + o.realizedR)
+  assert.ok(Math.abs(o.realizedR - 0.42 / 1.05) < 1e-9, 'gerceklesen R: ' + o.realizedR)
+  assert.equal(o.exitPrice, 100.62)
+
+  // Aleyhte kapanista sonuc negatif ama -1 (tam stop) DEGIL.
+  const aleyhte = labelTouch(seriKur(20, { 10: { close: 99.8 } }), ALIS_BOLGE, 1, KENAR)
+  assert.equal(aleyhte.outcome, 'timeout')
+  assert.ok(aleyhte.realizedR < 0)
+  assert.ok(aleyhte.realizedR > -1, 'zaman asimi tam stop zarari olmamali: ' + aleyhte.realizedR)
 })

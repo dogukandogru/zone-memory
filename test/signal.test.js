@@ -6,33 +6,36 @@ const test = require('node:test')
 const assert = require('node:assert/strict')
 
 const { evaluateTouch, DEFAULT_SIGNAL_CFG } = require('../src/core/learn/signal')
+const fixtures = require('./helpers/fixtures')
 
 // Em-dash karakteri kodda yazilmaz, kod noktasindan uretilir.
 const EM_DASH = String.fromCharCode(0x2014)
-const GUN = 86400
+const GUN = fixtures.GUN
 const T_SORGU = 1700000000
 
-/** Sabit, varyansli ozellik vektoru. */
+/** Sabit, varyansli ozellik vektoru (bkz. test/helpers/fixtures.js). */
 function ozellik () {
-  const shape = new Float32Array(16)
-  for (let i = 0; i < 16; i++) shape[i] = Math.sin(i / 2.5) * 0.5 + 0.5
-  const ret = new Float32Array(32)
-  for (let i = 0; i < 32; i++) ret[i] = Math.sin(i / 3)
-  const ctx = new Float32Array(22)
-  for (let i = 0; i < 22; i++) ctx[i] = (i % 5) / 4
-  return { shape, ret, ctx }
+  return fixtures.sabitOzellik()
 }
 
-/** Sozlesmedeki tum alanlari tasiyan dokunus. */
+/**
+ * Sozlesmedeki tum alanlari tasiyan dokunus.
+ * Kapanis (2000) bolgenin (1999 - 2001) ICINDEDIR, yani guncel giris modeli
+ * ('afterClose') plan girisini KAPANISA koyar. Kenara limit emir konan durum
+ * icin `dokunusLimit` kullanilir.
+ */
 function dokunus (yon) {
-  return {
-    id: 7, zoneId: 3, isSupport: yon === 'BUY', direction: yon,
-    bar: 500, time: T_SORGU, price: 2000,
-    zoneTop: 2001, zoneBottom: 1999, zoneFlow: 2.5,
-    zoneAgeBars: 25, penetration: 0.5, atr: 4,
-    score: 5, maxScore: 8, qualified: true, strong: false, session: 'London',
-    parts: { flow: true, trend: true, volatility: true, session: true, sweep: false, rejection: false, mss: false, fvg: false },
-  }
+  return fixtures.dokunus({ id: 7, zoneId: 3, yon: yon, bar: 500, time: T_SORGU })
+}
+
+/** Kapanis kenarin lehte tarafinda: plan girisi bolge kenarina limit emir. */
+function dokunusLimit (yon) {
+  return fixtures.dokunus({
+    id: 8, zoneId: 4, yon: yon, bar: 500, time: T_SORGU,
+    // BUY'da kapanis ust kenarin uzerinde, SELL'de alt kenarin altinda.
+    price: yon === 'BUY' ? 2002 : 1998,
+    zoneTop: 2001, zoneBottom: 1999,
+  })
 }
 
 /**
@@ -41,23 +44,12 @@ function dokunus (yon) {
  * Zamanlar 10 gun arayla, sorgudan cok once.
  */
 function hafizaKur (adet, basariliAdet, yon) {
-  const events = []
-  for (let i = 0; i < adet; i++) {
-    const basarili = i < basariliAdet
-    events.push({
-      id: i,
-      time: T_SORGU - (adet - i) * 10 * GUN,
-      direction: yon,
-      price: 1900 + i,
-      atr: 4,
-      outcome: basarili ? 'respect' : 'break',
-      success: basarili,
-      mfeAtr: basarili ? 2 : 0.2,
-      maeAtr: basarili ? 0.3 : 1.2,
-      features: ozellik(),
-    })
-  }
-  return { tf: '15m', ctxNames: [], events }
+  return fixtures.hafizaKur({
+    adet: adet,
+    basarili: basariliAdet,
+    yon: yon,
+    ilkZaman: T_SORGU - adet * 10 * GUN,
+  })
 }
 
 test('DEFAULT_SIGNAL_CFG sozlesmedeki alanlari birebir tasir', () => {
@@ -117,15 +109,7 @@ test('benzerlik esigini gecemeyen kayitlar plana girmez', () => {
   // kosinusu -1 olur ve birlesik skor esigin (0.80) cok altinda kalir.
   const q = ozellik()
   const mem = hafizaKur(20, 20, 'BUY')
-  for (const e of mem.events) {
-    const shape = new Float32Array(16)
-    const ret = new Float32Array(32)
-    const ctx = new Float32Array(22)
-    for (let i = 0; i < 16; i++) shape[i] = 1 - q.shape[i]
-    for (let i = 0; i < 32; i++) ret[i] = -q.ret[i] * 20
-    for (let i = 0; i < 22; i++) ctx[i] = -q.ctx[i]
-    e.features = { shape, ret, ctx }
-  }
+  for (const e of mem.events) e.features = fixtures.tersOzellik(q)
   const s = evaluateTouch(dokunus('BUY'), q, mem, [], {}, null)
   assert.ok(s.bestSimilarity < 0.8, 'en iyi benzerlik esigin altinda olmali: ' + s.bestSimilarity)
   assert.equal(s.matchCount, 0)
@@ -147,10 +131,10 @@ test('BUY: tum esikler gecilince fired true ve plan yonu tp1 > entry > sl', () =
   assert.ok(s.avgSimilarity > 0.99, 'birebir ayni ozelliklerde benzerlik 1 olmali: ' + s.avgSimilarity)
   assert.ok(s.bestSimilarity > 0.99)
 
-  // Plan girisi bolge KENARIDIR (destekte zoneTop), dokunus barinin kapanisi
-  // degil. Kapanis `price` alaninda korunur.
+  // Plan girisi guncel giris modelinden gelir: kapanis bolgenin ICINDE
+  // oldugu icin giris kapanistir. Kapanis `price` alaninda da korunur.
   assert.equal(s.price, t.price)
-  assert.equal(s.entry, t.zoneTop, 'BUY icin plan girisi bolgenin ust kenari')
+  assert.equal(s.entry, t.price, 'kapanis bolge icindeyken plan girisi kapanistir')
   assert.ok(s.tp1 > s.entry, 'BUY icin TP1 giristen yukarida olmali')
   assert.ok(s.tp2 >= s.tp1, 'TP2 TP1 ile ayni veya daha uzak olmali')
   assert.ok(s.sl < s.entry, 'BUY icin SL giristen asagida olmali')
@@ -281,4 +265,129 @@ test('confidence 0..1 arasinda kirpilir', () => {
     const s = evaluateTouch(dokunus('BUY'), ozellik(), mem, [], {}, null)
     assert.ok(s.confidence >= 0 && s.confidence <= 1, 'confidence disari tasti: ' + s.confidence)
   }
+})
+
+// ---------------------------------------------------------------------------
+// GUVEN VE PLAN YONU
+// ---------------------------------------------------------------------------
+
+test('dusuk tutma oranli eslesme YUKSEK GUVEN almaz', () => {
+  const esik = { minMatches: 5, minWinRate: 0.60 }
+  // Ayni eslesme sayisi ve ayni benzerlik, yalnizca tutma orani farkli.
+  const yazi = evaluateTouch(dokunus('BUY'), ozellik(), hafizaKur(20, 10, 'BUY'), [], esik, null)
+  const yuksek = evaluateTouch(dokunus('BUY'), ozellik(), hafizaKur(20, 20, 'BUY'), [], esik, null)
+
+  assert.ok(Math.abs(yazi.winRate - 0.5) < 1e-9, 'kurgu: tutma orani 0.50 olmali')
+  assert.equal(yazi.fired, false, 'yazi tura kurulum sinyal uretmemeli')
+  assert.ok(yazi.confidence < yuksek.confidence,
+    'tutma orani dusukken guven daha yuksek cikmamali: ' + yazi.confidence + ' >= ' + yuksek.confidence)
+  // Guven formulunun tutma orani terimi: 0.5 oraninda katkisi sifirdir.
+  assert.ok(yazi.confidence <= 0.70,
+    'yazi tura kurulumda guven yuksek gorunmemeli: ' + yazi.confidence)
+
+  // Esigin hemen altindaki oran da yuksek guven vermemeli.
+  const sinir = evaluateTouch(dokunus('BUY'), ozellik(), hafizaKur(20, 11, 'BUY'), [], esik, null)
+  assert.equal(sinir.fired, false)
+  assert.ok(sinir.confidence < yuksek.confidence)
+})
+
+test('plan fiyatlari yon olarak dogru: BUY tp1 > entry > sl, SELL tersi', () => {
+  const esik = { minMatches: 5, minWinRate: 0.60 }
+  const durumlar = [
+    { ad: 'BUY kapanis bolge icinde', t: dokunus('BUY'), yon: 'BUY' },
+    { ad: 'BUY kenara limit emir', t: dokunusLimit('BUY'), yon: 'BUY' },
+    { ad: 'SELL kapanis bolge icinde', t: dokunus('SELL'), yon: 'SELL' },
+    { ad: 'SELL kenara limit emir', t: dokunusLimit('SELL'), yon: 'SELL' },
+  ]
+  for (const d of durumlar) {
+    const s = evaluateTouch(d.t, ozellik(), hafizaKur(10, 9, d.yon), [], esik, null)
+    assert.equal(s.fired, true, d.ad + ': sinyal beklenir')
+    assert.equal(s.direction, d.yon)
+    assert.ok(Number.isFinite(s.entry) && Number.isFinite(s.tp1) && Number.isFinite(s.sl))
+    if (d.yon === 'BUY') {
+      assert.ok(s.tp1 > s.entry, d.ad + ': TP1 giristen yukarida olmali')
+      assert.ok(s.entry > s.sl, d.ad + ': giris stoptan yukarida olmali')
+      assert.ok(s.tp2 >= s.tp1)
+    } else {
+      assert.ok(s.tp1 < s.entry, d.ad + ': TP1 giristen asagida olmali')
+      assert.ok(s.entry < s.sl, d.ad + ': giris stoptan asagida olmali')
+      assert.ok(s.tp2 <= s.tp1)
+    }
+    assert.ok(s.rr > 0, d.ad + ': risk/odul pozitif olmali')
+    assert.ok(Math.abs(s.tp1Atr - Math.abs(s.tp1 - s.entry) / s.atr) < 1e-9)
+    assert.ok(Math.abs(s.slAtr - Math.abs(s.entry - s.sl) / s.atr) < 1e-9)
+  }
+})
+
+test('kenara limit emirde plan girisi bolgenin yakin kenaridir', () => {
+  const esik = { minMatches: 5, minWinRate: 0.60 }
+  const t = dokunusLimit('BUY')
+  const s = evaluateTouch(t, ozellik(), hafizaKur(10, 9, 'BUY'), [], esik, null)
+  assert.equal(s.entry, t.zoneTop, 'kapanis kenarin uzerindeyse giris kenara konur')
+  assert.equal(s.price, t.price, 'olay barinin kapanisi price alaninda korunur')
+})
+
+// ---------------------------------------------------------------------------
+// SONUC DAGILIMI VE BEKLENEN DEGER
+// ---------------------------------------------------------------------------
+
+test('dolmayan limit emirler (nofill) orana ve plana GIRMEZ', () => {
+  const mem = hafizaKur(20, 20, 'BUY')
+  // Yarisini "emir hic dolmadi" yap: bunlar ne kazanc ne kayiptir.
+  for (let i = 0; i < 10; i++) {
+    mem.events[i].outcome = 'nofill'
+    mem.events[i].success = false
+    mem.events[i].filled = false
+    mem.events[i].realizedR = 0
+  }
+  const s = evaluateTouch(dokunus('BUY'), ozellik(), mem, [], { minMatches: 5, minWinRate: 0.60 }, null)
+  assert.equal(s.matchCount, 10, 'yalnizca dolan emirler eslesme sayilir')
+  assert.equal(s.winRate, 1, 'nofill kayitlari orani bozmamali')
+  for (const m of s.topMatches) {
+    const ev = mem.events.find((e) => e.id === m.id)
+    assert.notEqual(ev.outcome, 'nofill', 'nofill kaydi eslesme listesine girmis')
+  }
+})
+
+test('sonuc dagilimi alanlari doludur ve toplami 1 olur', () => {
+  const mem = hafizaKur(30, 10, 'BUY')
+  // 10 tutma, 10 kirilma, 10 zaman asimi.
+  for (let i = 10; i < 20; i++) {
+    mem.events[i].outcome = 'break'
+    mem.events[i].success = false
+    mem.events[i].realizedR = -1
+  }
+  for (let i = 20; i < 30; i++) {
+    mem.events[i].outcome = 'timeout'
+    mem.events[i].success = false
+    mem.events[i].realizedR = 0.2
+  }
+  // k varsayilani 25, otuz kaydin tamami degerlendirilsin diye acikca verilir.
+  const s = evaluateTouch(dokunus('BUY'), ozellik(), mem, [], { k: 40, minMatches: 5, minWinRate: 0.30 }, null)
+  assert.equal(s.matchCount, 30)
+  assert.ok(Math.abs(s.respectRate - 1 / 3) < 1e-9)
+  assert.ok(Math.abs(s.breakRate - 1 / 3) < 1e-9)
+  assert.ok(Math.abs(s.timeoutRate - 1 / 3) < 1e-9)
+  assert.ok(Math.abs(s.respectRate + s.breakRate + s.timeoutRate - 1) < 1e-12)
+  assert.ok(Math.abs(s.timeoutAvgR - 0.2) < 1e-9, 'zaman asimlarinin ortalama R degeri')
+
+  // Beklenen deger: pR * rr - pB + pT * mT
+  const beklenen = s.respectRate * s.rr - s.breakRate + s.timeoutRate * s.timeoutAvgR
+  assert.ok(Math.abs(s.expectancy - beklenen) < 1e-9, 'beklenti formulu: ' + s.expectancy)
+})
+
+test('zaman asimi TAM ZARAR sayilmaz: beklenti eski formulden yuksek cikar', () => {
+  // Tum eslesmeler zaman asimi ve ufuk sonunda hafif lehte kapanmis.
+  const mem = hafizaKur(20, 0, 'BUY')
+  for (const e of mem.events) {
+    e.outcome = 'timeout'
+    e.success = false
+    e.realizedR = 0.1
+  }
+  const s = evaluateTouch(dokunus('BUY'), ozellik(), mem, [], { minMatches: 5, minWinRate: 0 }, null)
+  assert.equal(s.matchCount, 20)
+  assert.equal(s.winRate, 0)
+  // Eski formul: winRate * rr - (1 - winRate) = -1
+  assert.ok(Math.abs(s.expectancy - 0.1) < 1e-9, 'beklenti zaman asimi R ortalamasi olmali: ' + s.expectancy)
+  assert.ok(s.expectancy > -1, 'zaman asimi tam zarar yazilmamali')
 })

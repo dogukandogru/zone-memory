@@ -11,6 +11,7 @@ const path = require('node:path')
 
 const memstore = require('../src/core/store/memstore')
 const { CTX_NAMES, SHAPE_LEN, RET_LEN } = require('../src/core/learn/features')
+const fixtures = require('./helpers/fixtures')
 
 let kok = null
 
@@ -27,47 +28,31 @@ function yol (ad) {
   return path.join(kok, ad)
 }
 
-/** Deterministik ozellik vektoru uretir. */
+/** Deterministik ozellik vektoru (bkz. test/helpers/fixtures.js). */
 function ozellik (tohum) {
-  const shape = new Float32Array(SHAPE_LEN)
-  for (let i = 0; i < SHAPE_LEN; i++) shape[i] = ((tohum * 7 + i * 3) % 11) / 10
-  const ret = new Float32Array(RET_LEN)
-  for (let i = 0; i < RET_LEN; i++) ret[i] = (((tohum * 5 + i) % 9) - 4) / 4
-  const ctx = new Float32Array(CTX_NAMES.length)
-  for (let i = 0; i < CTX_NAMES.length; i++) ctx[i] = ((tohum + i * 2) % 5) / 4
-  return { shape, ret, ctx }
+  return fixtures.ozellik(tohum)
 }
 
-/** Sentetik hafiza kaydi. */
+/**
+ * Sentetik hafiza kaydi. Alanlarin tamami ortak yardimcidan gelir, boylece
+ * sozlesme degistiginde (ornegin baglam vektoru uzarsa) tek yerden guncellenir.
+ */
 function olay (i) {
-  return {
-    id: i,
+  return fixtures.olay({
+    i: i,
     zoneId: i * 2,
-    isSupport: i % 2 === 0,
-    direction: i % 2 === 0 ? 'BUY' : 'SELL',
+    yon: i % 2 === 0 ? 'BUY' : 'SELL',
+    basarili: i % 3 === 0,
     bar: 100 + i,
     time: 1700000000 + i * 3600,
     price: 1900 + i,
-    zoneTop: 1901 + i,
-    zoneBottom: 1899 + i,
-    zoneFlow: 2.5,
-    zoneAgeBars: 12,
-    penetration: 0.42,
     atr: 1.5,
-    score: 5,
-    maxScore: 8,
     qualified: i % 3 === 0,
-    strong: false,
-    session: 'London',
-    parts: { flow: true, trend: false, volatility: true, session: true, sweep: false, rejection: false, mss: false, fvg: false },
-    outcome: i % 3 === 0 ? 'respect' : 'break',
-    success: i % 3 === 0,
     mfeAtr: 1.25,
     maeAtr: 0.75,
     fwdReturnPct: 0.5,
-    barsToOutcome: 20,
     features: ozellik(i),
-  }
+  })
 }
 
 test('loadMemory / statMemory: dosya yoksa null doner', async () => {

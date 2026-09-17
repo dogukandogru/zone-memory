@@ -12,6 +12,7 @@
     "start": "node scripts/stamp-build.mjs && electron .",
     "dev": "node scripts/stamp-build.mjs && electron . --dev",
     "test": "node --test \"test/*.test.js\"",
+    "test:coverage": "node --test --experimental-test-coverage \"test/*.test.js\"",
     "import-legacy": "node scripts/import-legacy.mjs",
     "fetch-history": "node scripts/fetch-history.mjs",
     "dist": "node scripts/stamp-build.mjs --dist && electron-builder",

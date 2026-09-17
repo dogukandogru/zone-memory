@@ -78,7 +78,9 @@ const DEFAULT_BACKTEST_CFG = {
  * @property {string} outcome          'respect' | 'break' | 'timeout'
  * @property {boolean} success         Ham etiket
  * @property {boolean} win             Gerceklesen islem sonucu
- * @property {number} pnlAtr           +tp1Atr veya -slAtr
+ * @property {number} pnlAtr           Net sonuc: hedef vurulduysa +tp1Atr,
+ *   kirildiysa -slAtr, zaman asiminda ufuk sonu kapanisindan hesaplanan
+ *   deger (maliyet dusulmus)
  * @property {number} equityAtr        Bu islemden sonraki birikimli kazanc
  * @property {number|null} prototypeId
  * @property {string} prototypeLabel
@@ -95,7 +97,15 @@ const DEFAULT_BACKTEST_CFG = {
  * @property {number} profitFactor
  * @property {number} maxDrawdownAtr
  * @property {number} avgRr
- * @property {number} baselineWinRate  Tum etiketlenmis olaylarin ham basari orani
+ * @property {number|null} baselineWinRate  AYNI TURUN tabani: tetiklenen
+ *   islemlerin tur karisimiyla agirliklanmis, isinma sonrasi donemden ve
+ *   AYNI planla hesaplanan oran. Islem yoksa null. Tum olaylarin ham orani
+ *   ayri alanda: `rawWinRate`.
+ * @property {number|null} edgePts  Isabetin tabana gore farki (puan)
+ * @property {number|null} edgeNetAtr  Net beklentinin tabana gore farki
+ * @property {number} timeouts  Zaman asimina ugrayan islem sayisi
+ * @property {number} nofill  Limit emrin hic dolmadigi olay sayisi
+ * @property {string|null} warning  Orneklem yetersizse uyari metni
  */
 
 /** Bos sonuc iskeleti (veri yoksa donulur). Alan duzeni dolu sonucla aynidir. */
@@ -116,7 +126,16 @@ function emptyResult(baselineWinRate, labeled, warmup, embargoSec) {
         { kind: 'form', total: 0, fired: 0, wins: 0, losses: 0, winRate: 0, expectancyAtr: 0, totalPnlAtr: 0 },
         { kind: 'touch', total: 0, fired: 0, wins: 0, losses: 0, winRate: 0, expectancyAtr: 0, totalPnlAtr: 0 },
       ],
-      baselineWinRate: baselineWinRate,
+      // Islem yoksa taban da tanimsizdir (ana yolla ayni kural).
+      baselineWinRate: null,
+      baselineExpectancyAtr: null,
+      edgePts: null,
+      edgeNetAtr: null,
+      rawWinRate: baselineWinRate,
+      timeouts: 0,
+      timeoutPnlAtr: 0,
+      nofill: 0,
+      fillRate: null,
       labeled: labeled,
       totalPnlAtr: 0,
       warmupEvents: warmup,
@@ -315,17 +334,18 @@ function runBacktest(memory, prototypes, cfg, onProgress) {
     evalTo = ev.time
 
     const kb = kindMap.get(kindOf(ev))
-    kb.total++
 
     // 'nofill': kenara konan limit emir ufuk boyunca dolmadi, yani ortada
-    // islem yok. Ne degerlendirilen olay ne taban sayacina girer; dolum orani
-    // ayrica raporlanir. Komsu havuzuna da girmez (similarity.js).
+    // islem yok. Ne degerlendirilen olay (total) ne taban sayacina girer;
+    // yalnizca dolum orani icin sayilir. Komsu havuzuna da girmez
+    // (similarity.js). byKind.total ile summary.total ayni seyi sayar.
     if (ev.outcome === 'nofill') {
       nofill++
       kb.nofill++
       continue
     }
 
+    kb.total++
     total++
     const sig = evaluateTouch(ev, ev.features, poolMemory, protos, signalCfg, beforeTime)
 
@@ -594,15 +614,18 @@ function runBacktest(memory, prototypes, cfg, onProgress) {
       // Limit emrin hic dolmadigi olaylar: islem sayilmaz, dolum orani
       // ayrica raporlanir (dokunus olaylarinda anlamlidir).
       nofill: nofill,
+      // Dolum orani: dolan dokunus emirlerinin, dolan + dolmayanlara orani.
+      // (k.total artik yalnizca DEGERLENDIRILEN, yani dolan olaylari sayar.)
       fillRate: (function () {
-        let dolum = 0
-        let toplam = 0
+        let dolan = 0
+        let dolmayan = 0
         for (const g of kindMap.entries()) {
           if (g[0] !== 'touch') continue
-          toplam += g[1].total
-          dolum += g[1].total - g[1].nofill
+          dolan += g[1].total
+          dolmayan += g[1].nofill
         }
-        return toplam > 0 ? dolum / toplam : null
+        const toplam = dolan + dolmayan
+        return toplam > 0 ? dolan / toplam : null
       })(),
       labeled: labeled,
       totalPnlAtr: totalPnl,

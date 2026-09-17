@@ -369,15 +369,39 @@ test('kirilan kutu artik temas olayi uretmez', () => {
 })
 
 test('maxAgeBars: kutu pivot barindan sonra belirtilen omru kadar yasar', () => {
-  const n = 400
+  const n = 450
   const d = taslak(n, () => 100)
   dipEkle(d, 250, 5, 20000)
-  dipEkle(d, 300, 4.95)              // omur 30 iken bu dokunus gec kalir
-  const r = runIndicator(series.fromArrays(d), { maxAgeBars: 30 }, ADIM)
+  dipEkle(d, 330, 4.95)              // omur 60 iken bu dokunus gec kalir
+  // 60, Pine'daki maxAgeBars araliginin (50..5000) icindedir.
+  const r = runIndicator(series.fromArrays(d), { maxAgeBars: 60 }, ADIM)
 
   assert.equal(r.zones.length, 1)
-  assert.equal(r.zones[0].endBar, 281, 'kutu pivot + 30 barda olur')
+  assert.equal(r.zones[0].endBar, 311, 'kutu pivot + 60 barda olur')
   assert.equal(r.touches.filter((t) => t.kind === 'touch').length, 0)
+})
+
+// PINE INPUT ARALIKLARI
+// Pine'da her girdi minval/maxval ile sinirlidir. Port bu sinirlari
+// uygulamazsa kullanici TradingView'da MUMKUN OLMAYAN bir ayarla tarama yapip
+// "grafikle ayni degil" sonucuna varir. Kirpma sessiz olmamali, raporlanmali.
+test('Pine araligi disindaki ayar kirpilir ve stats.paramsClamped ile bildirilir', () => {
+  const d = taslak(400, () => 100)
+  dipEkle(d, 250, 5, 20000)
+  const s = series.fromArrays(d)
+
+  // maxAgeBars Pine'da en az 50: 30 istenirse 50 kullanilir.
+  const kirpilan = runIndicator(s, { maxAgeBars: 30 }, ADIM)
+  assert.deepEqual(kirpilan.stats.paramsClamped.maxAgeBars, { istenen: 30, kullanilan: 50 })
+  assert.equal(kirpilan.zones[0].endBar, 301, 'kirpilmis omur (50) uygulanmali')
+
+  // Aralik icindeki deger kirpilmaz, rapor bos kalir.
+  const temiz = runIndicator(s, { maxAgeBars: 60, pivotLen: 5 }, ADIM)
+  assert.deepEqual(temiz.stats.paramsClamped, {}, 'gecerli ayarlar kirpilmamali')
+
+  // Ust sinir da uygulanir.
+  const ustSinir = runIndicator(s, { bbMult: 500 }, ADIM)
+  assert.equal(ustSinir.stats.paramsClamped.bbMult.kullanilan, 50)
 })
 
 test('boxLengthBars: kutunun sag kenari pivot barindan itibaren sayilir', () => {

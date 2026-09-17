@@ -13,6 +13,7 @@ const assert = require('node:assert/strict')
 
 const sim = require('../src/core/learn/similarity')
 const { pearson, cosine, euclidean, dtwDistance, similarity, knn, DEFAULT_WEIGHTS } = sim
+const fixtures = require('./helpers/fixtures')
 
 const F32 = (a) => Float32Array.from(a)
 
@@ -319,4 +320,118 @@ test('knn: 20 bin kayitta tek sorgu 50 ms altinda kalir', () => {
   const ms = Number(process.hrtime.bigint() - t0) / 1e6
   assert.equal(r.length, 25)
   assert.ok(ms < 50, 'knn 50 ms altinda kalmali, olculen: ' + ms.toFixed(1) + ' ms')
+})
+
+// ---------------------------------------------------------------------------
+// ON ELEME DOGRULUGU
+// ---------------------------------------------------------------------------
+// knn iki asamalidir: ucuz sekil benzerligiyle en iyi k * 8 aday secilir,
+// pahali kosinus ve DTW yalnizca onlarda hesaplanir. Bu hizlandirma SONUCU
+// DEGISTIRMEMELI; asagidaki test kaba kuvvetle (tum adaylarda tam benzerlik)
+// hesaplanan ilk k ile karsilastirir.
+test('knn sonucu kaba kuvvetle hesaplanan ilk k ile AYNI', () => {
+  const rnd = fixtures.prng(20260917)
+  const T = 1500000000
+  const SAAT = 3600
+
+  const sorgu = fixtures.rastgeleOzellik(rnd)
+  const events = []
+  for (let i = 0; i < 320; i++) {
+    events.push(fixtures.olay({
+      i: i,
+      // Zamanlar tekil: esitlikte siralama zamana gore cozulur.
+      time: T + i * SAAT,
+      basarili: i % 3 === 0,
+      features: fixtures.rastgeleOzellik(rnd),
+    }))
+  }
+
+  const k = 40
+  const sonuc = knn(sorgu, { events }, { k: k })
+  assert.equal(sonuc.length, k)
+
+  // Kaba kuvvet: her kayitta tam benzerlik, sonra azalan siralama.
+  const kaba = events
+    .map((ev) => ({ id: ev.id, time: ev.time, score: similarity(sorgu, ev.features).score }))
+    .sort((a, b) => (b.score !== a.score ? b.score - a.score : a.time - b.time))
+    .slice(0, k)
+
+  for (let i = 0; i < k; i++) {
+    assert.ok(Math.abs(sonuc[i].similarity - kaba[i].score) < 1e-9,
+      i + '. siradaki benzerlik degeri tutmuyor: ' + sonuc[i].similarity + ' vs ' + kaba[i].score)
+  }
+  // Kimlik kumesi ayni olmali; esit benzerlikte sira serbest.
+  const a = sonuc.map((x) => x.event.id).sort((x, y) => x - y)
+  const b = kaba.map((x) => x.id).sort((x, y) => x - y)
+  assert.deepEqual(a, b, 'kaba kuvvetle ayni kayitlar secilmeli')
+
+  // Siralama gercekten azalan ve on eleme en iyi kaydi kacirmamis olmali.
+  for (let i = 1; i < sonuc.length; i++) {
+    assert.ok(sonuc[i - 1].similarity >= sonuc[i].similarity - 1e-12)
+  }
+  const enIyi = kaba[0].score
+  assert.ok(Math.abs(sonuc[0].similarity - enIyi) < 1e-9, 'en benzer kayit kacirilmis')
+})
+
+// ---------------------------------------------------------------------------
+// OLAY TURU FILTRESI
+// ---------------------------------------------------------------------------
+// Kutunun DOGDUGU an ile fiyatin ona GERI DONDUGU an iki farkli kurulumdur.
+// Karistirilirsa "gecmiste bu yapi %78 tuttu" cumlesi baska bir kurulumun
+// istatistigini tasir.
+test('knn kind filtresi karsi turu HIC dondurmez', () => {
+  const rnd = fixtures.prng(4242)
+  const sorgu = fixtures.rastgeleOzellik(rnd)
+  const events = []
+  for (let i = 0; i < 60; i++) {
+    events.push(fixtures.olay({
+      i: i,
+      kind: i % 2 === 0 ? 'form' : 'touch',
+      time: 1500000000 + i * 3600,
+      features: fixtures.rastgeleOzellik(rnd),
+    }))
+  }
+
+  const formlar = knn(sorgu, { events }, { k: 60, kind: 'form' })
+  assert.equal(formlar.length, 30, 'tum form kayitlari aday olmali')
+  for (const x of formlar) assert.equal(x.event.kind, 'form', 'dokunus kaydi form sorgusuna sizmis')
+
+  const temaslar = knn(sorgu, { events }, { k: 60, kind: 'touch' })
+  assert.equal(temaslar.length, 30)
+  for (const x of temaslar) assert.equal(x.event.kind, 'touch', 'form kaydi dokunus sorgusuna sizmis')
+
+  // Filtresiz cagri iki turu de getirir (kontrol testi).
+  const hepsi = knn(sorgu, { events }, { k: 60 })
+  assert.equal(hepsi.length, 60)
+  assert.ok(hepsi.some((x) => x.event.kind === 'form'))
+  assert.ok(hepsi.some((x) => x.event.kind === 'touch'))
+
+  // Eski hafiza dosyalarinda `kind` yoktur: o kayitlar dokunus sayilir.
+  const eski = events.map((e) => {
+    const kopya = Object.assign({}, e)
+    delete kopya.kind
+    return kopya
+  })
+  const eskiTemas = knn(sorgu, { events: eski }, { k: 60, kind: 'touch' })
+  assert.equal(eskiTemas.length, 60, 'tur tasimayan kayitlar dokunus kabul edilir')
+  assert.equal(knn(sorgu, { events: eski }, { k: 60, kind: 'form' }).length, 0)
+})
+
+test('knn dolmayan limit emirleri (nofill) aday havuzuna ALMAZ', () => {
+  const rnd = fixtures.prng(99)
+  const sorgu = fixtures.rastgeleOzellik(rnd)
+  const events = []
+  for (let i = 0; i < 20; i++) {
+    events.push(fixtures.olay({
+      i: i,
+      time: 1500000000 + i * 3600,
+      features: fixtures.rastgeleOzellik(rnd),
+      // Tek indeksler: emir hic dolmadi, yani ortada islem yok.
+      outcome: i % 2 === 1 ? 'nofill' : 'respect',
+      success: i % 2 === 0,
+    }))
+  }
+  const r = knn(sorgu, { events }, { k: 20 })
+  assert.equal(r.length, 10, 'yalnizca dolan emirler aday olmali')
+  for (const x of r) assert.notEqual(x.event.outcome, 'nofill')
 })
