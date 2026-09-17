@@ -10,7 +10,8 @@
  *
  * Yayinlanan olaylar:
  *   'live:candle'  her cekimde son bar
- *   'live:signal'  yeni bir ilk dokunusta uretilen Signal
+ *   'live:signal'  yeni bir bolge olayinda (kutu olusumu veya ilk dokunus)
+ *                  uretilen Signal
  *   'live:status'  baslama, durma ve durum degisimi
  *   'log'          Turkce bilgi ve hata mesajlari
  */
@@ -131,7 +132,7 @@ async function start(opts) {
   state.ticks = 0
   state.signals = 0
   state.addedBars = 0
-  // Baslangictan ONCEKI dokunuslar icin sinyal uretilmez.
+  // Baslangictan ONCEKI olaylar icin sinyal uretilmez.
   state.sinceTime = Math.floor(Date.now() / 1000)
   basisLogged = false
   basisWarned = false
@@ -246,7 +247,7 @@ async function tick() {
       state.addedBars += res.added
     }
     if (res && res.touch && typeof res.touch.time === 'number') {
-      // Ayni dokunusun tekrar degerlendirilmesini onle.
+      // Ayni olayin tekrar degerlendirilmesini onle.
       if (res.touch.time > state.sinceTime) state.sinceTime = res.touch.time
     }
     if (res && res.signal) {
@@ -254,9 +255,11 @@ async function tick() {
       emitEvent('live:signal', { tf: state.tf, signal: res.signal, touch: res.touch || null })
       const dir = res.signal.direction === 'BUY' ? 'ALIS' : 'SATIS'
       if (res.signal.fired) {
-        logLine('Yeni sinyal: ' + dir + ', basari beklentisi %' + Math.round((res.signal.winRate || 0) * 100) + '.')
+        const tur = res.signal.kind === 'form' ? 'kutu olusumu' : 'bolge dokunusu'
+        logLine('Yeni sinyal: ' + dir + ' (' + tur + '), basari beklentisi %' +
+          Math.round((res.signal.winRate || 0) * 100) + '.')
       } else {
-        logLine('Yeni dokunus bulundu ama esikler gecilmedi, sinyal yayinlanmadi.')
+        logLine('Yeni bolge olayi bulundu ama esikler gecilmedi, sinyal yayinlanmadi.')
       }
     }
   } catch (err) {

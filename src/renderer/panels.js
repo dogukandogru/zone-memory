@@ -407,6 +407,56 @@ function eslesmeSerisi(m) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Olay turu yardimcilari                                              */
+/* ------------------------------------------------------------------ */
+
+/** Olay turunun okunabilir adi: kutu olusumu mu, bolgeye dokunus mu. */
+function turAdi(kind) {
+  return kind === 'form' ? 'Kutu oluşumu' : 'Bölge dokunuşu'
+}
+
+/** Liste satirlarinda yer kaplamayan kisa tur rozeti. */
+function turRozeti(kind) {
+  const e = h('span', 'badge tiny', kind === 'form' ? 'OLUŞUM' : 'DOKUNUŞ')
+  e.title = kind === 'form'
+    ? 'Kutunun doğduğu an, giriş onay barının kapanışı'
+    : 'Kutuya ilk dokunuş, giriş bölge kenarı'
+  return e
+}
+
+/**
+ * Sinyalin GERCEKLESEN sonucu. Geriye testte uretilen sinyaller bunu tasir;
+ * canli sinyallerde sonuc henuz belli olmadigi icin null gelir.
+ *
+ * `win` ile `outcome` ayni sey DEGILDIR:
+ *   outcome  bolgenin tutup tutmadigi etiketi (respect / break / timeout)
+ *   win      islemin gercekten kazanip kazanmadigi; bolge tutmus OLSA BILE
+ *            plan hedefine ulasilamadiysa kazanc sayilmaz
+ * Kullaniciyi ilgilendiren birinci sey `win`, ayrintida ikisi de gosterilir.
+ * @returns {{hazir:boolean, kazanc:boolean, etiket:string, sinif:string}}
+ */
+function sonucBilgisi(s) {
+  if (!s || s.win === null || s.win === undefined) {
+    return { hazir: false, kazanc: false, etiket: 'Sonuç yok', sinif: 'muted' }
+  }
+  const kazanc = s.win === true
+  return {
+    hazir: true,
+    kazanc: kazanc,
+    etiket: kazanc ? 'Tuttu' : 'Tutmadı',
+    sinif: kazanc ? 'up' : 'down',
+  }
+}
+
+/** outcome etiketinin okunabilir hali. */
+function outcomeAdi(outcome) {
+  if (outcome === 'respect') return 'Bölge tuttu'
+  if (outcome === 'break') return 'Bölge kırıldı'
+  if (outcome === 'timeout') return 'Zaman aşımı'
+  return 'Sonuç henüz belli değil'
+}
+
+/* ------------------------------------------------------------------ */
 /* renderSignals                                                       */
 /* ------------------------------------------------------------------ */
 
@@ -430,14 +480,45 @@ export function renderSignals(el, signals, opts) {
     if (suzgec === 'fired') return !!s.fired
     if (suzgec === 'buy') return s.direction !== 'SELL'
     if (suzgec === 'sell') return s.direction === 'SELL'
+    if (suzgec === 'form') return s.kind === 'form'
+    if (suzgec === 'touch') return s.kind !== 'form'
+    if (suzgec === 'won') return s.win === true
+    if (suzgec === 'lost') return s.win === false
     return true
   })
 
   if (liste.length === 0) {
+    // Gecmis sinyaller yalnizca geriye testte olusur. "Gecmisi Tara" hafizayi
+    // kurar ve eski sinyalleri SILER, cunku onlar artik gecersiz hafizaya
+    // dayanir. Bu yuzden bos liste mesaji kullaniciyi taramaya degil teste
+    // yollamali; aksi halde tarayip tarayip ayni bos ekrana bakiyor.
     el.appendChild(bosKutu(hepsi.length === 0
-      ? 'Henüz sinyal yok. Üst şeritten "Geçmişi Tara" ile hafızayı kurun.'
+      ? 'Sinyal listesi geriye testten gelir. "Test" sekmesine geçip "Testi Çalıştır" deyin.'
       : 'Bu süzgeçle gösterilecek sinyal yok.'))
     return
+  }
+
+  // Sonucu belli olan sinyallerin ozeti. Canli sinyaller henuz sonuclanmadigi
+  // icin bu sayima girmez.
+  let tutan = 0
+  let tutmayan = 0
+  let toplamPnl = 0
+  for (let i = 0; i < liste.length; i++) {
+    const x = liste[i]
+    if (x.win === true) { tutan++; toplamPnl += sayi(x.pnlAtr, 0) }
+    else if (x.win === false) { tutmayan++; toplamPnl += sayi(x.pnlAtr, 0) }
+  }
+  const sonuclu = tutan + tutmayan
+  if (sonuclu > 0) {
+    const oran = tutan / sonuclu
+    const ortPnl = toplamPnl / sonuclu
+    const ozet = h('div', 'list-summary')
+    ozet.appendChild(h('span', oran >= 0.5 ? 'up' : 'down', formatPercent(oran, 1) + ' tuttu'))
+    ozet.appendChild(h('span', 'muted', tam(tutan) + ' / ' + tam(sonuclu)))
+    ozet.appendChild(h('span', ortPnl >= 0 ? 'up' : 'down',
+      (ortPnl >= 0 ? '+' : '') + formatNumber(ortPnl, 3) + ' ATR'))
+    ozet.title = 'Sonucu belli olan ' + sonuclu + ' sinyalin isabet oranı ve işlem başına net kazancı'
+    el.appendChild(ozet)
   }
 
   const adet = Math.min(liste.length, AZAMI_SATIR)
@@ -451,6 +532,7 @@ export function renderSignals(el, signals, opts) {
 
     const orta = h('span', 'row-main')
     orta.appendChild(document.createTextNode(formatDateTime(s.time) + '  ' + formatPrice(s.price)))
+    orta.appendChild(turRozeti(s.kind))
     const altMetin = s.fired
       ? (tam(s.matchCount) + ' benzer kayıt, güven ' + formatPercent(s.confidence, 0))
       : ('Üretilmedi: ' + (Array.isArray(s.reasons) && s.reasons.length
@@ -460,9 +542,21 @@ export function renderSignals(el, signals, opts) {
     satir.appendChild(orta)
 
     const sag = h('span', 'row-side')
-    const oran = h('span', sayi(s.winRate, 0) >= 0.5 ? 'up' : 'down', formatPercent(s.winRate, 0))
-    sag.appendChild(oran)
-    sag.appendChild(h('span', 'row-sub', 'RR ' + formatNumber(s.rr, 2)))
+    const sonuc = sonucBilgisi(s)
+    if (sonuc.hazir) {
+      // Gerceklesen sonuc, beklentiden daha onemli oldugu icin ust satirda.
+      const rozet = h('span', sonuc.sinif, sonuc.etiket)
+      rozet.title = outcomeAdi(s.outcome) + ', beklenti %' +
+        Math.round(sayi(s.winRate, 0) * 100) + ', R/R ' + formatNumber(s.rr, 2)
+      sag.appendChild(rozet)
+      sag.appendChild(h('span', 'row-sub ' + (sayi(s.pnlAtr, 0) >= 0 ? 'up' : 'down'),
+        (sayi(s.pnlAtr, 0) >= 0 ? '+' : '') + formatNumber(s.pnlAtr, 2) + ' ATR'))
+    } else {
+      const oran = h('span', sayi(s.winRate, 0) >= 0.5 ? 'up' : 'down', formatPercent(s.winRate, 0))
+      oran.title = 'Benzer geçmiş kurulumların tutma oranı'
+      sag.appendChild(oran)
+      sag.appendChild(h('span', 'row-sub', 'RR ' + formatNumber(s.rr, 2)))
+    }
     satir.appendChild(sag)
 
     tiklamaBagla(satir, o.onSelect, s)
@@ -483,9 +577,13 @@ export function renderSignals(el, signals, opts) {
  * Tek bir sinyalin ayrintisini cizer.
  * @param {HTMLElement} el Ayrinti kabi (ornek: #signalDetail)
  * @param {object} signal
+ * @param {{onMatchSelect?:(match:object)=>void}} [opts]
+ *        onMatchSelect verilirse "Benzer gecmis ornekler" satirlari tiklanabilir
+ *        olur ve secilen ornek geri cagriya gecer (grafikte o ana gitmek icin).
  */
-export function renderSignalDetail(el, signal) {
+export function renderSignalDetail(el, signal, opts) {
   if (!el) return
+  const o = opts || {}
   bosalt(el)
   if (!signal) {
     el.appendChild(bosKutu('Ayrıntı için listeden bir sinyal seçin.'))
@@ -495,7 +593,8 @@ export function renderSignalDetail(el, signal) {
   const alis = signal.direction !== 'SELL'
   const yonSinifi = alis ? 'up' : 'down'
 
-  el.appendChild(bolumBasligi((alis ? 'AL sinyali' : 'SAT sinyali') + ' - ' + formatDateTime(signal.time)))
+  el.appendChild(bolumBasligi((alis ? 'AL sinyali' : 'SAT sinyali') + ' - ' +
+    turAdi(signal.kind) + ' - ' + formatDateTime(signal.time)))
 
   el.appendChild(statIzgara([
     stat('Güven skoru', formatPercent(signal.confidence, 0), yonSinifi),
@@ -508,8 +607,32 @@ export function renderSignalDetail(el, signal) {
   el.appendChild(kv('Beklenen lehte hareket', formatNumber(signal.expectedMfeAtr, 2) + ' ATR'))
   el.appendChild(kv('Beklenen aleyhte hareket', formatNumber(signal.expectedMaeAtr, 2) + ' ATR'))
   el.appendChild(kv('Bölge aralığı', formatPrice(signal.zoneBottom) + ' - ' + formatPrice(signal.zoneTop)))
+  el.appendChild(kv('Sinyal türü', signal.kind === 'form'
+    ? 'Kutu oluşumu, giriş onay barının kapanışı'
+    : 'Bölgeye geri dönüş, giriş bölge kenarına limit emir'))
   el.appendChild(kv('Durum', signal.fired ? 'Sinyal üretildi' : 'Eşikler geçilmedi',
     signal.fired ? 'up' : 'muted'))
+
+  // Gercek sonuc. Geriye testte uretilen sinyallerde bellidir; canli
+  // sinyallerde henuz olusmadigi icin bolum hic cizilmez.
+  const sonuc = sonucBilgisi(signal)
+  if (sonuc.hazir) {
+    el.appendChild(bolumBasligi('Gerçekleşen sonuç'))
+    el.appendChild(statIzgara([
+      stat('Sonuç', sonuc.etiket, sonuc.sinif),
+      stat('Net kazanç', (sayi(signal.pnlAtr, 0) >= 0 ? '+' : '') +
+        formatNumber(signal.pnlAtr, 3) + ' ATR', sayi(signal.pnlAtr, 0) >= 0 ? 'up' : 'down'),
+    ]))
+    el.appendChild(kv('Bölgenin durumu', outcomeAdi(signal.outcome),
+      signal.outcome === 'respect' ? 'up' : (signal.outcome === 'break' ? 'down' : 'muted')))
+    const barSayisi = sayi(signal.barsToOutcome, -1)
+    el.appendChild(kv('Sonuca kadar geçen bar', barSayisi >= 0 ? tam(barSayisi) : 'ufuk doldu'))
+    // "Bolge tuttu" ile "islem kazandi" ayni sey degil; fark gorunur kalsin.
+    if (signal.outcome === 'respect' && signal.win === false) {
+      el.appendChild(h('div', 'small muted',
+        'Bölge tuttu ama fiyat plandaki TP1 seviyesine ulaşmadı, o yüzden işlem kazanç sayılmadı.'))
+    }
+  }
 
   // En yakin ortak yapi (prototip)
   el.appendChild(bolumBasligi('En yakın ortak yapı'))
@@ -558,10 +681,17 @@ export function renderSignalDetail(el, signal) {
 
   let taslakVar = false
   const cizimler = []
+  const ornegeGit = typeof o.onMatchSelect === 'function' ? o.onMatchSelect : null
+
   for (let i = 0; i < eslesmeler.length; i++) {
     const m = eslesmeler[i]
-    const satir = h('div', 'row')
-    satir.style.cursor = 'default'
+    const satir = h('div', 'row' + (ornegeGit ? ' clickable' : ''))
+    if (ornegeGit) {
+      satir.title = 'Grafikte bu örneğe git'
+      tiklamaBagla(satir, ornegeGit, m)
+    } else {
+      satir.style.cursor = 'default'
+    }
 
     const sol = h('span', 'row-side')
     sol.appendChild(h('span', null, formatDate(m.time)))
@@ -599,9 +729,13 @@ export function renderSignalDetail(el, signal) {
     })
   }
 
-  el.appendChild(h('div', 'small muted', taslakVar
+  const notlar = [taslakVar
     ? 'Mini grafikler seyir taslağıdır: kesik dikey çizgi sinyal anını, sonrası lehte ve aleyhte azami hareketi gösterir.'
-    : 'Kesik dikey çizgi sinyal anını gösterir.'))
+    : 'Kesik dikey çizgi sinyal anını gösterir.']
+  if (ornegeGit) notlar.push('Bir örneğe tıklayınca grafik o tarihe gider.')
+  for (let i = 0; i < notlar.length; i++) {
+    el.appendChild(h('div', 'small muted', notlar[i]))
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -687,7 +821,7 @@ export function renderMemory(el, summary, prototypes) {
   const protolar = Array.isArray(prototypes) ? prototypes : []
 
   if (!s || sayi(s.total, 0) === 0) {
-    el.appendChild(bosKutu('Hafıza boş. "Geçmişi Tara" ile geçmiş dokunuşları öğrenin.'))
+    el.appendChild(bosKutu('Hafıza boş. "Geçmişi Tara" ile geçmiş bölge olaylarını öğrenin.'))
     return
   }
 
@@ -717,6 +851,19 @@ export function renderMemory(el, summary, prototypes) {
   el.appendChild(yonSatirlari.length
     ? tablo(['Yön', 'Toplam', 'Saygı', 'Kırılım', 'Oran'], yonSatirlari)
     : h('div', 'small muted', 'Yön dağılımı yok.'))
+
+  // Olay turu dagilimi
+  el.appendChild(bolumBasligi('Olay türü dağılımı'))
+  const turler = s.byKind || {}
+  const turSatirlari = []
+  for (const anahtar of ['form', 'touch']) {
+    const b = turler[anahtar]
+    if (!b) continue
+    turSatirlari.push([turAdi(anahtar), tam(b.total), tam(b.success), tam(b.fail), formatPercent(b.winRate, 1)])
+  }
+  el.appendChild(turSatirlari.length
+    ? tablo(['Tür', 'Toplam', 'Saygı', 'Kırılım', 'Oran'], turSatirlari)
+    : h('div', 'small muted', 'Tür dağılımı yok.'))
 
   // Seans dagilimi
   el.appendChild(bolumBasligi('Seans dağılımı'))
@@ -825,49 +972,115 @@ function yolaYaz(nesne, yol, deger) {
 function ayarGruplari(saglayiciSecenekleri) {
   return [
     {
-      baslik: 'İndikatör parametreleri',
+      baslik: 'Bölge (kutu) ayarları',
       bozar: true,
+      not: 'Kutu, hacimli bir pivotun Bollinger bandı dışına taştığı yerde doğar. ' +
+        'Bu bölümdeki değerler kutunun nerede doğduğunu ve ne kadar yaşadığını belirler.',
       alanlar: [
-        { yol: 'indicatorParams.lookback', ad: 'Pivot geriye bakış', tip: 'sayi', adim: 1, min: 1,
-          not: 'Pivotun iki yanında aranan bar sayısı, büyük değer daha az ve daha güçlü bölge üretir.' },
-        { yol: 'indicatorParams.boxWidthAtr', ad: 'Bölge genişliği (ATR)', tip: 'sayi', adim: 0.1, min: 0.1,
-          not: 'Bölge kutusunun kalınlığı, uzun dönem ATR ile çarpılır.' },
-        { yol: 'indicatorParams.breakConfirmBars', ad: 'Kırılım onay barı', tip: 'sayi', adim: 1, min: 1,
-          not: 'Kırılım için gereken ardışık kapanış sayısı.' },
-        { yol: 'indicatorParams.boxLengthBars', ad: 'Bölge ömrü (bar)', tip: 'sayi', adim: 1, min: 1,
-          not: 'Bölgenin ileriye doğru uzatıldığı bar sayısı.' },
-        { yol: 'indicatorParams.mergeNearAtr', ad: 'Yakın bölge birleştirme (ATR)', tip: 'sayi', adim: 0.1, min: 0,
-          not: 'Bu mesafeden yakın aynı yönlü bölge varsa yeni bölge açılmaz, 0 kapatır.' },
-        { yol: 'indicatorParams.minFlowStrength', ad: 'En az akış gücü', tip: 'sayi', adim: 0.1, min: 0,
-          not: 'Pivot barında aranan hacim akışı eşiği, yükseltmek bölge sayısını azaltır.' },
+        { yol: 'indicatorParams.pivotLen', ad: 'Pivot hassasiyeti', tip: 'sayi', adim: 1, min: 2, max: 20,
+          not: 'Pivotun iki yanında aranan bar sayısı. Kutu, pivot barından bu kadar bar SONRA onaylanır.' },
+        { yol: 'indicatorParams.zoneAtrMult', ad: 'Kutu kalınlığı (ATR)', tip: 'sayi', adim: 0.05, min: 0.05, max: 2,
+          not: 'Kutunun yüksekliği, pivot barındaki ATR ile çarpılır.' },
+        { yol: 'indicatorParams.mergeAtrMult', ad: 'Yakın kutuları birleştir (ATR)', tip: 'sayi', adim: 0.05, min: 0, max: 3,
+          not: 'Bu mesafeden yakın aynı yönlü kutu varsa yeni kutu açılmaz, mevcut kutu büyür. 0 kapatır.' },
+        { yol: 'indicatorParams.maxAgeBars', ad: 'Kutu ömrü (bar)', tip: 'sayi', adim: 1, min: 10,
+          not: 'Kutu pivot barından itibaren kaç bar canlı kalır. Süre dolunca dokunuş aranmaz.' },
+        { yol: 'indicatorParams.boxLengthBars', ad: 'Kutu çizim uzunluğu (bar)', tip: 'sayi', adim: 1, min: 1,
+          not: 'Kutunun grafikte ileriye doğru uzatıldığı bar sayısı.' },
+        { yol: 'indicatorParams.maxZones', ad: 'Azami canlı kutu', tip: 'sayi', adim: 1, min: 5, max: 100,
+          not: 'Aynı anda takip edilen kutu sayısı. Aşılınca en eski kutu takipten düşer.' },
+        { yol: 'indicatorParams.breakAtrMult', ad: 'Kırılım payı (ATR)', tip: 'sayi', adim: 0.05, min: 0,
+          not: 'Kapanış kutunun bu kadar dışına taşarsa kutu kırılır. Onay barı yoktur, tek bar yeter.' },
+        { yol: 'indicatorParams.touchCooldown', ad: 'Dokunuş sayım aralığı (bar)', tip: 'sayi', adim: 1, min: 1,
+          not: 'Aynı kutuya yapılan dokunuşların akış gücünü kaç barda bir artıracağı.' },
         { yol: 'indicatorParams.atrLen', ad: 'ATR uzunluğu', tip: 'sayi', adim: 1, min: 1,
-          not: 'Hedef ve zarar mesafelerinde kullanılan ATR periyodu.' },
+          not: 'Kutu kalınlığında, kırılım payında ve plan mesafelerinde kullanılan ATR periyodu.' },
+      ],
+    },
+    {
+      baslik: 'Hacim filtresi',
+      bozar: true,
+      not: 'Kutunun açılması için pivot barında hacim patlaması aranır. ' +
+        'Akış gücü = (hacim / hacim ortalaması) * 3, tavanı 10.',
+      onaylar: [
+        { yol: 'indicatorParams.useVolumeFilter', ad: 'Hacim filtresini kullan' },
+      ],
+      alanlar: [
+        { yol: 'indicatorParams.volumeLen', ad: 'Hacim ortalaması (bar)', tip: 'sayi', adim: 1, min: 10, max: 300,
+          not: 'Hacim oranının paydası olan hareketli ortalamanın uzunluğu.' },
+        { yol: 'indicatorParams.minVolRatio', ad: 'En az hacim oranı', tip: 'sayi', adim: 0.05, min: 0.1, max: 5,
+          not: 'Pivot barının hacmi ortalamanın en az bu katı olmalı.' },
+        { yol: 'indicatorParams.minFlowToShow', ad: 'En az akış gücü', tip: 'sayi', adim: 0.1, min: 1, max: 10,
+          not: 'Kutu açılması için gereken akış gücü eşiği. 6,0 yaklaşık iki kat hacim demektir.' },
+      ],
+    },
+    {
+      baslik: 'Bollinger filtresi',
+      bozar: true,
+      not: 'Kutu yalnızca pivot bandın dışına taştığında açılır. Kurulumu bir ' +
+        '"aşırılık + hacim" kurulumu yapan şey budur, sinyalin yönü de buradan gelir.',
+      onaylar: [
+        { yol: 'indicatorParams.useBBFilter', ad: 'Bollinger filtresini kullan' },
+      ],
+      alanlar: [
+        { yol: 'indicatorParams.bbLen', ad: 'Bollinger periyodu', tip: 'sayi', adim: 1, min: 2,
+          not: 'Orta bandın hareketli ortalama uzunluğu.' },
+        { yol: 'indicatorParams.bbMult', ad: 'Bollinger std sapma', tip: 'sayi', adim: 0.1, min: 0.1,
+          not: 'Bant genişliği çarpanı. Büyütmek kutu sayısını azaltır.' },
+      ],
+    },
+    {
+      baslik: 'Sinyal üretimi',
+      bozar: true,
+      not: 'İki sinyal türü vardır ve ikisi de ayrı ayrı öğrenilir: kutunun ' +
+        'doğduğu an (oluşum) ve kutuya yapılan ilk dokunuş.',
+      onaylar: [
+        { yol: 'indicatorParams.signalOnForm', ad: 'Kutu oluşumunda sinyal üret' },
+        { yol: 'indicatorParams.signalOnTouch', ad: 'Bölgeye dokunuşta sinyal üret' },
+      ],
+      alanlar: [
+        { yol: 'indicatorParams.minScoreForSignal', ad: 'En az skor', tip: 'sayi', adim: 1, min: 0, max: 5,
+          not: 'Beş bileşenden kaçı doğru olursa olay "nitelikli" sayılır (akış, trend, seans, fitil reddi, hacim).' },
+        { yol: 'indicatorParams.strongScoreLevel', ad: 'Güçlü sinyal skoru', tip: 'sayi', adim: 1, min: 0, max: 5,
+          not: 'Bu skorun üstündeki olaylar güçlü olarak işaretlenir.' },
+        { yol: 'indicatorParams.strongFlowLevel', ad: 'Güçlü akış eşiği', tip: 'sayi', adim: 0.5, min: 1, max: 10,
+          not: 'Akış skoru bunun üstündeyse skorun akış bileşeni sayılır.' },
+        { yol: 'indicatorParams.wickMinRatio', ad: 'Fitil reddi oranı', tip: 'sayi', adim: 0.05, min: 0, max: 1,
+          not: 'Olay barının fitili bar aralığının bu kadarını kaplarsa red bileşeni sayılır.' },
         { yol: 'indicatorParams.trendTf', ad: 'Trend zaman dilimi', tip: 'secim',
           secenekler: TF_SECENEKLERI.map((t) => ({ deger: t, ad: t })),
-          not: 'Üst zaman dilimi trend süzgeci, büyük seçilirse seri yeniden örneklenir.' },
+          not: 'Üst zaman dilimi trend süzgeci, büyük seçilirse seri yeniden örneklenir. Kutu oluşumunu etkilemez, yalnızca skora girer.' },
       ],
     },
     {
       baslik: 'Seans seçimleri',
       bozar: true,
-      not: 'Yalnızca seçili seanslarda oluşan dokunuşlar sinyal olarak nitelenir.',
+      not: 'Seans, skorun bir bileşenidir. Sert kapı açıksa seçili seans dışındaki ' +
+        'olaylar hiç sinyal sayılmaz.',
       onaylar: [
         { yol: 'indicatorParams.useAsia', ad: 'Asya' },
         { yol: 'indicatorParams.useLondon', ad: 'Londra' },
         { yol: 'indicatorParams.useNewYork', ad: 'New York' },
         { yol: 'indicatorParams.useOther', ad: 'Diğer' },
+        { yol: 'indicatorParams.hardSessionGate', ad: 'Sert seans kapısı' },
       ],
     },
     {
       baslik: 'Sonuç etiketleme',
       bozar: true,
+      not: 'Hafızanın öğrendiği "bölge tuttu mu" sorusunun tanımı. Buradaki hedef ' +
+        've geçersizlik seviyeleri, sinyal planındaki TP1 ve SL ile AYNI seviyelerdir.',
       alanlar: [
         { yol: 'outcomeCfg.horizonBars', ad: 'Sonuç ufku (bar)', tip: 'sayi', adim: 1, min: 1,
           not: 'Sonucun beklendiği azami bar sayısı, aşılırsa zaman aşımı sayılır.' },
-        { yol: 'outcomeCfg.tpAtr', ad: 'Hedef mesafesi (ATR)', tip: 'sayi', adim: 0.1, min: 0.1,
-          not: 'Etiketlemede kullanılan kâr al mesafesi.' },
-        { yol: 'outcomeCfg.slAtr', ad: 'Zarar mesafesi (ATR)', tip: 'sayi', adim: 0.1, min: 0.1,
-          not: 'Etiketlemede kullanılan zarar durdur mesafesi, aynı barda ikisi de vurulursa zarar sayılır.' },
+        { yol: 'outcomeCfg.targetAtr', ad: 'Hedef mesafesi (ATR)', tip: 'sayi', adim: 0.1, min: 0.1,
+          not: 'Dokunuş olayında hedef, bölge kenarından bu kadar uzaktadır. Uzun zaman diliminde büyütün.' },
+        { yol: 'outcomeCfg.breakBufferAtr', ad: 'Geçersizlik payı (ATR)', tip: 'sayi', adim: 0.05, min: 0,
+          not: 'Fiyat bölgenin uzak kenarından bu kadar dışarı taşarsa bölge kırılmış sayılır.' },
+        { yol: 'outcomeCfg.formTargetRr', ad: 'Oluşum hedefi (risk katı)', tip: 'sayi', adim: 0.1, min: 0,
+          not: 'Kutu oluşumu olayında hedef, riskin bu katı kadar uzaktadır. 0 yaparsanız sabit ATR mesafesi kullanılır.' },
+        { yol: 'outcomeCfg.maxFormRiskAtr', ad: 'Oluşumda azami risk (ATR)', tip: 'sayi', adim: 0.5, min: 0,
+          not: 'Kutu onaylanana kadar fiyat çok kaçtıysa olay hafızaya alınmaz. 0 sınırı kapatır.' },
       ],
     },
     {
@@ -887,6 +1100,10 @@ function ayarGruplari(saglayiciSecenekleri) {
     {
       baslik: 'Sağlayıcı ve anahtarlar',
       bozar: false,
+      onaylar: [
+        { yol: 'autoStartLive', ad: 'Program açılınca canlı takibi başlat' },
+        { yol: 'autoPrepareOnTfChange', ad: 'Zaman dilimi değişince eksikleri tamamla' },
+      ],
       alanlar: [
         { yol: 'providers.history', ad: 'Geçmiş kaynağı', tip: 'secim', secenekler: saglayiciSecenekleri,
           not: 'Geçmiş mumların indirileceği kaynak.' },
@@ -1114,6 +1331,22 @@ export function renderBacktest(el, result, opts) {
   el.appendChild(kv('Ortalama RR', formatNumber(s.avgRr, 2)))
   el.appendChild(kv('Isınma olayı', tam(s.warmupEvents)))
 
+  // Iki sinyal turu ayri ayri. Toplam rakam, birinin digerini tasidigi
+  // durumlari gizler; asil karar bu tabloda verilir.
+  const turler = Array.isArray(s.byKind) ? s.byKind : []
+  if (turler.length > 0) {
+    el.appendChild(bolumBasligi('Sinyal türüne göre'))
+    const satirlar = []
+    for (let i = 0; i < turler.length; i++) {
+      const k = turler[i]
+      satirlar.push([
+        turAdi(k.kind), tam(k.total), tam(k.fired), tam(k.wins), tam(k.losses),
+        formatPercent(k.winRate, 1), formatNumber(k.expectancyAtr, 3),
+      ])
+    }
+    el.appendChild(tablo(['Tür', 'Olay', 'Sinyal', 'Kazanan', 'Kaybeden', 'Oran', 'Beklenti'], satirlar))
+  }
+
   // Sermaye egrisi
   el.appendChild(bolumBasligi('Sermaye eğrisi (birikimli ATR)'))
   const noktalar = Array.isArray(r.equity) ? r.equity : []
@@ -1168,12 +1401,13 @@ export function renderBacktest(el, result, opts) {
       satirlar.push([
         formatDateTime(t.time),
         t.direction === 'SELL' ? 'SAT' : 'AL',
+        t.kind === 'form' ? 'Oluşum' : 'Dokunuş',
         formatPercent(t.winRate, 0),
         t.win ? 'Kazanç' : 'Kayıp',
         formatNumber(t.pnlAtr, 2),
         formatNumber(t.equityAtr, 2),
       ])
     }
-    el.appendChild(tablo(['Zaman', 'Yön', 'Beklenen', 'Sonuç', 'Kazanç', 'Birikim'], satirlar))
+    el.appendChild(tablo(['Zaman', 'Yön', 'Tür', 'Beklenen', 'Sonuç', 'Kazanç', 'Birikim'], satirlar))
   }
 }

@@ -137,6 +137,9 @@ function lightEvent(e) {
   return {
     id: e.id,
     zoneId: e.zoneId,
+    // Olay turu: 'form' kutunun dogdugu an, 'touch' fiyatin geri donup
+    // dokundugu an. Eski hafiza dosyalarinda yoktur, o kayitlar dokunustur.
+    kind: e.kind === 'form' ? 'form' : 'touch',
     isSupport: !!e.isSupport,
     direction: e.direction,
     bar: e.bar,
@@ -147,6 +150,9 @@ function lightEvent(e) {
     zoneFlow: e.zoneFlow,
     zoneAgeBars: e.zoneAgeBars,
     penetration: e.penetration,
+    entryDistAtr: e.entryDistAtr !== undefined ? e.entryDistAtr : null,
+    bbDistAtr: e.bbDistAtr !== undefined ? e.bbDistAtr : null,
+    volRatio: e.volRatio !== undefined ? e.volRatio : null,
     atr: e.atr,
     score: e.score,
     maxScore: e.maxScore,
@@ -269,11 +275,29 @@ async function getSeries(tf, force) {
   return s
 }
 
-/** Hafizayi onbellekten verir, yoksa diskten okur (yoksa null). */
+/**
+ * Hafizayi onbellekten verir, yoksa diskten okur (yoksa null).
+ *
+ * Baglam vektorunun boyutlari indikatore baglidir (features.CTX_NAMES). Eski
+ * bir indikator surumuyle uretilmis hafiza dosyasi kendi icinde tutarlidir,
+ * bu yuzden memstore onu sorunsuz okur, ama boyutlari uyusmadigi icin yeni
+ * olaylarla KARSILASTIRILAMAZ. Sessizce yanlis benzerlik uretmektense burada
+ * durup yeniden tarama istiyoruz.
+ */
 async function getMemory(tf, force) {
   if (!force && memoryCache.tf === tf && memoryCache.memory) return memoryCache.memory
   const memstore = core('store/memstore')
   const mem = await memstore.loadMemory(paths.memoryPath(tf))
+  if (mem && Array.isArray(mem.ctxNames) && mem.ctxNames.length > 0) {
+    const guncel = core('learn/features').CTX_NAMES
+    if (mem.ctxNames.length !== guncel.length) {
+      throw new Error(
+        'Bu zaman diliminin hafizasi eski indikator surumunden kalma (baglam ' +
+        mem.ctxNames.length + ' boyut, simdi ' + guncel.length +
+        '). "Geçmişi Tara" ile yeniden olusturun.'
+      )
+    }
+  }
   memoryCache = { tf: tf, memory: mem }
   return mem
 }
@@ -332,6 +356,15 @@ handlers['data:status'] = async function () {
     memstore = null
   }
 
+  // Guncel baglam vektoru uzunlugu: hafizanin eski surumden kalip kalmadigini
+  // anlamak icin karsilastirma olcusu.
+  let guncelCtxLen = 0
+  try {
+    guncelCtxLen = core('learn/features').CTX_NAMES.length
+  } catch (err) {
+    guncelCtxLen = 0
+  }
+
   const list = []
   const byTf = {}
   for (const tf of tfmod.TF_LIST) {
@@ -360,6 +393,11 @@ handlers['data:status'] = async function () {
       memoryFirstTime: mem ? mem.firstTime : null,
       memoryLastTime: mem ? mem.lastTime : null,
       hasMemory: !!(mem && mem.count > 0),
+      memoryCtxLen: mem ? num(mem.ctxLen, 0) : 0,
+      memoryBuiltToTime: mem ? num(mem.builtToTime, 0) : 0,
+      // Hafiza guncel indikator surumuyle mi uretilmis. false ise arayuz
+      // yeniden tarama ister; okumaya kalkarsa zaten hata alir.
+      memoryCurrent: !!(mem && mem.count > 0 && num(mem.ctxLen, 0) === guncelCtxLen),
       hasZones: await fileExists(paths.zonesPath(tf)),
       hasPrototypes: await fileExists(paths.protosPath(tf)),
       hasSignals: await fileExists(paths.signalsPath(tf)),
@@ -550,6 +588,9 @@ handlers['engine:scan'] = async function (payload, ctx) {
     tf: tf,
     ctxNames: built.ctxNames,
     events: events,
+    // Hangi bara kadar taradigimiz. Arayuz bunu deponun son bariyla
+    // karsilastirip hafizanin geride kalip kalmadigini anlar.
+    builtToTime: s.length > 0 ? s.time[s.length - 1] : 0,
   })
 
   ctx.progress(88, 'Bolgeler kaydediliyor')
@@ -921,7 +962,7 @@ handlers['engine:live-tick'] = async function (payload) {
       const tail = clampInt(payload.tailBars, 500, 50000, DEFAULT_TAIL_BARS)
       const start = Math.max(0, s.length - tail)
       const sub = seriesMod.sliceSeries(s, start, s.length)
-      const ind = core('indicator/masterTouch').runIndicator(sub, payload.params || {}, tfSec)
+      const ind = core('indicator/proZones').runIndicator(sub, payload.params || {}, tfSec)
       const touches = ind && Array.isArray(ind.touches) ? ind.touches : []
       const since = num(payload.sinceTime, 0)
 
@@ -939,9 +980,9 @@ handlers['engine:live-tick'] = async function (payload) {
         const feats = core('learn/features').buildFeatures(sub, cand, ind.context)
         const mem = await getMemory(tf, false)
         if (!feats) {
-          logs.push('Yeni dokunus bulundu ama ozellik penceresi yetersiz.')
+          logs.push('Yeni bolge olayi bulundu ama ozellik penceresi yetersiz.')
         } else if (!mem || !mem.events || mem.events.length === 0) {
-          logs.push('Yeni dokunus bulundu ama hafiza bos. Once "Geçmişi Tara" calistirin.')
+          logs.push('Yeni bolge olayi bulundu ama hafiza bos. Once "Geçmişi Tara" calistirin.')
         } else {
           const protos = await getProtos(tf, false)
           signal = core('learn/signal').evaluateTouch(cand, feats, mem, protos, payload.signalCfg || {}, num(cand.time, nowSec))
@@ -1006,6 +1047,8 @@ function tradesToSignals(trades, memory) {
     out.push({
       id: t.id,
       fired: true,
+      // Olay turu geriye testin islem kaydinda yok, hafizadaki olaydan gelir.
+      kind: e && e.kind === 'form' ? 'form' : 'touch',
       time: t.time,
       bar: t.bar,
       direction: t.direction,

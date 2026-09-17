@@ -42,47 +42,68 @@ sorunu dosyanin basindaki yorumda belirt.
  */
 
 /**
- * Indikatorun urettigi destek/direnc bolgesi.
+ * Indikatorun urettigi destek/direnc bolgesi (kutu).
  * @typedef {Object} Zone
  * @property {number} id            Seri icinde tekil, olusum sirasina gore artan
- * @property {boolean} isSupport    true destek, false direnc
+ * @property {boolean} isSupport    true destek (BUY LIQUIDITY), false direnc
  * @property {number} top
  * @property {number} bottom
- * @property {number} createdBar    Bolgenin ONAYLANDIGI bar (pivot + lookback)
+ * @property {number} createdBar    Kutunun ONAYLANDIGI bar (pivot + pivotLen)
  * @property {number} createdTime   createdBar zamani (UNIX saniye)
- * @property {number} pivotBar      Pivotun asil bari (createdBar - lookback)
+ * @property {number} pivotBar      Pivotun asil bari (createdBar - pivotLen).
+ *                                  Kutunun omru ve cizim uzunlugu BURADAN sayilir.
  * @property {number} pivotTime
- * @property {number} endBar        createdBar + boxLengthBars
+ * @property {number} endBar        min(oldugu bar, pivotBar + boxLengthBars)
  * @property {number} endTime
- * @property {number} flow          Pivottaki flow gucu
+ * @property {number} flow          Guncel akis skoru, 1..10 (dokunus ve
+ *                                  birlesmelerle buyur)
+ * @property {number} flowAtBirth   Kutu dogdugundaki akis skoru
+ * @property {number} mergeCount    Kac yakin pivot bu kutuya katildi
+ * @property {number} bbDistAtr     Pivotun Bollinger bandindan disari tasmasi,
+ *                                  ATR biriminde (asiriligin derinligi)
  * @property {boolean} broken
  * @property {number} brokenBar     Kirilmadiysa -1
  * @property {number} touchCount
  */
 
 /**
- * Bir bolgeye ILK dokunus olayi. Sistemin ogrenme birimi budur.
- * @typedef {Object} Touch
+ * Bir bolge OLAYI. Sistemin ogrenme birimi budur. Iki turu vardir ve ikisi de
+ * ayni yapiyi tasir; tarihsel nedenle dizinin adi hala `touches`.
+ *
+ *   kind = 'form'   Kutunun DOGDUGU an. Pivot barindan pivotLen bar sonra
+ *                   onaylanir, yani ileriye bakma yoktur.
+ *   kind = 'touch'  Fiyat kutuyu tamamen terk ettikten sonra GERI DONUP ilk kez
+ *                   dokundugu an.
+ *
+ * Bir bolge her turden EN FAZLA BIR olay uretir.
+ *
+ * @typedef {Object} Event
  * @property {number} id
  * @property {number} zoneId
+ * @property {'form'|'touch'} kind
  * @property {boolean} isSupport
  * @property {'BUY'|'SELL'} direction   isSupport ? 'BUY' : 'SELL'
  * @property {number} bar
  * @property {number} time
- * @property {number} price             Dokunus barinin kapanisi
+ * @property {number} price             Olay barinin kapanisi
  * @property {number} zoneTop
  * @property {number} zoneBottom
- * @property {number} zoneFlow
- * @property {number} zoneAgeBars       bar - createdBar
- * @property {number} penetration       Bolgeye ne kadar girildi, 0..1 arasi
- * @property {number} atr               Dokunus barindaki ATR(atrLen)
+ * @property {number} zoneFlow          Olay anindaki akis skoru, 1..10
+ * @property {number} zoneAgeBars       bar - pivotBar
+ * @property {number} penetration       Bolgeye ne kadar girildi, 0..1 arasi.
+ *                                      Form olayinda her zaman 0.
+ * @property {number} entryDistAtr      Kapanisin bolgenin yakin kenarina
+ *                                      uzakligi, ATR biriminde. Form olayinda
+ *                                      fiyatin pivottan ne kadar kactigini olcer.
+ * @property {number} bbDistAtr         Kutunun bant disina tasmasi (Zone'dan)
+ * @property {number} volRatio          Olay barinin hacim / hacim ortalamasi orani
+ * @property {number} atr               Olay barindaki ATR(atrLen)
  * @property {number} score
  * @property {number} maxScore
- * @property {boolean} qualified        Pine'in gercekten yayinladigi sinyal mi
+ * @property {boolean} qualified        Skor ve seans kapisini gecti mi
  * @property {boolean} strong
  * @property {string} session           'Asia' | 'London' | 'New York' | 'Other'
- * @property {Object<string,boolean>} parts  flow, trend, volatility, session,
- *                                           sweep, rejection, mss, fvg
+ * @property {Object<string,boolean>} parts  flow, trend, session, rejection, volume
  */
 
 /**
@@ -106,8 +127,8 @@ sorunu dosyanin basindaki yorumda belirt.
  */
 
 /**
- * Hafiza kaydi: dokunus + ozellik + sonuc.
- * @typedef {Touch & Outcome & {features: Features}} MemoryEvent
+ * Hafiza kaydi: olay + ozellik + sonuc.
+ * @typedef {Event & Outcome & {features: Features}} MemoryEvent
  */
 ```
 
@@ -122,7 +143,7 @@ src/core/store/binstore.js        A1
 src/core/store/memstore.js        A1
 src/core/ta.js                    A2
 src/core/session.js               A2
-src/core/indicator/masterTouch.js A3
+src/core/indicator/proZones.js    A3
 src/core/learn/outcome.js         A4
 src/core/learn/features.js        A4
 src/core/learn/similarity.js      A5
@@ -284,30 +305,74 @@ module.exports = {
 }
 ```
 
-## 9. `src/core/indicator/masterTouch.js` (A3)
+## 9. `src/core/indicator/proZones.js` (A3)
 
-Kullanicinin TradingView Pine indikatorunun ("XAUUSD MASTER son", MASTER 1 TOUCH)
-JavaScript portu. **Referans uygulama** olarak
-`/Users/dogukandogru/dev/indicator2/backend/app/services/indicator/master_touch.py`
-dosyasini oku ve mantigi birebir tasi; Pine kaynagi
-`/Users/dogukandogru/dev/indicator/indicator.pine` dosyasindadir.
+> Bu bolum ilk insadan SONRA degistirildi. Uygulama once MASTER 1 TOUCH
+> indikatoruyle (`masterTouch.js`) calisiyordu; o dosya kaldirildi ve yerine
+> kullanicinin yeni Pine indikatorunun portu kondu. Eski indikatorle olculmus
+> sayilar (README 1. bolumdeki tablo, `presets.js` yorumlari) YENI INDIKATOR
+> ICIN GECERLI DEGILDIR ve yeniden olculmesi gerekir.
+
+Kullanicinin Pine v6 indikatorunun ("proje son versiyon 3") JavaScript portu.
+Pine kaynagi: `~/Downloads/son pro.txt`.
+
+Ozet mantik:
+
+1. Pivot high / pivot low barinda bir kutu adayi dogar.
+2. Aday iki KESIN kapiyi gecmelidir:
+   - **hacim**: `vR = volume[pivot] / sma(volume, volumeLen)[pivot]` ve
+     `flow = clamp(vR * 3, 1, 10)`; `vR >= minVolRatio && flow >= minFlowToShow`
+   - **bollinger**: destekte `pivotLow <= bbLower[pivot]`, direncte
+     `pivotHigh >= bbUpper[pivot]`
+   Ikisi birlikte kutuyu bir "hacimli asirilik" kurulumu yapar. Sinyalin yonu
+   bu yuzden ORTALAMAYA DONUS yonudur: destek kutusu BUY, direnc kutusu SELL.
+   Pine'in kutuya yazdigi metin de budur (BUY LIQUIDITY / SELL LIQUIDITY).
+3. Kutu geometrisi, `zH = atr[pivot] * zoneAtrMult` olmak uzere:
+   - destek : `top = pivotLow + zH * 0.25`, `bottom = pivotLow - zH`
+   - direnc : `top = pivotHigh + zH`, `bottom = pivotHigh - zH * 0.25`
+4. Ayni yonde ve orta noktasi `atr[bar] * mergeAtrMult` mesafesinden yakin bir
+   AKTIF kutu varsa yeni kutu ACILMAZ; mevcut kutu iki pivotu da kapsayacak
+   sekilde genisler ve akis skoru `flow * 0.25` kadar artar (tavan 10).
+   Birlesme YENI BIR OLAY URETMEZ.
+5. Her dokunusta (ayni kutu icin `touchCooldown` bar araligiyla) akis skoru
+   0.35 artar, tavan 10.
+6. Kirilma: destekte `close < bottom - atr * breakAtrMult`, direncte
+   `close > top + atr * breakAtrMult`. **Onay bari yoktur, tek bar yeter.**
+   Kirilan kutu takipten duser.
+7. Kutu, PIVOT barindan itibaren `maxAgeBars` bar yasar; cizimi `boxLengthBars`
+   bar ileri uzar. Aktif liste `maxZones` ile sinirlanir, dolunca en eski kutu
+   takipten duser ama `zones` ciktisinda kalir.
+
+Pine'da olmayan, bu portun ekledigi katman **sinyal**tir. Pine yalnizca kutu
+ciziyordu, hicbir alis/satis olayi uretmiyordu. Iki olay turu vardir:
+
+- `kind = 'form'`  Kutu dogdugu barda (pivot + pivotLen). Ileriye bakma yok.
+- `kind = 'touch'` Kutuya yapilan ILK dokunusta. Bu, kutunun DOGDUGU bara
+  denk gelebilir: kutu pivotun etrafinda dogdugu icin fiyat o anda zaten kutunun
+  icinde olabilir. Kasitlidir, kullanicinin karari. Onceki bir surumde kutunun
+  once tamamen terk edilmesini bekleyen bir kural vardi (`requireArmedTouch`),
+  kaldirildi.
 
 ```js
 const DEFAULT_PARAMS = {
-  minScoreForSignal: 5, strongScoreLevel: 6,
-  lookback: 10, boxWidthAtr: 1.0, maxZoneHistory: 50,
-  breakConfirmBars: 5, boxLengthBars: 120, mergeNearAtr: 0.8,
-  flowLen: 10, minFlowStrength: 1.5, flowBonusMult: 1.25,
-  useFootprintScore: false, hardFootprintGate: false, allowNoFootprintData: true,
+  // Pine: Bolge Ayarlari
+  pivotLen: 5, atrLen: 14, zoneAtrMult: 0.35, mergeAtrMult: 0.55,
+  maxZones: 24, maxAgeBars: 100, touchCooldown: 12, boxLengthBars: 100,
+  // Pine: Volume Ayarlari
+  useVolumeFilter: true, volumeLen: 50, minVolRatio: 1.05, minFlowToShow: 6.0,
+  // Pine: Bollinger Band
+  useBBFilter: true, bbLen: 20, bbMult: 2.0,
+  // Pine'da sabit yazilmis kirilma tamponu
+  breakAtrMult: 0.15,
+  // Sinyal katmani (Pine'da yok)
+  signalOnForm: true, signalOnTouch: true,
+  minScoreForSignal: 3, strongScoreLevel: 4, strongFlowLevel: 8.0,
+  useFlowScore: true, useTrendScore: true, useSessionScore: true,
+  useRejectionScore: true, useVolumeScore: true, wickMinRatio: 0.35,
+  // Baglam (Pine'da yok, ozellik vektoru ve skor icin)
   useHtfTrend: true, trendTf: '15m', emaFastLen: 50, emaSlowLen: 200,
-  useVolatility: true, atrLen: 14, atrBaseLen: 50,
-  minAtrRatio: 0.70, maxAtrRatio: 2.50,
-  useLiquiditySweep: true, sweepLookback: 20,
-  useRejection: true, wickMinRatio: 0.35,
-  useMss: true, mssLen: 5,
-  useFvg: false, fvgLookback: 8,
-  sessionTz: 'Europe/Istanbul', useSessionScore: true, hardSessionGate: true,
-  useAsia: false, useLondon: true, useNewYork: true, useOther: false,
+  sessionTz: 'Europe/Istanbul', hardSessionGate: false,
+  useAsia: true, useLondon: true, useNewYork: true, useOther: true,
   mintick: 0.01,
 }
 
@@ -318,11 +383,27 @@ module.exports = {
    * @param {object} params  DEFAULT_PARAMS uzerine yazilir
    * @param {number} tfSec   Serinin zaman dilimi (saniye)
    * @param {(pct:number, msg:string)=>void} [onProgress]
-   * @returns {{zones: Zone[], touches: Touch[], context: IndicatorContext, stats: object}}
+   * @returns {{zones: Zone[], touches: Event[], context: IndicatorContext, stats: object}}
    */
   runIndicator(s, params, tfSec, onProgress),
 }
 ```
+
+**Skorlama.** Kutu olusumunun kapisi (hacim + bollinger) KESIN oldugu icin o iki
+kriter her kutuda dogrudur ve skor bileseni olarak bilgi tasimaz. Bu yuzden skor,
+olayin OLDUGU BARDA degisen bes seyi olcer:
+
+| bilesen | kosul | anahtar |
+| --- | --- | --- |
+| akis | `zoneFlow >= strongFlowLevel` | `flow` |
+| trend | ust zaman dilimi trendi yonle uyumlu | `trend` |
+| seans | olay bari secili seansta | `session` |
+| fitil reddi | olay barinin fitili `wickMinRatio` orandan uzun ve yon dogru | `rejection` |
+| hacim | `volume[bar] / volMA[bar] >= minVolRatio` | `volume` |
+
+`maxScore` = acik bilesen sayisi. `needed = min(minScoreForSignal, maxScore)`,
+`qualified = score >= needed && (!hardSessionGate || sessionAllowed)`.
+Kapali bir olay turu (`signalOnForm` / `signalOnTouch` false) hic olay uretmez.
 
 `IndicatorContext`, ozellik cikarimi ve etiketleme icin yeniden hesaplanmasin
 diye geri verilen ara diziler:
@@ -331,11 +412,14 @@ diye geri verilen ara diziler:
 /**
  * @typedef {Object} IndicatorContext
  * @property {Float64Array} atr        ATR(atrLen)
- * @property {Float64Array} atr200
  * @property {Float64Array} rsi        RSI(14)
  * @property {Float64Array} sma20
  * @property {Float64Array} sma50
- * @property {Float64Array} flowStrength
+ * @property {Float64Array} bbBasis
+ * @property {Float64Array} bbUpper
+ * @property {Float64Array} bbLower
+ * @property {Float64Array} volRatio     hacim / hacim ortalamasi
+ * @property {Float64Array} flowScore    clamp(volRatio * 3, 1, 10)
  * @property {Uint8Array} bullTrend
  * @property {Uint8Array} bearTrend
  * @property {Uint8Array} sessionIdx
@@ -344,35 +428,24 @@ diye geri verilen ara diziler:
  */
 ```
 
-Kritik davranislar (Python portundan aynen):
-1. Bolge olusumu: pivot barinda `flowStrength >= minFlowStrength` ve yon dogru
-   ise (destek icin `dir > 0`, direnc icin `dir < 0`). Genislik `atr200[pivot] * boxWidthAtr`.
-   Destek: `top = pivotLow`, `bottom = pivotLow - genislik`. Direnc: `bottom = pivotHigh`,
-   `top = pivotHigh + genislik`.
-2. `mergeNearAtr > 0` ise, AKTIF bolge listesinde ayni yonde ve orta noktasi
-   `atr200[pivot] * mergeNearAtr` mesafesinden yakin bolge varsa YENI BOLGE ACILMAZ.
-3. Aktif bolge listesi `maxZoneHistory` ile sinirlanir, en eskiden atilir.
-   Ancak fonksiyon TUM olusmus bolgeleri `zones` dizisinde dondurur (grafik icin).
-4. Kirilma: destekte `close < bottom`, direncte `close > top` olan ardisik bar
-   sayaci `breakConfirmBars`'a ulasinca bolge kirilir. Ardisik olmayan barda sayac sifirlanir.
-5. Dokunus: `zoneAlive && !broken && bar >= createdBar && low <= top && high >= bottom`.
-   `wasTouching` durumu ile YENI dokunus ayirt edilir. **Bolge basina yalnizca
-   ILK dokunus** olay uretir (`touchCount === 0` kontrolu).
-6. Skor bilesenleri ve `neededScore = min(minScoreForSignal, maxScore)` kurali
-   Python portuyla ayni. `qualified = score >= needed && sessionGateOk && footprintGateOk`.
-7. `penetration`: destekte `(top - min(low, top)) / (top - bottom)`, direncte
+Diger kurallar:
+
+1. `penetration`: destekte `(top - min(low, top)) / (top - bottom)`, direncte
    `(max(high, bottom) - bottom) / (top - bottom)`, 0..1 arasina kirpilir.
-8. Bu port TUM ilk dokunuslari `touches` icinde dondurur. `qualified` bayragi
-   Pine'in yayinladigi sinyali isaretler. Bu ayrim onemlidir: esik cok az sinyal
-   urettigi icin benzerlik motoru tum dokunuslari korpus olarak kullanir.
-9. HTF trend: `trendTf` grafik zaman diliminden BUYUKSE, seri o zaman dilimine
+   Form olayinda her zaman 0'dir, cunku fiyat kutunun icinde degildir.
+2. Bu port TUM olaylari `touches` icinde dondurur; `qualified` bayragi esigi
+   gecenleri isaretler. Benzerlik motoru tum olaylari korpus olarak kullanir.
+3. HTF trend: `trendTf` grafik zaman diliminden BUYUKSE, seri o zaman dilimine
    yeniden orneklenir, EMA'lar orada hesaplanir ve degerler **HTF bari kapandiktan
    sonra** gecerli olacak sekilde ileri doldurulur (lookahead yok). Kucuk veya
-   esitse seri oldugu gibi kullanilir.
-10. `onProgress` 0..100 arasi yuzde ile en fazla 100 kez cagrilir.
+   esitse seri oldugu gibi kullanilir. Trend kutu olusumunu ETKILEMEZ, yalnizca
+   skora ve baglama girer.
+4. `onProgress` 0..100 arasi yuzde ile en fazla 100 kez cagrilir.
+5. Olaylar zamana gore artan sirada doner, `id` degerleri 0'dan baslar ve
+   birer artar.
 
-Performans: 6 milyon bar isleyebilmeli. Ic dongude nesne ayirmaktan kacin,
-tipli dizi kullan, aktif bolge listesini duz dizilerde tut.
+Performans: 6 milyon bar isleyebilmeli. Ic dongude nesne ayirmaktan kacin;
+aktif kutu listesi `maxZones` ile sinirli oldugu icin dogrusal tarama yeterlidir.
 
 ## 10. `src/core/learn/outcome.js` (A4)
 
@@ -388,18 +461,53 @@ const DEFAULT_OUTCOME_CFG = {
   targetAtr: 1.0,        // bolge modu: yakin kenardan hedef uzakligi
   breakBufferAtr: 0.25,  // bolge modu: uzak kenardan tasma toleransi
   minTargetAtr: 0.25,    // hedef en az bu kadar uzakta olur
+  entryMode: 'zoneEdge', // dokunus olayinda giris: 'zoneEdge' | 'close'
+  formTargetRr: 1.0,     // form olayinda hedef, riskin bu kati kadar uzakta
+  maxFormRiskAtr: 3.0,   // form olayinda kabul edilen azami risk (ATR)
   tpAtr: 1.0,            // atr modu
   slAtr: 1.0,            // atr modu
 }
 
 module.exports = {
   DEFAULT_OUTCOME_CFG,
-  labelTouch(s, touch, atrAtTouch, cfg),   // Outcome | null
-  zoneLevels(touch, atr, cfg),             // {entry, target, invalid, sign, riskAtr, rewardAtr} | null
+  labelTouch(s, event, atrAtEvent, cfg),   // Outcome | null
+  zoneLevels(event, atr, cfg),             // {entry, target, invalid, sign, entryMode, riskAtr, rewardAtr} | null
 }
 ```
 
-**Bolge modu (varsayilan).** Destek icin:
+**Iki olay turu, iki giris modeli.** `event.kind` seviyeleri belirler:
+
+| | `kind = 'touch'` | `kind = 'form'` |
+| --- | --- | --- |
+| giris | bolgenin YAKIN kenari, limit emir | onay barinin KAPANISI |
+| gecersizlik | bolgenin UZAK kenari -/+ `breakBufferAtr * atr` | ayni |
+| hedef | yakin kenardan `targetAtr * atr` | giristen `formTargetRr * risk` |
+| odul | her zaman `targetAtr` | her zaman `formTargetRr` risk birimi |
+
+Dokunus olayinda giris kenardadir cunku dokunus tanimi geregi fiyat o kenari
+gecmistir, yani limit emir dolar. Form olayinda fiyat kutunun icinde DEGILDIR,
+oraya donmeyebilir; bu yuzden giris kapanistir ve risk kurulumdan kuruluma
+degisir. Hedef sabit bir ATR mesafesi olsaydi risk/odul 0.3 ile 2.0 arasinda
+savrulur ve "gecmiste bu yapi %70 tuttu" cumlesi karsilastirilamaz seylerin
+ortalamasi olurdu. `formTargetRr` bunu tek eksene indirger: tum form olaylari
+ayni risk/odul oranini tasir, aralarindaki tek fark isabet oranidir.
+
+`formTargetRr = 0` verilirse form olayinda da sabit `targetAtr` mesafesi
+kullanilir.
+
+**Form olayinda iki eleme.** `zoneLevels` su iki durumda `null` doner ve olay
+hafizaya HIC girmez (`noLabel` olarak sayilir):
+1. Giris zaten gecersizlik tarafindaysa (pivot onaylanana kadar fiyat kutunun
+   obur tarafina gecmis).
+2. Risk `maxFormRiskAtr` esigini asiyorsa (sivri bir fitil dibinden sonra fiyat
+   cok uzaga kacmis). Boyle bir kurulum gercekte islenmez; hafizaya girerse hem
+   kendi istatistigini bozar hem plan hedeflerini sisirir. `0` sinirı kapatir.
+
+Ayrica dokunus olayina ozgu kural: giris kenardan limit emirle OLAY BARI icinde
+dolar, o bar gecersizligi de gorduyse bar ici sirayi bilemedigimiz icin ANINDA
+kirilma yazilir. Form olayinda boyle bir kural yoktur, emir bar kapaninca dolar.
+
+**Bolge modu (varsayilan).** Destege yapilan dokunus icin:
 `gecersizlik = zoneBottom - breakBufferAtr * atr`,
 `hedef = max(zoneTop + targetAtr * atr, giris + minTargetAtr * atr)`.
 Direnc simetriktir. Gecersizlik once vurulursa `'break'` (bolge kirildi),
@@ -428,19 +536,19 @@ const CTX_NAMES = [
   'rsi', 'atrPct', 'distSma20Atr', 'distSma50Atr',
   'hourSin', 'hourCos', 'dowSin', 'dowCos',
   'zoneWidthAtr', 'zoneAge', 'zoneFlow', 'penetration',
-  'scoreRatio', 'pFlow', 'pTrend', 'pVolatility', 'pSession',
-  'pSweep', 'pRejection', 'pMss', 'isSupport', 'trendState',
+  'scoreRatio', 'pFlow', 'pTrend', 'pSession', 'pRejection', 'pVolume',
+  'isSupport', 'trendState', 'isForm', 'bbDistAtr', 'volRatio', 'entryDistAtr',
 ]
 
 module.exports = {
   SHAPE_LEN, RET_LEN, WINDOW_BARS, CTX_NAMES,
   /**
    * @param {Series} s
-   * @param {Touch} touch
+   * @param {Event} event
    * @param {IndicatorContext} ctx
    * @returns {Features|null}   Pencere yetmiyorsa null
    */
-  buildFeatures(s, touch, ctx),
+  buildFeatures(s, event, ctx),
   rowLength(),   // SHAPE_LEN + RET_LEN + CTX_NAMES.length
   packRow(features, out, offset),   // Float32Array'e yaz
   unpackRow(buf, offset),           // Features geri kur
@@ -461,11 +569,21 @@ Hesaplama kurallari:
   `clamp((price-sma50)/atr,-5,5)/5`, `sin(2pi*h/24)`, `cos(2pi*h/24)`,
   `sin(2pi*dow/7)`, `cos(2pi*dow/7)`,
   `clamp((zoneTop-zoneBottom)/atr,0,5)/5`, `min(zoneAgeBars/120,1)`,
-  `clamp(zoneFlow,0,5)/5`, `penetration`, `score/maxScore`,
-  `parts.flow?1:0`, `parts.trend?1:0`, `parts.volatility?1:0`, `parts.session?1:0`,
-  `parts.sweep?1:0`, `parts.rejection?1:0`, `parts.mss?1:0`,
-  `isSupport?1:0`, `bullTrend?1:(bearTrend?-1:0)`.
+  `clamp(zoneFlow,0,10)/10`, `penetration`, `score/maxScore`,
+  `parts.flow?1:0`, `parts.trend?1:0`, `parts.session?1:0`,
+  `parts.rejection?1:0`, `parts.volume?1:0`,
+  `isSupport?1:0`, `bullTrend?1:(bearTrend?-1:0)`,
+  `kind==='form'?1:0`, `clamp(bbDistAtr,0,3)/3`, `clamp(volRatio,0,3)/3`,
+  `clamp(entryDistAtr,0,5)/5`.
+- `zoneFlow` 10'a bolunur cunku Pine'daki akis skoru 1..10 araligindadir.
 - Tum ctx degerleri sonlu olmali; NaN cikarsa 0 yaz.
+
+**Baglam vektoru indikatore baglidir.** `pFlow / pTrend / pSession / pRejection /
+pVolume`, `proZones` cikisindaki `parts` anahtarlarinin birebir karsiligidir.
+`CTX_NAMES` degisirse eski hafiza dosyalari kendi iclerinde tutarli kalir ama
+yeni olaylarla KARSILASTIRILAMAZ. Motor bunu yakalar: `engine.worker.js`
+`getMemory`, yuklenen `ctxNames` uzunlugu guncelden farkliysa anlasilir bir hata
+firlatip yeniden tarama ister.
 
 ## 12. `src/core/learn/similarity.js` (A5)
 
@@ -488,7 +606,7 @@ module.exports = {
   /**
    * @param {Features} query
    * @param {{events:MemoryEvent[]}} memory
-   * @param {{k:number, direction:string, excludeWithinSec:number,
+   * @param {{k:number, direction:string, kind:string, excludeWithinSec:number,
    *          beforeTime:number|null, weights:object}} opts
    * @returns {Array<{event:MemoryEvent, shapeSim, ctxSim, dtwSim, similarity}>}
    *          Benzerlige gore azalan sirali, en fazla k adet.
@@ -500,6 +618,11 @@ module.exports = {
 `excludeWithinSec`: sorgu zamanina bu kadar yakin kayitlar elenir (komsu
 dislama; ayni kurulumun kendisiyle eslesmesini onler). `beforeTime` verilirse
 yalnizca o zamandan ONCEKI kayitlar aday olur (yuruyen ileri test icin sart).
+
+`kind`: yalnizca ayni turdeki olaylar aday olur. Kutunun DOGDUGU an ile fiyatin
+ona GERI DONDUGU an iki farkli kurulumdur; girisleri, riskleri ve tipik
+sonuclari ayridir. Karistirilirsa "gecmiste bu yapi %78 tuttu" cumlesi baska bir
+kurulumun istatistigini tasir. Kayitta `kind` yoksa `'touch'` kabul edilir.
 
 Performans: 20 bin kayitta 1 sorgu 50 ms altinda kalmali. Once ucuz `shapeSim`
 ile on eleme yap (en iyi `k*8` aday), sonra yalnizca onlarda DTW hesapla.
@@ -536,8 +659,9 @@ egim (yukselen/dusen/yatay), oynaklik (sikisik/genis) ve son hareket
 ```js
 module.exports = {
   /**
-   * Tarih boyunca indikatoru calistirir, ilk dokunuslari etiketler,
-   * ozellik vektorlerini cikarir ve hafiza kaydini uretir.
+   * Tarih boyunca indikatoru calistirir, uretilen olaylari (kutu olusumu ve
+   * bolgeye ilk geri donus) etiketler, ozellik vektorlerini cikarir ve hafiza
+   * kaydini uretir.
    * @param {Series} s
    * @param {{tf:string, params:object, outcomeCfg:object}} cfg
    * @param {(pct:number,msg:string)=>void} [onProgress]
@@ -546,13 +670,22 @@ module.exports = {
   buildMemory(s, cfg, onProgress),
   /** Var olan hafizaya yeni barlardan gelen olaylari ekler (artimli tarama). */
   extendMemory(s, memory, cfg, onProgress),
-  /** Hafiza ozeti: toplam, basarili, basarisiz, yon ve seans dagilimi, yillara gore. */
+  /**
+   * Hafiza ozeti: toplam, basarili, basarisiz; yon, OLAY TURU (byKind),
+   * seans dagilimi ve yillara gore kirilim.
+   */
   summarize(memory),
 }
 ```
 
-`stats` icinde en az: `bars, zonesCreated, zonesMergedAway, firstTouches,
-qualified, labeled, respected, broken, timeout, scoreHist`.
+`stats` icinde en az: `bars, zonesCreated, zonesMerged, totalEvents, formEvents,
+touchEvents, formStored, touchStored, firstTouches, qualified, labeled,
+respected, broken, timeout, scoreHist`.
+
+**Artimli taramada tekrar anahtari.** `extendMemory` seriyi bastan degil, son
+olayin epeyce oncesinden yeniden tarar ve yeniden taramada kimlikler sifirdan
+numaralanir. Tekrar kontrolu bu yuzden `kind + zoneId + time` uclusuyle yapilir;
+asil koruma ise "hafizadaki son olay zamanindan SONRAKI olaylar" filtresidir.
 
 ## 15. `src/core/learn/signal.js` (A6)
 
@@ -566,18 +699,20 @@ const DEFAULT_SIGNAL_CFG = {
 module.exports = {
   DEFAULT_SIGNAL_CFG,
   /**
-   * Bir dokunusu hafizayla karsilastirip sinyal uretir.
+   * Bir bolge olayini hafizayla karsilastirip sinyal uretir. Karsilastirma
+   * YALNIZCA ayni turdeki (`event.kind`) gecmis olaylarla yapilir.
    * Esikleri gecemezse yine bir nesne doner ama `fired: false` olur; boylece
    * arayuz "neden sinyal olmadi" bilgisini gosterebilir.
    * @returns {Signal}
    */
-  evaluateTouch(touch, features, memory, prototypes, cfg, beforeTime),
+  evaluateTouch(event, features, memory, prototypes, cfg, beforeTime),
 }
 
 /**
  * @typedef {Object} Signal
  * @property {string} id
  * @property {boolean} fired
+ * @property {'form'|'touch'} kind
  * @property {number} time
  * @property {number} bar
  * @property {'BUY'|'SELL'} direction
@@ -634,8 +769,15 @@ module.exports = {
 ```
 
 `Summary` icinde: `total, fired, wins, losses, winRate, expectancyAtr,
-profitFactor, maxDrawdownAtr, avgRr, baselineWinRate` (baseline = tum ilk
-dokunuslarin ham basari orani; sistemin katma degerini gosterir).
+profitFactor, maxDrawdownAtr, avgRr, baselineWinRate, byKind`
+(baseline = etiketlenmis TUM olaylarin ham basari orani; sistemin katma degerini
+gosterir).
+
+`byKind`, iki sinyal turunun ayri kirilimidir:
+`[{kind, total, fired, wins, losses, winRate, expectancyAtr, totalPnlAtr}]`.
+Toplam rakam, turlerden birinin digerini tasidigi durumlari gizler; hangi
+sinyalin gercekten calistigina bu tabloya bakilarak karar verilir.
+`Trade` kayitlari da `kind` alani tasir.
 
 `equity`: her islemde `success ? +tp1Atr : -slAtr` birikimli toplami.
 
@@ -751,10 +893,12 @@ Duzen:
 bolgeleri dikdortgen olarak cizer. Yalnizca gorunur araliktaki bolgeler cizilir.
 `subscribeVisibleLogicalRangeChange` ve `ResizeObserver` ile yeniden cizim yapar.
 Destek yesil, direnc kirmizi, kirilan bolge soluk ve kesik cerceveli.
-Bolgeye tiklaninca o bolgenin dokunus gecmisi sag panelde acilir.
+Bolgeye tiklaninca o bolgenin olay gecmisi sag panelde acilir.
 
 Sinyal isaretleri: `series.setMarkers` ile BUY icin altta yukari ok (`arrowUp`),
-SELL icin ustte asagi ok. Etikette basari orani yazar, ornegin `%78`.
+SELL icin ustte asagi ok. Etikette olay turu oneki ve basari orani yazar:
+`O %78` kutu olusumu, `D %78` bolgeye geri donus. Sinyal listesinde ayni ayrim
+`OLUSUM` / `DOKUNUS` rozetiyle gosterilir ve suzgecte ayri secenekleri vardir.
 Bir sinyale tiklaninca sag panelde detay acilir: giris/TP1/TP2/SL fiyat cizgileri
 grafige dusler ve benzer gecmis ornekler mini grafik (sparkline canvas) olarak listelenir.
 
@@ -787,10 +931,14 @@ yukselen mum `#26a69a`, dusen mum `#ef5350`, metin `#d1d4dc`.
 - `series.test.js`: resample kova hizalamasi, indexAtTime ikili aramasi,
   concatSeries tekillestirme.
 - `binstore.test.js`: yaz/oku gidis donus, append tekillestirme.
-- `indicator.test.js`: sentetik seride bolge olusumu, yakin bolge birlestirme,
-  kirilma sayaci, ILK dokunus kurali (ikinci dokunus olay uretmemeli),
-  HTF trendinde ileriye bakma olmadigi.
-- `outcome.test.js`: TP once, SL once, ayni barda ikisi (SL kazanir), timeout.
+- `indicator.test.js`: sentetik seride kutu olusumu, hacim ve bollinger
+  kapilarinin gercekten elemesi, yakin pivotun birlestigi, tek barda kirilma,
+  kutu omru, form olayinin onay barinda uretildigi, temas olayinin ilk dokunusta
+  (gerekirse kutunun dogdugu barda) uretildigi, bolge basina her turden EN FAZLA
+  BIR olay, olaylarin zaman sirasi, HTF trendinde ileriye bakma olmadigi.
+- `outcome.test.js`: TP once, SL once, ayni barda ikisi (SL kazanir), timeout;
+  form olayinda girisin kapanis oldugu, hedefin riskin kati oldugu
+  (`formTargetRr`), asiri riskin `maxFormRiskAtr` ile elendigi.
 - `similarity.test.js`: pearson/cosine/dtw bilinen degerler, knn siralamasi,
   `beforeTime` filtresinin ileriye bakmayi engelledigi.
 - `signal.test.js`: esik altinda `fired:false`, plan fiyatlarinin yonu dogru.

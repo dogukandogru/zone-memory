@@ -6,41 +6,75 @@ XAUUSD destek/direnç bölgelerinin geçmiş hafızası ve canlı örüntü eşl
 
 ## 1. Bu uygulama ne yapar
 
-TradingView'deki "MASTER 1 TOUCH" indikatörü fiyat grafiğinde destek ve direnç
-bölgeleri çizer ve fiyat bir bölgeye **ilk kez** dokunduğunda sinyal üretir.
-Bu sinyallerin bir kısmı tutar, bir kısmı tutmaz. Zone Memory, tam olarak bu
-farkı öğrenir.
+TradingView'deki **"proje son versiyon 3"** indikatörü fiyat grafiğinde
+destek ve direnç kutuları çizer. Bir kutu ancak iki koşul birlikte sağlanınca
+doğar: pivot barında **hacim patlaması** olacak ve pivot **Bollinger bandının
+dışına** taşmış olacak. Yani her kutu bir "hacimli aşırılık" noktasıdır. Kutunun
+üzerine yazan `BUY LIQUIDITY` / `SELL LIQUIDITY` etiketi de beklenen yönü söyler:
+destek kutusunda ALIŞ, direnç kutusunda SATIŞ.
 
-Uygulama şunu yapar:
+İndikatörün kendisi sinyal üretmez, sadece kutu çizer. Zone Memory bu kutulardan
+**iki ayrı sinyal** üretir ve ikisini de ayrı ayrı öğrenir:
+
+1. **Kutu oluşumu (OLUŞUM).** Kutu doğduğu anda sinyal verir, sonraki hareketi
+   öngörür. Kutu pivot barından `pivotLen` bar sonra onaylanır; pivot ancak o
+   zaman kesinleşir, yani ileriye bakma yoktur. Giriş, onay barının kapanışıdır.
+2. **Bölge dokunuşu (DOKUNUŞ).** Kutuya yapılan ilk dokunuşta sinyal verir.
+   Giriş, bölgenin yakın kenarına limit emirdir.
+
+Bu sinyallerin bir kısmı tutar, bir kısmı tutmaz. Zone Memory tam olarak bu
+farkı öğrenir:
 
 1. 2009'dan bugüne kadarki tüm XAUUSD mumlarında indikatörü **birebir** çalıştırır.
-2. Oluşan her bölgeye yapılan **ilk dokunuşu** kaydeder (sistemin öğrenme birimi budur).
-3. Her dokunuşun sonucunu geriye dönük etiketler: bölge tuttu mu (`respect`),
+2. Her kutu için en fazla bir oluşum ve bir dokunuş olayı kaydeder
+   (sistemin öğrenme birimi budur).
+3. Her olayın sonucunu geriye dönük etiketler: bölge tuttu mu (`respect`),
    kırıldı mı (`break`), yoksa hiçbir şey olmadan ufuk mu doldu (`timeout`).
-4. Her dokunuş anının "parmak izini" çıkarır: son 32 barın şekli, getiri profili
-   ve bağlam bilgileri (RSI, ATR, trend, seans, bölge yaşı, skor bileşenleri).
-5. Canlıda yeni bir ilk dokunuş oluştuğunda bu parmak izini geçmişteki
-   **on binlerce dokunuşla** karşılaştırır, en benzer olanları bulur ve
-   "geçmişte bu yapı %78 oranında tuttu, ortalama benzerlik 0,86" gibi
-   ölçülmüş bir değerlendirme verir.
+4. Her olay anının "parmak izini" çıkarır: son 32 barın şekli, getiri profili
+   ve bağlam bilgileri (RSI, ATR, trend, seans, bölge yaşı, bandın dışına taşma
+   derinliği, hacim oranı, skor bileşenleri).
+5. Canlıda yeni bir olay oluştuğunda bu parmak izini geçmişteki **aynı türdeki**
+   on binlerce olayla karşılaştırır, en benzer olanları bulur ve "geçmişte bu
+   yapı %78 oranında tuttu, ortalama benzerlik 0,86" gibi ölçülmüş bir
+   değerlendirme verir.
 
-Yani indikatörün sinyalini olduğu gibi kabul etmez. Sinyalin geçmişte **gerçekten
-tutmuş** olan versiyonlarına ne kadar benzediğini ölçer ve size onu söyler.
+İki tür asla birbiriyle karşılaştırılmaz. Kutunun doğduğu an ile fiyatın ona
+geri döndüğü an farklı kurulumlardır: girişleri, riskleri ve tipik sonuçları
+ayrıdır. Karıştırılsaydı "geçmişte bu yapı %78 tuttu" cümlesi başka bir
+kurulumun istatistiğini taşırdı.
+
+Yani indikatörün çizdiği kutuyu olduğu gibi kabul etmez. O kutudan doğan
+sinyalin geçmişte **gerçekten tutmuş** olan versiyonlarına ne kadar benzediğini
+ölçer ve size onu söyler.
 
 Kısaca: bu bir karar destek aracıdır. Otomatik işlem açmaz, emir göndermez.
 
 ### Ölçülen sonuçlar
 
-Aşağıdaki sayılar tahmin değil, bu veriyle yapılmış ölçümdür. Yöntem:
+> **ÖNEMLİ: Aşağıdaki tablo ESKİ indikatöre aittir ve şu anki sürüm için
+> GEÇERLİ DEĞİLDİR.**
+>
+> Uygulama önce MASTER 1 TOUCH indikatörüyle çalışıyordu ve o indikatör için
+> aşağıdaki ölçüm yapılmıştı. İndikatör "proje son versiyon 3" ile değiştirildi;
+> kutu oluşum kuralları, sinyal türleri ve özellik vektörü tamamen değişti.
+> Tablo, kullanılan yöntemin ne olduğunu göstermek için duruyor. Yeni
+> indikatörün sayıları **ölçülmedi**; ölçmek için Test sekmesindeki yürüyen
+> ileri testi çalıştırın ve oradaki "Sinyal türüne göre" tablosuna bakın.
+> `src/core/learn/presets.js` içindeki hazır ayarlar da aynı sebeple eski
+> ölçüme dayanır ve yeniden aranmalıdır.
+
+Yöntem (yeni indikatör için de aynen uygulanabilir):
 
 - 6.086.450 adet 1 dakikalık XAUUSD mumu, 2009-03 ile 2026-07 arası.
 - Geçmiş ikiye bölündü. Parametreler **yalnızca 2009-2018** döneminden seçildi,
   sonra hiç dokunulmamış **2019-2026** döneminde test edildi. Aşağıdaki tablo
   o ikinci dönemin sonucudur.
-- Testin kendisi de ileriye bakmaz: her dokunuş yalnızca kendinden **en az bir
+- Testin kendisi de ileriye bakmaz: her olay yalnızca kendinden **en az bir
   gün önce sonuçlanmış** kayıtlarla karşılaştırılır.
 - İşlem maliyeti dahildir: fiyatın %0,0068'i, yani 4400 dolarlık altında
   0,30 dolar gidiş-dönüş spread.
+
+Eski indikatörün (MASTER 1 TOUCH) doğrulama dönemi sonucu:
 
 | TF | işlem | isabet | **taban** | brüt/işlem | maliyet | **net/işlem** | kâr faktörü |
 |---|---|---|---|---|---|---|---|
@@ -48,22 +82,12 @@ Aşağıdaki sayılar tahmin değil, bu veriyle yapılmış ölçümdür. Yönte
 | 5m | 113 | %57,5 | %43,2 | +0,293 ATR | -0,108 | **+0,184 ATR** | 1,30 |
 | 15m | 18 | %55,6 | %38,4 | +0,264 ATR | -0,054 | **+0,210 ATR** | 1,35 |
 
-**Taban**, hiçbir seçim yapmadan bölgeye yapılan tüm ilk dokunuşları almanın
-isabet oranıdır. Sistemin katma değeri isabet ile taban arasındaki farktır:
-1 dakikalıkta **+19,6 puan**, 5 dakikalıkta **+14,3 puan**, 15 dakikalıkta
-**+17,2 puan**. Üç zaman diliminde de aynı yönde ve örnek dışı dönemde geçerli.
+**Taban**, hiçbir seçim yapmadan tüm olayları almanın isabet oranıdır. Sistemin
+katma değeri isabet ile taban arasındaki farktır. Yeni indikatörde de bakılacak
+sayı budur: Test sekmesinde `Taban başarı oranı` ile `Başarı oranı` farkı. Fark
+yoksa sistem bir şey katmıyordur.
 
-Neden varsayılan 5 dakika:
-
-- **1m** en yüksek isabeti ve en çok örneği verir, ama hareketler küçük olduğu
-  için işlem maliyeti edimin yaklaşık %70'ini yer (medyan ATR tüm geçmişte
-  yalnızca 0,35 dolar). Net kalır ama pay incedir ve spreade çok duyarlıdır.
-- **15m** işlem başına en yüksek net kazancı verir, ama doğrulama döneminde
-  yalnızca 18 işlem ürettiği için bu sayıya güvenmek zordur.
-- **5m** ikisinin arasındadır: 113 işlem, kâr faktörü 1,30, maliyet edimin
-  %37'sini yer.
-
-Zaman dilimini değiştirdiğinizde uygulama o zaman dilimi için ölçülmüş hazır
+Zaman dilimini değiştirdiğinizde uygulama o zaman dilimi için kayıtlı hazır
 ayarı kendiliğinden uygular (`src/core/learn/presets.js`). Ayarlar ekranından
 girdiğiniz değerler bu hazır ayarı her zaman ezer.
 
@@ -232,16 +256,16 @@ yaklaşık 360 MB'tır.
 
 ### 4.1 Geçmişi Tara
 
-Üst şeritteki zaman dilimini seçin (öneri: **15m**) ve **Geçmişi Tara**
+Üst şeritteki zaman dilimini seçin (varsayılan: **5m**) ve **Geçmişi Tara**
 düğmesine basın. Uygulama:
 
 1. Seçilen zaman diliminde indikatörü baştan sona çalıştırır.
-2. Tüm bölgeleri ve ilk dokunuşları bulur.
-3. Her dokunuşu TP/SL/ufuk kuralına göre etiketler.
+2. Tüm kutuları, kutu oluşum olaylarını ve bölgeye ilk geri dönüşleri bulur.
+3. Her olayı hedef / geçersizlik / ufuk kuralına göre etiketler.
 4. Özellik vektörlerini çıkarır ve hafızayı diske yazar.
 5. Başarılı kurulumlardan prototip kümeleri üretir.
 
-15 dakikalık seride bu işlem birkaç dakika sürer ve on binlerce olay üretir.
+Uzun bir seride bu işlem birkaç dakika sürer ve on binlerce olay üretir.
 Bir kez yapılır, sonra artımlı olarak güncellenir. İlerleme çubuğu üst şeritte
 görünür.
 
@@ -249,32 +273,41 @@ görünür.
 
 Grafiğin üzerine çizilen kutular indikatörün bölgeleridir:
 
-- **Yeşil kutu:** destek bölgesi, beklenen yön ALIŞ.
-- **Kırmızı kutu:** direnç bölgesi, beklenen yön SATIŞ.
+- **Yeşil kutu:** destek bölgesi (BUY LIQUIDITY), beklenen yön ALIŞ.
+- **Kırmızı kutu:** direnç bölgesi (SELL LIQUIDITY), beklenen yön SATIŞ.
 - **Soluk ve kesik çerçeveli kutu:** kırılmış bölge, artık geçerli değildir.
 
-Bir kutuya tıklarsanız sağ panelde o bölgenin dokunuş geçmişi açılır:
-ne zaman dokunulmuş, sonucu ne olmuş, skoru kaçmış.
+Bir kutuya tıklarsanız sağ panelde o bölgenin bilgileri ve olay geçmişi açılır:
+akış gücü (1 ile 10 arası), doğuştaki akış, bandın dışına ne kadar taşmış, kaç
+yakın pivotun bu kutuya katıldığı ve kutunun ürettiği olaylar.
 
 ### 4.3 Sinyallerin okunması
 
 Grafikte alta bakan yukarı ok ALIŞ, üste bakan aşağı ok SATIŞ sinyalidir.
-Etiketteki yüzde, geçmişteki benzer kurulumların kazanma oranıdır.
+Etiketin başındaki harf sinyalin türünü söyler:
+
+- **O** = kutu oluşumu (kutu o barda doğdu)
+- **D** = bölgeye geri dönüş (fiyat kutuya döndü ve dokundu)
+
+Harften sonraki yüzde, geçmişteki **aynı türdeki** benzer kurulumların kazanma
+oranıdır. Sinyal listesinde aynı ayrım `OLUŞUM` / `DOKUNUŞ` rozetiyle görünür,
+üstteki süzgeçten yalnızca bir türü de gösterebilirsiniz.
 
 Bir sinyale tıklayınca sağ panelde detay açılır:
 
 | Alan | Anlamı |
 | --- | --- |
-| Eşleşme sayısı | Benzerlik eşiğini geçen geçmiş kayıt sayısı |
+| Sinyal türü | Kutu oluşumu mu, bölgeye geri dönüş mü; girişin nereden alındığı |
+| Eşleşme sayısı | Benzerlik eşiğini geçen, aynı türdeki geçmiş kayıt sayısı |
 | Ortalama benzerlik | Bu eşleşmelerin ortalama benzerlik puanı (0 ile 1) |
 | Kazanma oranı | Eşleşmelerin kaçı bölgeye saygı göstermiş |
 | Güven | Eşleşme sayısı, oranın 0,5'ten uzaklığı ve benzerliğin bileşimi |
-| Giriş / TP1 / TP2 / SL | Eşleşmelerin MFE ve MAE yüzdeliklerinden türetilen plan |
+| Giriş / TP1 / TP2 / SL | Bölge geometrisinden türetilen plan, TP2 eşleşmelerin dağılımından |
 | R/R | (TP1 - giriş) / (giriş - SL) mutlak değeri |
 | Prototip | Kurulumun benzediği örüntü kümesinin adı |
 | Gerekçeler | Sinyalin neden oluştuğu veya neden oluşmadığı, Türkçe |
 
-Önemli: eşikleri geçemeyen dokunuşlar da listelenir, ama `fired: false`
+Önemli: eşikleri geçemeyen olaylar da listelenir, ama `fired: false`
 durumundadır. Böylece "neden sinyal vermedi" sorusunun cevabı görünür kalır.
 
 ### 4.4 Test sekmesi
@@ -283,17 +316,26 @@ Yürüyen ileri test (walk forward) sonuçlarını gösterir. Her olay yalnızca
 **kendinden önceki** hafızayla değerlendirilir, yani ileriye bakma yoktur.
 Sekmede özet tablo, yıllara göre kırılım ve sermaye eğrisi bulunur.
 
-Burada bakılacak en önemli sayı `baselineWinRate` ile `winRate` farkıdır:
-birincisi tüm ilk dokunuşların ham başarı oranı, ikincisi sistemin seçtiklerinin
-oranıdır. Aradaki fark sistemin katma değeridir. Fark yoksa sistem bir şey
-katmıyordur.
+Burada bakılacak en önemli sayı `Taban başarı oranı` ile `Başarı oranı`
+farkıdır: birincisi tüm olayların ham başarı oranı, ikincisi sistemin
+seçtiklerinin oranıdır. Aradaki fark sistemin katma değeridir. Fark yoksa sistem
+bir şey katmıyordur.
+
+Hemen altındaki **"Sinyal türüne göre"** tablosu iki sinyal türünü ayrı ayrı
+gösterir. Toplam rakam, türlerden birinin diğerini taşıdığı durumları gizler:
+kutu oluşumu zarar ederken bölge dokunuşu kazanıyor olabilir ve toplamda ikisi
+birden makul görünebilir. Hangi sinyalin gerçekten çalıştığına bu tabloya
+bakarak karar verin. Bir tür işinize yaramıyorsa Ayarlar ekranından
+(`Kutu oluşumunda sinyal üret` / `Bölgeye dokunuşta sinyal üret`) kapatın ve
+yeniden tarayın.
 
 ### 4.5 Canlı mod
 
 Üst şeritten sağlayıcı seçip **Canlı** anahtarını açın. Uygulama seçilen
 aralıkta (varsayılan 20 saniye) son mumları çeker, depoya ekler ve yeni bir
-mum **kapandığında** indikatörü son pencerede çalıştırır. Yeni bir ilk dokunuş
-oluşursa hafızayla karşılaştırıp sinyali panele düşer.
+mum **kapandığında** indikatörü son pencerede çalıştırır. Yeni bir bölge olayı
+(kutu oluşumu veya ilk dokunuş) oluşursa hafızayla karşılaştırıp sinyali panele
+düşer.
 
 Vekil bir kaynak kullanıyorsanız (Yahoo GC=F, Binance PAXG, OKX XAUT) fiyat
 farkı otomatik olarak `computeBasis` ile ölçülür ve seri spot seviyesine
@@ -387,46 +429,109 @@ API anahtarları uygulama içinde **Ayarlar** sekmesinden girilir ve
 
 ### 6.1 Bölge oluşumu
 
-Pivot noktalarında (varsayılan `lookback = 10` bar sol/sağ) bir bölge adayı
-doğar. Adayın bölgeye dönüşmesi için pivot barındaki **flow gücünün**
-`minFlowStrength` (1,5) eşiğini geçmesi ve yönünün doğru olması gerekir.
+Pivot noktalarında (varsayılan `pivotLen = 5` bar sol/sağ) bir kutu adayı doğar.
+Adayın kutuya dönüşmesi için **iki kesin kapıyı** birden geçmesi gerekir:
 
-- Bölge genişliği: `atr200[pivot] * boxWidthAtr` (varsayılan 1,0 ATR).
-- Destek: üst kenar pivot dibi, alt kenar pivot dibinin bir genişlik altı.
-- Direnç: alt kenar pivot tepesi, üst kenar pivot tepesinin bir genişlik üstü.
-- **Birleştirme:** aktif listede aynı yönde ve orta noktası
-  `atr200 * mergeNearAtr` (0,8 ATR) mesafesinden yakın bir bölge varsa yeni
-  bölge açılmaz. Aynı seviyenin defalarca sayılması böyle engellenir.
-- **Kırılma:** destekte kapanış alt kenarın altında, dirençte üst kenarın
-  üstünde ardışık `breakConfirmBars` (5) bar kalırsa bölge kırılır. Ardışıklık
-  bozulursa sayaç sıfırlanır.
+- **Hacim:** pivot barının hacmi kendi 50 barlık ortalamasının en az
+  `minVolRatio` (1,05) katı olacak **ve** akış gücü `minFlowToShow` (6,0)
+  eşiğini geçecek. Akış gücü `hacim oranı × 3` olarak hesaplanır, tavanı 10'dur;
+  yani 6,0 eşiği kabaca iki kat hacim demektir.
+- **Bollinger:** pivot dibi alt bandın altında (destek) veya pivot tepesi üst
+  bandın üstünde (direnç) olacak.
 
-### 6.2 İlk dokunuş kuralı
+İkisi birlikte kutuyu bir "hacimli aşırılık" noktası yapar. Sinyalin yönü de
+buradan gelir: aşırılık ortalamaya dönüş beklentisi taşır, bu yüzden destek
+kutusu ALIŞ, direnç kutusu SATIŞ yönündedir.
 
-Bir bölgeye yapılan **yalnızca ilk dokunuş** olay üretir. İkinci, üçüncü
-dokunuşlar kaydedilmez.
+Kutu geometrisi, `zH = atr[pivot] * zoneAtrMult` (0,35 ATR) olmak üzere:
 
-Sebebi şudur: aynı bölgeye art arda yapılan dokunuşlar birbirinin neredeyse
-kopyasıdır. Hepsi hafızaya girseydi, benzerlik motoru "geçmişte çok benzer 20
-kayıt buldum" derken aslında aynı olayın 20 kopyasını bulmuş olurdu. İlk
-dokunuş kuralı hafızayı bağımsız olaylardan oluşan bir kütüğe dönüştürür.
+- **Destek:** üst kenar `pivot dibi + zH/4`, alt kenar `pivot dibi - zH`.
+- **Direnç:** üst kenar `pivot tepesi + zH`, alt kenar `pivot tepesi - zH/4`.
 
-Dokunuş koşulu: bölge yaşıyor, kırılmamış, bar >= oluşum barı ve
-`low <= üst kenar && high >= alt kenar`.
+Kutunun ömrü boyunca:
+
+- **Birleştirme:** aktif listede aynı yönde ve orta noktası `atr * mergeAtrMult`
+  (0,55 ATR) mesafesinden yakın bir kutu varsa yeni kutu açılmaz; mevcut kutu
+  iki pivotu da kapsayacak şekilde genişler ve akış gücü artar. Aynı seviyenin
+  defalarca sayılması böyle engellenir. Birleşme yeni bir sinyal üretmez.
+- **Dokunuş:** kutuya her dokunuşta (aynı kutu için `touchCooldown` = 12 bar
+  aralığıyla) akış gücü 0,35 artar, tavan 10.
+- **Kırılma:** destekte kapanış alt kenarın `atr * 0,15` kadar altına inerse,
+  dirençte üst kenarın o kadar üstüne çıkarsa kutu kırılır. **Onay barı yoktur,
+  tek bar yeter.** Kırılan kutu takipten düşer.
+- **Ömür:** kutu pivot barından itibaren `maxAgeBars` (100) bar yaşar, çizimi
+  `boxLengthBars` (100) bar ileri uzar. Aynı anda en fazla `maxZones` (24) kutu
+  takip edilir; liste dolunca en eski kutu takipten düşer ama grafikte kalır.
+
+### 6.2 İki sinyal türü ve bölge başına birer olay kuralı
+
+Her kutu **her türden en fazla bir** olay üretir.
+
+**Kutu oluşumu (`kind = 'form'`).** Kutu doğduğu barda üretilir. Pivot ancak
+kendisinden `pivotLen` bar sonra kesinleştiği için olay o barda açılır, yani
+ileriye bakma yoktur. Fiyat bu anda kutunun içinde değildir; onay barına kadar
+pivottan ne kadar uzaklaştığı `entryDistAtr` alanında tutulur ve özellik
+vektörüne girer.
+
+**Bölge dokunuşu (`kind = 'touch'`).** Kutuya yapılan **ilk dokunuşta**
+üretilir. Bu, kutunun doğduğu bara denk gelebilir: kutu pivotun etrafında
+doğduğu için fiyat o anda zaten kutunun içinde olabilir. Bilinçli bir tercihtir.
+Önceki bir sürümde kutunun önce tamamen terk edilmesini bekleyen bir kural vardı,
+kaldırıldı.
+
+İkinci, üçüncü dokunuşlar olay üretmez. Sebebi şudur: aynı bölgeye art arda
+yapılan dokunuşlar birbirinin neredeyse kopyasıdır. Hepsi hafızaya girseydi,
+benzerlik motoru "geçmişte çok benzer 20 kayıt buldum" derken aslında aynı
+olayın 20 kopyasını bulmuş olurdu. Bu kural hafızayı bağımsız olaylardan oluşan
+bir kütüğe dönüştürür.
+
+**İki tür asla karıştırılmaz.** Benzerlik motoru bir oluşum olayını yalnızca
+geçmişteki oluşum olaylarıyla, bir dokunuşu yalnızca geçmişteki dokunuşlarla
+karşılaştırır. Girişleri, riskleri ve tipik sonuçları farklı olduğu için
+karıştırmak istatistiği anlamsızlaştırırdı.
+
+**Skor.** Kutu oluşumunun kapısı (hacim + Bollinger) kesin olduğu için o iki
+kriter her kutuda doğrudur ve skor bileşeni olarak bilgi taşımaz. Bu yüzden skor
+olayın **olduğu barda** değişen beş şeyi ölçer: akış gücü, üst zaman dilimi
+trendi, seans, fitil reddi ve o barın hacim gücü. `minScoreForSignal` (3) eşiğini
+geçen olay "nitelikli" sayılır. Skor bir kapı değildir; niteliksiz olaylar da
+hafızaya girer, çünkü benzerlik motoru tüm olayları korpus olarak kullanır.
 
 ### 6.3 Sonuç etiketleme
 
 Buradaki tanım sistemin tamamını belirler, çünkü hafızanın öğrendiği şey budur.
 
 Sorulan soru şu: **bölge gerçekten tuttu mu?** Genel fiyat hareketi değil,
-bölgenin kendisi. Bu yüzden seviyeler bölge geometrisinden türetilir:
+bölgenin kendisi. Bu yüzden seviyeler bölge geometrisinden türetilir. İki olay
+türünün girişi farklı olduğu için hedef hesabı da farklıdır:
 
-- **Giriş:** bölgenin yakın kenarı (destekte üst kenar, dirençte alt kenar),
-  limit emirle. Dokunuş tanımı gereği fiyat o kenarı geçmiştir, yani emir dolar.
-- **Hedef:** kenardan `targetAtr` \* ATR uzakta (zaman dilimine göre 1,0 veya 1,5).
-- **Geçersizlik:** bölgenin uzak kenarından `breakBufferAtr` \* ATR dışarıda
-  (varsayılan 0,25). Fiyat oraya giderse bölge kırılmıştır.
-- **Ufuk:** `horizonBars`, varsayılan 48 bar.
+|  | dokunuş olayı | oluşum olayı |
+| --- | --- | --- |
+| Giriş | bölgenin yakın kenarı, limit emir | onay barının kapanışı |
+| Geçersizlik | bölgenin uzak kenarından `breakBufferAtr` \* ATR dışarıda | aynı |
+| Hedef | kenardan `targetAtr` \* ATR uzakta | girişten `formTargetRr` \* risk kadar uzakta |
+| Ödül | her zaman `targetAtr` | her zaman `formTargetRr` risk birimi |
+
+- **Ufuk:** `horizonBars`, varsayılan 48 bar (her iki türde de).
+
+**Dokunuşta giriş neden kenar.** Dokunuş tanımı gereği fiyat o kenarı geçmiştir,
+yani limit emir dolar. Risk ve ödül yalnızca bölge geometrisine bağlı kalır.
+
+**Oluşumda giriş neden kapanış.** Kutu doğduğunda fiyat kutunun içinde değildir
+ve oraya hiç dönmeyebilir, dolayısıyla kenara limit emir konamaz. Bunun bedeli
+şudur: risk artık sabit değildir, fiyat pivottan ne kadar kaçtıysa o kadar
+büyüktür. Hedef sabit bir ATR mesafesi olsaydı risk/ödül kurulumdan kuruluma
+0,3 ile 2,0 arasında savrulur ve "geçmişte bu yapı %70 tuttu" cümlesi
+karşılaştırılamaz şeylerin ortalaması olurdu. `formTargetRr` (varsayılan 1,0)
+bunu tek eksene indirir: bütün oluşum olayları aynı risk/ödül oranını taşır,
+aralarındaki tek fark isabet oranıdır. Riski büyük olan kurulumun hedefi de
+uzaktır, yani vurulması zordur; ceza otomatiktir.
+
+**Oluşumda iki eleme.** Pivot onaylanana kadar fiyat kutunun öbür tarafına
+geçtiyse ortada işlem yoktur. Fiyat çok uzağa kaçtıysa (giriş ile geçersizlik
+arası `maxFormRiskAtr`, varsayılan 3,0 ATR'yi aşıyorsa) kurulum gerçekte
+işlenmez. Her iki durumda da olay **etiketlenmez ve hafızaya hiç girmez**;
+canlıda böyle bir olay geldiğinde sinyal üretilmez ve gerekçesi yazılır.
 
 | Etiket | Koşul |
 | --- | --- |
@@ -435,23 +540,16 @@ bölgenin kendisi. Bu yüzden seviyeler bölge geometrisinden türetilir:
 | `timeout` | Ufuk boyunca hiçbiri olmadı |
 
 Aynı barda ikisi de olduysa **muhafazakâr** davranılır ve kırılma sayılır.
-Bar içi sıralama bilinmediği için iyimser varsayım yapılmaz. Aynı kural
-dokunuş barının kendisi için de geçerlidir: emir o bar içinde dolduğundan,
-o bar geçersizlik seviyesini de gördüyse anında kırılma yazılır.
-
-**Neden giriş kapanış değil, bölge kenarı.** İlk sürümde giriş dokunuş barının
-kapanışıydı. Bu, risk ve ödülü kapanışın bölge içindeki tesadüfi konumuna
-bağlıyordu: kapanış bölge dibine yakınsa stop 0,25 ATR uzakta kalıyor, risk/ödül
-kağıt üzerinde 8'e çıkıyor ama gürültü stopu anında vuruyordu. Ölçüldü: risk/ödül
-filtresi bu yüzden isabet oranını %52'den %25'e **düşürüyordu**. Kenardan girişte
-risk ve ödül yalnızca bölge geometrisine bağlıdır, sabittir, ters seçim ortadan
-kalkar.
+Bar içi sıralama bilinmediği için iyimser varsayım yapılmaz. Dokunuş olayında
+aynı kural olay barının kendisi için de geçerlidir: emir o bar içinde
+dolduğundan, o bar geçersizlik seviyesini de gördüyse anında kırılma yazılır.
+Oluşum olayında böyle bir kural yoktur, çünkü emir bar kapanınca dolar.
 
 **Neden bu tanım önemli.** Sinyal planındaki TP1 ve SL, etiketin kullandığı
 seviyelerin **aynısıdır**. Yani "bölge tuttu" ile "TP1 vuruldu" aynı olaydır.
 Bunlar ayrı tanımlar olduğunda sistem bir şeyi öğrenip başka bir şeyi işlemeye
-kalkıyordu; ölçüldü, 15 dakikalıkta seçimin kazandırdığı +5,1 puanlık fayda bu
-tutarsızlık yüzünden -11,5 puanlık zarara dönüyordu.
+kalkıyordu; eski indikatörle ölçüldü, 15 dakikalıkta seçimin kazandırdığı
++5,1 puanlık fayda bu tutarsızlık yüzünden -11,5 puanlık zarara dönüyordu.
 
 Her olay için ayrıca MFE ve MAE (lehte ve aleyhte azami hareket) iki biçimde
 kaydedilir: ufkun tamamı üzerinden (özellik olarak) ve yalnızca sonuca kadar
@@ -460,14 +558,14 @@ kuralında kullanılır, çünkü stop vurulduktan sonraki hareket gerçekte
 yakalanamaz.
 
 Eski `atr` modu (giriş +- N ATR) `outcomeCfg.mode = 'atr'` ile hâlâ seçilebilir,
-karşılaştırma için korundu. O modda ham isabet oranı yazı turadır (15m %48,0,
-5m %50,4), çünkü bölgeden bağımsız ölçüm yapar.
+karşılaştırma için korundu. O mod bölgeden bağımsız ölçüm yaptığı için "bölge
+çalıştı mı" sorusunu ölçmez.
 
 ### 6.4 Özellik vektörü
 
-Her dokunuş üç parçadan oluşan bir parmak izi taşır:
+Her olay üç parçadan oluşan bir parmak izi taşır:
 
-1. **shape (16 değer):** dokunuş barıyla biten son 32 kapanış. Önce 5'lik
+1. **shape (16 değer):** olay barıyla biten son 32 kapanış. Önce 5'lik
    hareketli ortalamayla yumuşatılır, sonra 16 kovaya bölünüp her kovanın
    ortalaması alınır, sonra min-max ile 0 ile 1 arasına normalize edilir.
    Bu sıkıştırma önceki projede ölçüldü: ham 32 barlık vektöre göre sinyal
@@ -477,11 +575,17 @@ Her dokunuş üç parçadan oluşan bir parmak izi taşır:
    yapıyla karşılaştırılabilir olur.
 2. **ret (32 değer):** son 33 kapanışın logaritmik getirileri, z-score ile
    normalize edilmiş. Hareketin hızını ve ritmini taşır.
-3. **ctx (22 değer):** bağlam. RSI, ATR yüzdesi, SMA20 ve SMA50'ye ATR
+3. **ctx (24 değer):** bağlam. RSI, ATR yüzdesi, SMA20 ve SMA50'ye ATR
    cinsinden uzaklık, saatin ve haftanın gününün sinüs/kosinüs kodlaması,
-   bölge genişliği, bölge yaşı, flow gücü, penetrasyon derinliği, skor oranı,
-   skorun hangi bileşenlerden geldiği (flow, trend, oynaklık, seans, sweep,
-   rejection, MSS) ve trend durumu.
+   bölge genişliği, bölge yaşı, akış gücü, penetrasyon derinliği, skor oranı,
+   skorun hangi bileşenlerden geldiği (akış, trend, seans, fitil reddi, hacim),
+   yön, trend durumu, **olay türü** (oluşum mu dokunuş mu), pivotun Bollinger
+   bandından ne kadar dışarı taştığı, olay barının hacim oranı ve kapanışın
+   bölgenin yakın kenarına uzaklığı.
+
+Bağlam vektörünün boyutları indikatöre bağlıdır. Eski bir sürümle üretilmiş
+hafıza dosyası yeni olaylarla karşılaştırılamaz; motor bunu yakalar ve
+"Geçmişi Tara" ile yeniden oluşturmanızı ister.
 
 ### 6.5 Benzerlik
 
@@ -496,8 +600,11 @@ Her dokunuş üç parçadan oluşan bir parmak izi taşır:
 Hepsi 0 ile 1 arasına taşınır. DTW pahalı olduğu için önce ucuz `shapeSim` ile
 ön eleme yapılır (en iyi `k * 8` aday), DTW yalnızca o adaylarda hesaplanır.
 
-İki koruma vardır:
+Üç filtre vardır:
 
+- `kind`: yalnızca **aynı türdeki** olaylar aday olur. Kutu oluşumu yalnızca
+  geçmişteki oluşumlarla, dokunuş yalnızca geçmişteki dokunuşlarla
+  karşılaştırılır.
 - `excludeWithinSec` (varsayılan 3 gün): sorgu zamanına çok yakın kayıtlar
   elenir. Aksi halde aynı kurulum kendisiyle eşleşir.
 - `beforeTime`: yalnızca belirtilen zamandan önceki kayıtlar aday olur.
@@ -529,12 +636,17 @@ Varsayılan değerler:
 | `minRr` | 0 (kapalı) | Asgari risk/ödül oranı |
 | `tp2Pct` | 70 | Uzatma hedefi için MFE dağılımının yüzdeliği |
 
-`minMatches` ve `minWinRate` sözleşmedeki ilk tahminlerden (5 ve 0,60) gerçek
-veriyle yapılan örnek dışı taramaya göre güncellendi. Zaman dilimine göre
-değişen değerler `src/core/learn/presets.js` içinde, ölçüm sonuçlarıyla birlikte.
+Zaman dilimine göre değişen değerler `src/core/learn/presets.js` içindedir.
+**Bu hazır ayarlar eski indikatörle (MASTER 1 TOUCH) yapılan taramadan gelir ve
+yeni indikatör için yeniden aranmalıdır.** Şimdilik makul bir başlangıç noktası
+olarak duruyorlar; kendi ayarınızı bulmak için Test sekmesindeki yürüyen ileri
+testi farklı eşiklerle çalıştırın ve "Sinyal türüne göre" tablosuna bakın.
 
 TP1 ve SL bölge geometrisinden gelir (bkz. 6.3), yüzdelikten değil. `tp1Pct` ve
 `slPct` yalnızca bölge bilgisi olmayan yedek yolda kullanılır.
+
+Kutu oluşumu olayında ek bir kapı vardır: fiyat pivottan `maxFormRiskAtr`
+(3,0 ATR) üstünde uzaklaştıysa sinyal hiç üretilmez ve gerekçesi yazılır.
 
 Sinyal ancak şu dördü birden sağlanırsa tetiklenir:
 `matchCount >= minMatches`, `winRate >= minWinRate`, `rr >= minRr` ve
@@ -542,10 +654,11 @@ Sinyal ancak şu dördü birden sağlanırsa tetiklenir:
 risk/ödülü tek ölçüte bağlar: yüksek isabet tek başına yetmez, kurulumun
 matematiği de olumlu olmalıdır.
 
-`minRr` varsayılan olarak **kapalıdır**. Ölçüldü: kenardan girişte risk ve ödül
-zaten bölge geometrisine bağlı olduğu için ek bir oran filtresi yalnızca örnek
-sayısını azaltıyor (1m doğrulama: 0,00 ile %72,0 ve kâr faktörü 2,10;
-1,10 ile örnek 43'e düşüyor).
+`minRr` varsayılan olarak **kapalıdır**. Eski indikatörle ölçülmüştü: kenardan
+girişte risk ve ödül zaten bölge geometrisine bağlı olduğu için ek bir oran
+filtresi yalnızca örnek sayısını azaltıyordu. Yeni indikatörde dokunuş olayı için
+aynı mantık geçerlidir; oluşum olayında risk/ödül `formTargetRr` ile zaten sabit
+tutulduğu için bu filtre yine bağlayıcı değildir.
 
 Güven puanı üç parçadan gelir: eşleşme sayısı (0,40), tutma oranının 0,5'ten
 uzaklığı (0,35) ve ortalama benzerliğin eşiği ne kadar aştığı (0,25).
@@ -557,14 +670,14 @@ Hafızadaki her olay zaman sırasına konur ve her biri **yalnızca kendinden
 atlanır, ayrıca sorgu zamanına çok yakın kayıtlar için ambargo uygulanır.
 
 Özet çıktısı: toplam olay, tetiklenen sinyal, kazanan, kaybeden, kazanma oranı,
-ATR cinsinden beklenti, kâr faktörü, azami geri çekilme, ortalama R/R ve
-`baselineWinRate`.
+ATR cinsinden beklenti, kâr faktörü, azami geri çekilme, ortalama R/R,
+`baselineWinRate` ve **iki sinyal türünün ayrı kırılımı** (`byKind`).
 
 **İşlem maliyeti teste dahildir.** Bu, küçük zaman dilimlerinde sonucu tamamen
 değiştirir. Ölçülen medyan ATR: 1 dakikalıkta tüm geçmişte yalnızca 0,35 dolar,
 5 dakikalıkta 0,94, 15 dakikalıkta 1,87 dolar (2025-2026'da sırasıyla 1,40, 3,92
-ve 6,55 dolar). Yani 1 dakikalıkta işlem başına +0,377 ATR brüt beklenti, tipik
-bir spread karşısında çok ince bir pay bırakır.
+ve 6,55 dolar). Yani 1 dakikalıkta ATR biriminde görünen ince bir brüt beklenti,
+tipik bir spread karşısında kolayca eriyebilir.
 
 Maliyet iki şekilde verilebilir:
 
@@ -588,38 +701,48 @@ Bunlar açıkça bilinen ve kabul edilmiş sınırlardır:
    widget'ıdır ve iframe içeriğine dışarıdan erişilemez. Kendi bölgelerimiz ve
    sinyallerimiz yalnızca uygulamanın kendi grafiğinde görünür. TradingView
    sekmesi sadece karşılaştırma ve tanıdık bir görünüm içindir.
-2. **Footprint verisi yoktur.** Pine indikatöründeki footprint (delta,
-   emilim) bileşeni bu portta veri kaynağı olmadığı için kapalıdır
-   (`useFootprintScore: false`). Bu bileşene dayalı skor katkısı hesaplanmaz.
-3. **Sinyal sayısı eşiklere çok duyarlıdır.** `minSimilarity` değerini 0,80'den
+2. **Yeni indikatörün sayıları henüz ölçülmedi.** İndikatör MASTER 1 TOUCH'tan
+   "proje son versiyon 3"e geçirildi. README'deki tablo ve `presets.js`
+   içindeki hazır ayarlar eski indikatöre aittir. Yeni indikatörün gerçekten
+   kazandırıp kazandırmadığı, siz Test sekmesinde yürüyen ileri testi
+   çalıştırana kadar **bilinmiyor**. Özellikle kutu oluşumu sinyali tamamen yeni
+   bir fikirdir ve hiç doğrulanmamıştır.
+3. **Kutu oluşumu sinyalinin riski sabit değildir.** Dokunuş olayında giriş
+   bölge kenarıdır, risk bölge yüksekliğine eşittir ve her kurulumda aynıdır.
+   Oluşum olayında giriş onay barının kapanışıdır; fiyat pivottan ne kadar
+   kaçtıysa risk o kadar büyür. `formTargetRr` hedefi riske orantılayarak
+   risk/ödülü sabitler ve `maxFormRiskAtr` aşırı olanları eler, ama bu türün
+   doğası gereği daha gürültülü olduğunu unutmayın.
+4. **Sinyal sayısı eşiklere çok duyarlıdır.** `minSimilarity` değerini 0,80'den
    0,85'e çekmek sinyal sayısını birkaç kat azaltabilir. Eşikleri değiştirdikten
    sonra mutlaka Test sekmesinden yürüyen ileri testi yeniden çalıştırın; az
    sayıda işlemle çıkan yüksek kazanma oranı istatistiksel olarak anlamsızdır.
-   15 dakikalıktaki 18 işlemlik doğrulama sonucu tam olarak bu yüzden temkinle
-   okunmalıdır.
-4. **Edim ince, maliyet belirleyici.** Net beklenti 5 dakikalıkta işlem başına
-   0,184 ATR'dir. Spreadiniz varsayılandan (fiyatın %0,0068'i) belirgin biçimde
-   yüksekse, ya da kayma (slippage) eklenirse, bu pay hızla erir. Test
-   sekmesinde kendi maliyetinizi girip sonucu yeniden ölçün.
-5. **Limit emir varsayımı.** Plan girişi bölge kenarına konan limit emirdir ve
-   dokunuş tanımı gereği fiyat o kenarı geçtiği için emrin dolduğu varsayılır.
-   Gerçekte hızlı hareketlerde kısmi dolum veya hiç dolmama olabilir; test bunu
-   modellemez.
-6. **Parametreler bu veriye göre seçildi.** Seçim yalnızca 2009-2018'e bakılarak
-   yapıldı ve 2019-2026'da doğrulandı, ama ikisi de aynı sembolün aynı geçmişidir.
-   Piyasa rejimi değişirse sonuçların sürmesi garanti değildir.
-7. **Hacim kaynağa göre değişir.** HistData ve Polygon tick hacmi verir, Yahoo
+5. **Kutu sayısı iki kesin kapıya bağlıdır.** Hacim ve Bollinger filtreleri
+   birlikte çok seçicidir; varsayılan ayarlarda bir yılda sadece birkaç yüz kutu
+   oluşabilir. Hafıza kuracak kadar olay çıkmıyorsa `minFlowToShow` değerini
+   düşürün veya Bollinger çarpanını küçültün, ama bunun kurulumun "aşırılık"
+   niteliğini zayıflattığını bilin.
+6. **Edim ince, maliyet belirleyici.** İşlem maliyeti küçük zaman dilimlerinde
+   beklentinin çoğunu yiyebilir. Spreadiniz varsayılandan (fiyatın %0,0068'i)
+   belirgin biçimde yüksekse, ya da kayma (slippage) eklenirse pay hızla erir.
+   Test sekmesinde kendi maliyetinizi girip sonucu yeniden ölçün.
+7. **Limit emir varsayımı.** Dokunuş olayında plan girişi bölge kenarına konan
+   limit emirdir ve dokunuş tanımı gereği fiyat o kenarı geçtiği için emrin
+   dolduğu varsayılır. Gerçekte hızlı hareketlerde kısmi dolum veya hiç dolmama
+   olabilir; test bunu modellemez.
+8. **Hacim kaynağa göre değişir.** HistData ve Polygon tick hacmi verir, Yahoo
    ve Binance gerçek hacim verir, Twelve Data hiç vermez, OKX çoğunlukla sıfır
    verir. Hafıza bir hacim cinsiyle kurulup başka bir hacim cinsiyle canlıya
    çıkılırsa flow bileşeni tutarsız olur. Geçmiş ve canlı için aynı cinsi
-   kullanmaya çalışın.
-8. **Vekil fiyat kayması.** GC=F, PAXG ve XAUT spot XAUUSD değildir. Basis
+   kullanmaya çalışın. Akış gücü doğrudan hacim oranından hesaplandığı için bu
+   tutarsızlık kutu oluşumunu bile etkiler.
+9. **Vekil fiyat kayması.** GC=F, PAXG ve XAUT spot XAUUSD değildir. Basis
    düzeltmesi seviyeyi hizalar ama vadeli primi zamanla değişir, tam eşitlik
    sağlanmaz.
-9. **Geçmiş performans geleceği garanti etmez.** Sistem geçmişteki
+10. **Geçmiş performans geleceği garanti etmez.** Sistem geçmişteki
    koşullanmalı olasılıkları ölçer. Piyasa rejimi değişirse (2020 gibi) ölçülen
    oranlar bozulabilir.
-10. **Bu bir karar destek aracıdır, yatırım tavsiyesi değildir.** Emir
+11. **Bu bir karar destek aracıdır, yatırım tavsiyesi değildir.** Emir
    göndermez, pozisyon açmaz. Verdiği sayılar geçmiş verinin istatistiğidir,
    gelecek vaadi değildir. Alım satım kararları ve sonuçları kullanıcıya aittir.
 

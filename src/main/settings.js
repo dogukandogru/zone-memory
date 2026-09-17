@@ -29,7 +29,7 @@ function coreConst(modulePath, name, fallback) {
 const DEFAULTS = {
   symbol: 'XAUUSD',
   timeframe: '5m',
-  indicatorParams: coreConst('../core/indicator/masterTouch', 'DEFAULT_PARAMS', {}),
+  indicatorParams: coreConst('../core/indicator/proZones', 'DEFAULT_PARAMS', {}),
   outcomeCfg: coreConst('../core/learn/outcome', 'DEFAULT_OUTCOME_CFG', {}),
   signalCfg: coreConst('../core/learn/signal', 'DEFAULT_SIGNAL_CFG', {}),
   // Canli varsayilani Binance PAXGUSDT'dir. Yahoo (GC=F) olculdu ve bu agdan
@@ -41,6 +41,14 @@ const DEFAULTS = {
   providers: { history: 'histdata', live: 'binance' },
   apiKeys: { twelvedata: '', polygon: '' },
   livePollSeconds: 20,
+  // Uygulama acilir acilmaz canli takibi kendiliginden baslatir. Kapatmak
+  // istersen Ayarlar ekranindan kapatabilirsin; basarisiz olursa uygulama
+  // normal calismaya devam eder, yalnizca uyari gosterilir.
+  autoStartLive: true,
+  // Zaman dilimi degistirildiginde (ve acilista) eksik mumlari indirir,
+  // gerekiyorsa hafizayi yeniden kurar. Geriye test buna DAHIL DEGILDIR;
+  // o, kullanicinin Test sekmesinden baslattigi ayri ve uzun bir istir.
+  autoPrepareOnTfChange: true,
   theme: 'dark',
 }
 
@@ -104,6 +112,40 @@ function setPath(obj, key, val) {
   return obj
 }
 
+/**
+ * ESKI INDIKATOR AYARLARINI TEMIZLEME
+ * ---------------------------------------------------------------------------
+ * Uygulama once MASTER 1 TOUCH indikatoruyle (masterTouch.js) calisiyordu ve
+ * kullanicilarin diskinde o indikatorun parametreleri duruyor. Yeni indikator
+ * (proZones.js) bazi anahtar adlarini PAYLASIYOR ama anlamlari veya olcekleri
+ * farkli:
+ *   minScoreForSignal  eskiden 9 bilesenli skor icin 5 idi, yenide skor
+ *                      5 bilesenli; 5 degeri "tum bilesenler dogru olsun"
+ *                      demeye gelir ve neredeyse hicbir sinyal kalmaz
+ *   strongScoreLevel   eski 6, yeni skorun tavani 5
+ *   hardSessionGate    eskiden true ve yalnizca Londra + New York acikti,
+ *                      yeni indikator seansi sert kapi olarak kullanmiyor
+ *   boxLengthBars      eski 120, Pine'daki karsiligi 100
+ * Bu yuzden eski semanin izi (`lookback` / `boxWidthAtr` / `minFlowStrength`
+ * gibi yalnizca eski indikatorde bulunan alanlar) varsa indikator ayarlari
+ * tumuyle varsayilana dondurulur. Kullanicinin sonuc, sinyal ve saglayici
+ * ayarlarina dokunulmaz.
+ */
+const ESKI_INDIKATOR_ALANLARI = ['lookback', 'boxWidthAtr', 'minFlowStrength', 'mergeNearAtr']
+
+function indikatorAyariniGocur(parsed) {
+  if (!isPlainObject(parsed) || !isPlainObject(parsed.indicatorParams)) return parsed
+  const p = parsed.indicatorParams
+  let eski = false
+  for (const alan of ESKI_INDIKATOR_ALANLARI) {
+    if (Object.prototype.hasOwnProperty.call(p, alan)) { eski = true; break }
+  }
+  if (!eski) return parsed
+  const out = deepClone(parsed)
+  delete out.indicatorParams
+  return out
+}
+
 /** Bellek onbellegi, her cagrida diskten okumamak icin. */
 let cache = null
 
@@ -125,7 +167,7 @@ function load() {
       parsed = null
     }
   }
-  cache = deepMerge(DEFAULTS, parsed || {})
+  cache = deepMerge(DEFAULTS, indikatorAyariniGocur(parsed || {}))
   return deepClone(cache)
 }
 

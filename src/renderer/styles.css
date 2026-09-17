@@ -395,6 +395,15 @@ canvas.zone-overlay {
   text-align: center;
 }
 
+/* Sinyal satirindaki tur rozeti: OLUSUM / DOKUNUS. */
+.badge.tiny {
+  margin-left: 6px;
+  padding: 0 4px;
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  vertical-align: 1px;
+}
+
 .sec-title {
   margin: 12px 0 5px;
   font-size: 10px;
@@ -432,6 +441,24 @@ canvas.zone-overlay {
 .row.buy { border-left-color: var(--up); }
 .row.sell { border-left-color: var(--down); }
 .row.dim { opacity: 0.55; }
+/* Sinyal listesinin ustundeki sonuc ozeti seridi. */
+.list-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-raise);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+/* "Benzer gecmis ornekler" satirlari: tiklaninca grafik o tarihe gider. */
+.row.clickable:hover { border-left-color: var(--warn); }
+.row.clickable:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .row-main { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row-sub { display: block; color: var(--text-dim); font-size: 10px; }
 .row-side { flex: 0 0 auto; text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; }

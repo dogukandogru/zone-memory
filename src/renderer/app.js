@@ -68,6 +68,9 @@ const durum = {
   veriDurumu: null,
   signals: [],
   seciliSinyalId: null,
+  // "Benzer gecmis ornekler" listesinden secilen kayit. Grafikte ayri bir
+  // isaretle gosterilir, boylece hangi ana gidildigi belli olur.
+  vurguluOrnek: null,
   seciliBolgeId: null,
   hafizaOzeti: null,
   prototipler: [],
@@ -452,15 +455,35 @@ function isaretleriCiz() {
     const t = sayi(s.time, 0)
     if (ilk === null || t < ilk || t > son) continue
     const alis = s.direction !== 'SELL'
+    // Tur oneki: O = kutu olusumu, D = bolgeye geri donus. Isaret metni cok
+    // kisa olmali, grafikte mumun ustune sigacak.
+    const onek = s.kind === 'form' ? 'O ' : 'D '
     isaretler.push({
       id: String(s.id),
       time: t,
       position: alis ? 'belowBar' : 'aboveBar',
       shape: alis ? 'arrowUp' : 'arrowDown',
       color: alis ? RENK.up : RENK.down,
-      text: '%' + Math.round(sayi(s.winRate, 0) * 100),
+      text: onek + '%' + Math.round(sayi(s.winRate, 0) * 100),
     })
   }
+  // Benzer gecmis ornek isareti. Sinyal oklarindan ayrilsin diye daire ve
+  // altin rengi; yalnizca yuklu mum araliginda gosterilir.
+  const ornek = durum.vurguluOrnek
+  if (ornek) {
+    const ot = sayi(ornek.time, 0)
+    if (ilk !== null && ot >= ilk && ot <= son) {
+      isaretler.push({
+        id: 'ornek',
+        time: ot,
+        position: 'aboveBar',
+        shape: 'circle',
+        color: RENK.warn,
+        text: 'ÖRNEK ' + (ornek.success ? 'saygı' : 'kırılım'),
+      })
+    }
+  }
+
   isaretler.sort((a, b) => a.time - b.time)
   try {
     view.setMarkers(isaretler)
@@ -891,6 +914,114 @@ function tfDugmeleriniIsaretle() {
   }
 }
 
+/**
+ * Zaman dilimi basina son veri cekme denemesinin zamani. Piyasa kapaliyken
+ * (hafta sonu) depo hep "geride" gorunur ve her sekme degisiminde bosuna
+ * indirme baslardi; bu sayac onu engeller.
+ * @type {Object<string, number>}
+ */
+const sonSenkronDenemesi = {}
+const SENKRON_BEKLEME_SN = 300
+
+/** Bu zaman dilimi icin son denemenin uzerinden yeterli sure gecti mi. */
+function senkronBeklemede(tf, simdi) {
+  const son = sonSenkronDenemesi[tf]
+  return typeof son === 'number' && (simdi - son) < SENKRON_BEKLEME_SN
+}
+
+/**
+ * Yeni secilen zaman dilimini KULLANILABILIR hale getirir: eksik mumlari
+ * indirir, gerekiyorsa hafizayi kurar.
+ *
+ * Ne zaman ne yapilir:
+ *   veri cek  : deponun son bari 3 bardan fazla geride kaldiysa
+ *   tarama    : hafiza hic yoksa, ESKI indikator surumunden kalmissa
+ *               (memoryCurrent false) veya veri cekimi yeni bar ekledi ise
+ *
+ * Geriye test (sinyal listesi) BILEREK otomatik calistirilmaz: 1 dakikalikta
+ * on binlerce olay uzerinde dakikalar suruyor ve zaman dilimi degistirmeyi
+ * kullanilamaz hale getirirdi. Kullanici Test sekmesinden kendisi baslatir.
+ *
+ * @param {string} tf
+ * @returns {Promise<boolean>} bir sey degistiyse true
+ */
+async function tfHazirla(tf) {
+  const ayar = durum.ayarlar || {}
+  if (ayar.autoPrepareOnTfChange === false) return false
+
+  const durumBilgisi = await cagirGuvenli('data:status', {}, 'Veri durumu okunamadı')
+  const satir = durumBilgisi && durumBilgisi.byTf ? durumBilgisi.byTf[tf] : null
+  if (!satir) return false
+
+  const tfSec = tfSaniye(tf)
+  const simdi = Math.floor(Date.now() / 1000)
+  let degisti = false
+
+  // --- 1) Eksik mumlar -----------------------------------------------------
+  // Hangi kaynak: depo BOSSA gecmis kaynagi (HistData) tum tarihi verir.
+  // Depo doluysa eksik olan yalnizca SON gunlerdir ve gecmis kaynagi orayi
+  // veremez; olculdu, HistData icinde bulunulan ayi yayinlamiyor ve 12 gunluk
+  // bosluk icin 78 saniye harcayip 0 bar ekliyor. Ayni bosluk canli kaynaktan
+  // (Binance PAXG) 11 saniyede doluyor. Vekil kaynagin fiyat ve hacim farki
+  // loader icinde zaten duzeltiliyor.
+  const sonBar = sayi(satir.lastTime, 0)
+  const geride = !satir.hasData || (simdi - sonBar) > tfSec * 3
+  let yeniBar = 0
+  if (geride && !senkronBeklemede(tf, simdi)) {
+    const saglayici = satir.hasData
+      ? ((ayar.providers && ayar.providers.live) || undefined)
+      : ((ayar.providers && ayar.providers.history) || undefined)
+    sonSenkronDenemesi[tf] = simdi
+    motorDurumu('eksik veri indiriliyor')
+    ilerleme(0, tf + ' için eksik mumlar indiriliyor')
+    const sonuc = await cagirGuvenli('data:sync',
+      { tf: tf, providerId: saglayici, provider: saglayici }, 'Eksik veri indirilemedi')
+    yeniBar = sonuc && typeof sonuc === 'object' ? sayi(sonuc.added, 0) : 0
+    if (yeniBar > 0) {
+      degisti = true
+      bildir(tf + ' için ' + formatNumber(yeniBar, 0) + ' yeni mum indirildi.')
+    }
+  }
+
+  // --- 2) Hafiza -----------------------------------------------------------
+  // Veri cekimi 1 dakikalik tabani gunceller ve TUM ust zaman dilimlerini
+  // yeniden uretir. Yani baska bir dilimde yapilan cekim bu dilimin deposunu
+  // da ilerletmis olabilir; bu yuzden "yeni bar indirdim mi" sorusu yetmez,
+  // hafizanin hangi bara kadar kuruldugu deponun son bariyla karsilastirilir.
+  const durumBilgisi2 = yeniBar > 0
+    ? await cagirGuvenli('data:status', {}, 'Veri durumu okunamadı')
+    : durumBilgisi
+  const satir2 = (durumBilgisi2 && durumBilgisi2.byTf ? durumBilgisi2.byTf[tf] : null) || satir
+
+  const hafizaYok = !satir2.hasMemory
+  const hafizaEski = satir2.hasMemory && satir2.memoryCurrent === false
+  const kuruldugu = sayi(satir2.memoryBuiltToTime, 0)
+  const veriSonu = sayi(satir2.lastTime, 0)
+  const hafizaGeride = kuruldugu <= 0 || (veriSonu - kuruldugu) > tfSec * 2
+
+  if (hafizaYok || hafizaEski || hafizaGeride) {
+    motorDurumu('geçmiş taranıyor')
+    ilerleme(0, tf + ' için hafıza kuruluyor')
+    const sonuc = await cagirGuvenli('engine:scan', {
+      tf: tf,
+      params: ayar.indicatorParams,
+      indicatorParams: ayar.indicatorParams,
+      outcomeCfg: ayar.outcomeCfg,
+      signalCfg: ayar.signalCfg,
+    }, 'Geçmiş taranamadı')
+    if (sonuc) {
+      degisti = true
+      bildir(tf + ' hafızası hazır: ' + formatNumber(sayi(sonuc.events, 0), 0) + ' kayıt. ' +
+        'Sinyal listesi için Test sekmesinden testi çalıştırın.')
+    }
+  }
+
+  ilerleme(100, 'Hazır')
+  motorDurumu('hazır')
+  setTimeout(ilerlemeyiKapat, 1200)
+  return degisti
+}
+
 /** Zaman dilimini degistirir ve her seyi yeniden yukler. */
 async function tfDegistir(tf) {
   const oncekiCanli = durum.canli
@@ -908,6 +1039,10 @@ async function tfDegistir(tf) {
   const yeni = await cagirGuvenli('settings:set', { timeframe: tf }, 'Zaman dilimi kaydedilemedi')
   if (yeni && typeof yeni === 'object') durum.ayarlar = yeni
   else if (durum.ayarlar) durum.ayarlar.timeframe = tf
+
+  // Once eksigi tamamla, sonra yukle: aksi halde bos bir grafik cizilip
+  // hemen ardindan yeniden cizilirdi.
+  await tfHazirla(tf)
 
   await hepsiniYukle()
   if (oncekiCanli) await canliBaslat()
@@ -1287,10 +1422,12 @@ function sinyalPaneliniCiz() {
     if (s) {
       // Once gorunur yapilir: mini grafiklerin genisligi yerlesimden okunur.
       goster(n.ayrinti, true)
-      renderSignalDetail(n.ayrinti, s)
+      renderSignalDetail(n.ayrinti, s, { onMatchSelect: ornegeGit })
       geriDugmesiEkle(n.ayrinti, 'Ayrıntıyı kapat', () => {
         durum.seciliSinyalId = null
+        durum.vurguluOrnek = null
         planCizgileri(null)
+        isaretleriCiz()
         sinyalPaneliniCiz()
       })
     } else {
@@ -1298,13 +1435,48 @@ function sinyalPaneliniCiz() {
     }
   } else if (s) {
     // Ayri ayrinti kabi yoksa listenin yerine ayrintiyi ciz.
-    renderSignalDetail(n.liste, s)
+    renderSignalDetail(n.liste, s, { onMatchSelect: ornegeGit })
     geriDugmesiEkle(n.liste, 'Sinyal listesine dön', () => {
       durum.seciliSinyalId = null
+      durum.vurguluOrnek = null
       planCizgileri(null)
+      isaretleriCiz()
       sinyalPaneliniCiz()
     })
   }
+}
+
+/**
+ * "Benzer gecmis ornekler" listesinden bir kayda tiklandiginda grafigi o ana
+ * goturur. Ornek, hafizadaki bir olaydir; sinyal degildir, bu yuzden plan
+ * cizgileri KURULMAZ, yalnizca konum gosterilir.
+ *
+ * Ornek cogu zaman yuklu mum penceresinin cok disindadir (2011 gibi), o yuzden
+ * once o tarihin etrafindaki mumlar ve bolgeler yuklenir; aksi halde grafik
+ * bos bir alana kayar.
+ */
+async function ornegeGit(m) {
+  if (!m) return
+  const zaman = sayi(m.time, 0)
+  if (!(zaman > 0)) return
+
+  durum.vurguluOrnek = { time: zaman, success: !!m.success }
+
+  if (zamanPencereDisinda(zaman)) {
+    const yuklendi = await mumlariZamanEtrafindaYukle(zaman)
+    if (yuklendi) {
+      const barlar = durum.bars
+      const to = barlar.length ? barlar[barlar.length - 1].time + tfSaniye(durum.tf) * 200 : undefined
+      await bolgeleriYukle(barlar.length ? barlar[0].time : undefined, to)
+    }
+  }
+
+  isaretleriCiz()
+  if (view && typeof view.scrollToTime === 'function') {
+    try { view.scrollToTime(zaman, { minSpan: 80, maxSpan: 900 }) } catch (err) { /* onemsiz */ }
+  }
+  bildir('Örneğe gidildi: ' + formatDateTime(zaman) +
+    ', sonuç ' + (m.success ? 'bölge tuttu' : 'bölge kırıldı'))
 }
 
 /** Ayrinti kabina geri dugmesi ekler. */
@@ -1332,6 +1504,8 @@ function seciliSinyal() {
 async function sinyalSec(s) {
   if (!s) return
   durum.seciliSinyalId = s.id
+  // Yeni bir sinyale gecilince onceki ornek vurgusu anlamini yitirir.
+  durum.vurguluOrnek = null
   const zaman = sayi(s.time, 0)
 
   // Sinyal yuklu mum penceresinin disindaysa once o tarihin etrafini yukle,
@@ -1436,7 +1610,10 @@ function bolgeAyrintisiniCiz(z, dokunuslar) {
     ['Oluşum', formatDateTime(z.createdTime)],
     ['Pivot', formatDateTime(z.pivotTime)],
     ['Bitiş', formatDateTime(z.endTime)],
-    ['Akış gücü', formatNumber(z.flow, 2)],
+    ['Akış gücü', formatNumber(z.flow, 2) + ' / 10'],
+    ['Doğuştaki akış', formatNumber(z.flowAtBirth, 2) + ' / 10'],
+    ['Bant dışına taşma', formatNumber(z.bbDistAtr, 2) + ' ATR'],
+    ['Birleşme sayısı', formatNumber(z.mergeCount, 0)],
     ['Dokunuş sayısı', formatNumber(z.touchCount, 0)],
   ]
   for (let i = 0; i < ciftler.length; i++) {
@@ -1453,13 +1630,13 @@ function bolgeAyrintisiniCiz(z, dokunuslar) {
 
   const dBaslik = document.createElement('h4')
   dBaslik.className = 'sec-title'
-  dBaslik.textContent = 'Dokunuş geçmişi (' + formatNumber(dokunuslar.length, 0) + ')'
+  dBaslik.textContent = 'Bölge olayları (' + formatNumber(dokunuslar.length, 0) + ')'
   kap.appendChild(dBaslik)
 
   if (dokunuslar.length === 0) {
     const bos = document.createElement('div')
     bos.className = 'small muted'
-    bos.textContent = 'Bu bölgeye kayıtlı dokunuş yok.'
+    bos.textContent = 'Bu bölgeye kayıtlı olay yok.'
     kap.appendChild(bos)
   } else {
     for (let i = 0; i < dokunuslar.length; i++) {
@@ -1476,10 +1653,20 @@ function bolgeAyrintisiniCiz(z, dokunuslar) {
       const orta = document.createElement('span')
       orta.className = 'row-main'
       orta.appendChild(document.createTextNode(formatDateTime(t.time)))
+      const rozet = document.createElement('span')
+      rozet.className = 'badge tiny'
+      rozet.textContent = t.kind === 'form' ? 'OLUŞUM' : 'DOKUNUŞ'
+      rozet.title = t.kind === 'form'
+        ? 'Kutunun doğduğu an, giriş onay barının kapanışı'
+        : 'Fiyatın bölgeye geri dönüşü, giriş bölge kenarı'
+      orta.appendChild(rozet)
       const alt = document.createElement('span')
       alt.className = 'row-sub'
-      alt.textContent = 'Fiyat ' + formatPrice(t.price) +
-        ', giriş derinliği ' + formatPercent(t.penetration, 0)
+      alt.textContent = t.kind === 'form'
+        ? ('Fiyat ' + formatPrice(t.price) + ', kutuya uzaklık ' +
+           formatNumber(t.entryDistAtr, 2) + ' ATR')
+        : ('Fiyat ' + formatPrice(t.price) + ', giriş derinliği ' +
+           formatPercent(t.penetration, 0))
       orta.appendChild(alt)
       satir.appendChild(orta)
 
@@ -1598,7 +1785,12 @@ async function testCalistir() {
       signalCfg: (durum.ayarlar || {}).signalCfg,
     })
     durum.testSonucu = sonuc
-    bildir('Test tamamlandı.')
+    // Geriye test sinyal listesini de URETIR ve diske yazar. Yeniden okunmazsa
+    // Sinyaller sekmesi taramadan kalma bos listeyi gostermeye devam eder ve
+    // kullanici "testi calistirdim ama sinyal gelmedi" diye bakar.
+    await sinyalleriYukle()
+    const uretilen = sonuc && sonuc.summary ? sayi(sonuc.summary.fired, 0) : durum.signals.length
+    bildir('Test tamamlandı, ' + formatNumber(uretilen, 0) + ' sinyal Sinyaller sekmesine yazıldı.')
     ilerleme(100, 'Tamamlandı')
   } catch (err) {
     hataGoster('Test başarısız: ' + hataMetni(err))
@@ -1678,13 +1870,14 @@ function canliSinyalEkle(s) {
   if (durum.aktifPanel === 'signals') sinyalPaneliniCiz()
 
   const yon = s.direction === 'SELL' ? 'SAT' : 'AL'
+  const tur = s.kind === 'form' ? 'kutu oluşumu' : 'bölge dokunuşu'
   if (s.fired) {
-    bildir('Yeni sinyal: ' + yon + ' ' + formatPrice(s.price) +
+    bildir('Yeni sinyal: ' + yon + ' (' + tur + ') ' + formatPrice(s.price) +
       ', başarı ' + formatPercent(s.winRate, 0) +
       ', güven ' + formatPercent(s.confidence, 0) +
       ', ' + formatDateTime(s.time))
   } else {
-    bildir('Dokunuş kaydedildi (' + yon + '), eşikler geçilmedi: ' + formatDateTime(s.time))
+    bildir('Olay kaydedildi (' + yon + ', ' + tur + '), eşikler geçilmedi: ' + formatDateTime(s.time))
   }
 }
 
@@ -1849,7 +2042,20 @@ async function baslat() {
   tvKaynagiGuncelle()
   await saglayicilariYukle()
   grafigiKur()
+
+  // Acilista da eksigi tamamla: uygulama gunlerce kapali kalmis olabilir.
+  await tfHazirla(durum.tf)
+
   await hepsiniYukle()
+
+  // Canli takip: ayar aciksa uygulama acilir acilmaz baslar. En SONA birakildi,
+  // cunku grafik ve saglayici listesi hazir olmadan baslatmak anlamsiz. Hata
+  // olursa `canliBaslat` icindeki `cagirGuvenli` uyariyi basar ve anahtar
+  // kapali kalir; acilis bundan etkilenmez.
+  const otomatikCanli = !durum.ayarlar || durum.ayarlar.autoStartLive !== false
+  if (otomatikCanli && !durum.canli) {
+    await canliBaslat()
+  }
 }
 
 if (document.readyState === 'loading') {

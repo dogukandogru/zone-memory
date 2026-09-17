@@ -145,7 +145,11 @@
             <span class="panel-actions">
               <select id="signalFilter" class="select mini" title="Listeleme filtresi">
                 <option value="fired">Yayınlananlar</option>
-                <option value="all">Tüm dokunuşlar</option>
+                <option value="all">Tüm olaylar</option>
+                <option value="form">Sadece kutu oluşumu</option>
+                <option value="touch">Sadece bölge dokunuşu</option>
+                <option value="won">Sadece tutanlar</option>
+                <option value="lost">Sadece tutmayanlar</option>
                 <option value="buy">Sadece AL</option>
                 <option value="sell">Sadece SAT</option>
               </select>
@@ -153,7 +157,7 @@
             </span>
           </div>
           <div id="signalList" class="list scroll"></div>
-          <div id="signalEmpty" class="empty">Henüz sinyal yok. Önce hafızayı kurun.</div>
+          <div id="signalEmpty" class="empty">Sinyal listesi geriye testten gelir. &quot;Test&quot; sekmesinde &quot;Testi Çalıştır&quot; deyin.</div>
           <div id="signalDetail" class="detail scroll" hidden></div>
         </section>
 
