@@ -1036,7 +1036,7 @@ async function tfDegistir(tf) {
   planCizgileri(null)
   tvKaynagiGuncelle()
 
-  const yeni = await cagirGuvenli('settings:set', { timeframe: tf }, 'Zaman dilimi kaydedilemedi')
+  const yeni = await cagirGuvenli('settings:set', { patch: { timeframe: tf } }, 'Zaman dilimi kaydedilemedi')
   if (yeni && typeof yeni === 'object') durum.ayarlar = yeni
   else if (durum.ayarlar) durum.ayarlar.timeframe = tf
 
@@ -1079,7 +1079,7 @@ function kutuyuDoldur(kutu, liste, secili, tur) {
   kutu.dataset.zmBagli = '1'
   kutu.addEventListener('change', async () => {
     const yama = tur === 'live' ? { providers: { live: kutu.value } } : { providers: { history: kutu.value } }
-    const yeni = await cagirGuvenli('settings:set', yama, 'Sağlayıcı kaydedilemedi')
+    const yeni = await cagirGuvenli('settings:set', { patch: yama }, 'Sağlayıcı kaydedilemedi')
     if (yeni && typeof yeni === 'object') durum.ayarlar = yeni
     kaynakDurumuYaz()
     if (tur === 'live' && durum.canli) await canliBaslat()
@@ -1728,6 +1728,27 @@ function ayarPaneliniCiz(zorla) {
   })
 }
 
+/**
+ * Yamanin her yapragini kaydedilen ayarla karsilastirir ve tutmayanlari
+ * "alan: istenen -> yazilan" listesi olarak dondurur. Ayarlar bir donem
+ * sessizce kaydedilmiyordu; artik kaydin gercekten tuttugunu dogruluyoruz.
+ */
+function tutmayanAlanlar(yeni, yama, onek) {
+  const fark = []
+  if (!yama || typeof yama !== 'object') return fark
+  for (const anahtar of Object.keys(yama)) {
+    const yol = onek ? onek + '.' + anahtar : anahtar
+    const istenen = yama[anahtar]
+    const yazilan = yeni && typeof yeni === 'object' ? yeni[anahtar] : undefined
+    if (istenen && typeof istenen === 'object' && !Array.isArray(istenen)) {
+      fark.push(...tutmayanAlanlar(yazilan, istenen, yol))
+    } else if (String(yazilan) !== String(istenen)) {
+      fark.push(yol + ': ' + String(istenen) + ' -> ' + String(yazilan))
+    }
+  }
+  return fark
+}
+
 /** Ayar yamasini diske yazar. */
 async function ayarlariKaydet(yama) {
   const gonderilecek = yama && Object.keys(yama).length ? yama : durum.ayarYamasi
@@ -1735,17 +1756,27 @@ async function ayarlariKaydet(yama) {
     bildir('Kaydedilecek değişiklik yok.')
     return
   }
-  const yeni = await cagirGuvenli('settings:set', gonderilecek, 'Ayarlar kaydedilemedi')
+  const yeni = await cagirGuvenli('settings:set', { patch: gonderilecek }, 'Ayarlar kaydedilemedi')
   if (yeni === null) return
   if (yeni && typeof yeni === 'object') durum.ayarlar = yeni
   durum.ayarYamasi = {}
-  bildir('Ayarlar kaydedildi. Hafızayı etkileyen değişiklikler için "Geçmişi Tara" çalıştırın.')
+  const fark = tutmayanAlanlar(yeni, gonderilecek)
+  if (fark.length > 0) {
+    hataGoster('Bazı ayarlar istenen değerle kaydedilmedi (geçerli aralığa kırpılmış olabilir): ' + fark.join(', '))
+  } else {
+    bildir('Ayarlar kaydedildi. Hafızayı etkileyen değişiklikler için "Geçmişi Tara" çalıştırın.')
+  }
   ayarPaneliniCiz(true)
   saglayiciSecimleriniKur()
 }
 
-/** Ayarlari varsayilanlara dondurur. */
+/** Ayarlari varsayilanlara dondurur (API anahtarlari ve saglayicilar korunur). */
 async function ayarlariSifirla() {
+  const onay = window.confirm(
+    'Tüm ayarlar varsayılanlara dönecek. API anahtarları, sağlayıcı seçimi ve açık zaman dilimi korunur, ' +
+    'elle girdiğiniz eşikler kaybolur ve hafızayı yeniden taramanız gerekir. Devam edilsin mi?'
+  )
+  if (!onay) return
   const yeni = await cagirGuvenli('settings:reset', {}, 'Varsayılanlara dönülemedi')
   if (yeni === null) return
   if (yeni && typeof yeni === 'object') durum.ayarlar = yeni
@@ -1775,8 +1806,13 @@ async function testCalistir() {
   motorDurumu('test çalışıyor')
   ilerleme(0, 'Test başlıyor')
 
+  // Bos birakilan kutu "degisiklik yok" demektir; sayi('') 0 dondugu icin
+  // isinma sessizce kapanip testi butun hafizaya acardi.
   const isinmaEl = el('testWarmup')
-  const isinma = isinmaEl ? sayi(isinmaEl.value, 500) : 500
+  const varsayilanIsinma = 500
+  const isinma = isinmaEl && isinmaEl.value.trim() !== ''
+    ? sayi(isinmaEl.value, varsayilanIsinma)
+    : varsayilanIsinma
 
   try {
     const sonuc = await cagir('engine:backtest', {
@@ -1992,12 +2028,24 @@ function dugmeleriBagla() {
   const sil = el('memoryDeleteBtn')
   if (sil) {
     sil.addEventListener('click', async () => {
+      const olay = durum.hafizaOzeti ? sayi(durum.hafizaOzeti.total, 0) : 0
+      const onay = window.confirm(
+        durum.tf + ' hafızası silinecek: ' + formatNumber(olay, 0) + ' olay, bölgeler, ortak yapılar ve ' +
+        formatNumber(durum.signals.length, 0) + ' sinyal. Bu işlem geri alınamaz, yeniden tarama gerekir. Devam edilsin mi?'
+      )
+      if (!onay) return
       const sonuc = await cagirGuvenli('engine:memory-delete', { tf: durum.tf }, 'Hafıza silinemedi')
       if (sonuc === null) return
       durum.hafizaOzeti = null
       durum.prototipler = []
       durum.signals = []
+      durum.zones = []
+      durum.seciliBolgeId = null
+      durum.seciliSinyalId = null
+      durum.testSonucu = null
       isaretleriCiz()
+      bolgeleriCiz()
+      planCizgileri(null)
       bildir('Hafıza silindi, yeniden tarama gerekir.')
       paneliCiz()
     })

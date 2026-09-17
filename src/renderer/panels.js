@@ -968,6 +968,24 @@ function yolaYaz(nesne, yol, deger) {
   return nesne
 }
 
+/** Nokta ile ayrilmis yoldaki degeri siler, bosalan ara nesneleri de temizler. */
+function yoldanSil(nesne, yol) {
+  const parcalar = String(yol).split('.')
+  const zincir = [nesne]
+  let cur = nesne
+  for (let i = 0; i < parcalar.length - 1; i++) {
+    const p = parcalar[i]
+    if (cur[p] === null || typeof cur[p] !== 'object') return nesne
+    cur = cur[p]
+    zincir.push(cur)
+  }
+  delete cur[parcalar[parcalar.length - 1]]
+  for (let i = zincir.length - 1; i > 0; i--) {
+    if (Object.keys(zincir[i]).length === 0) delete zincir[i - 1][parcalar[i - 1]]
+  }
+  return nesne
+}
+
 /** Ayar gruplari tanimi (sira arayuzdeki siradir). */
 function ayarGruplari(saglayiciSecenekleri) {
   return [
@@ -1159,6 +1177,44 @@ export function renderSettings(el, settings, opts) {
   bozulmaUyarisi.style.color = 'var(--down, ' + RENK.down + ')'
   el.appendChild(bozulmaUyarisi)
 
+  // Gecersiz (aralik disi) alanlar. Bunlar varken kaydetmek engellenir:
+  // bos birakilan bir kutu 0 olarak, aralik disi bir esik oldugu gibi
+  // kaydediliyordu ve sonuclari sessizce anlamsiz hale getiriyordu.
+  const gecersizler = new Set()
+  let kaydetDugmesi = null
+  const gecersizUyarisi = uyariKutusu('')
+  gecersizUyarisi.style.display = 'none'
+  gecersizUyarisi.style.color = 'var(--down, ' + RENK.down + ')'
+  el.appendChild(gecersizUyarisi)
+
+  /** Gecerlilik durumunu kaydet dugmelerine ve uyariya yansitir. */
+  function gecerliligiUygula() {
+    const bozukVar = gecersizler.size > 0
+    const liste = Array.from(gecersizler).join(', ')
+    gecersizUyarisi.textContent = bozukVar
+      ? 'Geçerli aralık dışında değer var, kaydetme kapalı: ' + liste
+      : ''
+    gecersizUyarisi.style.display = bozukVar ? '' : 'none'
+    if (kaydetDugmesi) kaydetDugmesi.disabled = bozukVar
+    const ustKaydet = document.getElementById('settingsSaveBtn')
+    if (ustKaydet) ustKaydet.disabled = bozukVar
+  }
+
+  /** Bir alanin gecerliligini bildirir. */
+  function gecerlilik(yol, gecerliMi) {
+    if (gecerliMi) gecersizler.delete(yol)
+    else gecersizler.add(yol)
+    gecerliligiUygula()
+  }
+
+  /** Bos birakilan alani yamadan cikarir ("degisiklik yok" anlamina gelir). */
+  function yamadanCikar(yol) {
+    yoldanSil(yama, yol)
+    if (typeof o.onChange === 'function') {
+      o.onChange({}, { path: yol, value: undefined, invalidatesMemory: false, patch: yama })
+    }
+  }
+
   /** Bir alan degistiginde yamayi gunceller ve onChange cagirir. */
   function degisti(yol, deger, bozarMi) {
     yolaYaz(yama, yol, deger)
@@ -1182,7 +1238,8 @@ export function renderSettings(el, settings, opts) {
     const alanlar = grup.alanlar || []
     if (alanlar.length) {
       const izgara = h('div', 'field-grid')
-      for (let i = 0; i < alanlar.length; i++) izgara.appendChild(alanDugumu(alanlar[i], s, grup.bozar, degisti))
+      const kanca = { degisti, gecerlilik, yamadanCikar }
+      for (let i = 0; i < alanlar.length; i++) izgara.appendChild(alanDugumu(alanlar[i], s, grup.bozar, kanca))
       el.appendChild(izgara)
     }
 
@@ -1208,7 +1265,10 @@ export function renderSettings(el, settings, opts) {
   const ayak = h('div', 'panel-foot')
   const kaydet = h('button', 'btn btn-primary mini', 'Kaydet')
   kaydet.type = 'button'
+  kaydetDugmesi = kaydet
+  gecerliligiUygula()
   kaydet.addEventListener('click', () => {
+    if (gecersizler.size > 0) return
     if (typeof o.onSave === 'function') o.onSave(yama)
     else if (typeof o.onChange === 'function') o.onChange(yama, { save: true, invalidatesMemory: bozuldu })
   })
@@ -1223,8 +1283,12 @@ export function renderSettings(el, settings, opts) {
   el.appendChild(ayak)
 }
 
-/** Tek bir ayar alani icin .field dugumu uretir. */
-function alanDugumu(tanim, ayarlar, bozar, degisti) {
+/**
+ * Tek bir ayar alani icin .field dugumu uretir.
+ * @param {object} kanca {degisti, gecerlilik, yamadanCikar}
+ */
+function alanDugumu(tanim, ayarlar, bozar, kanca) {
+  const degisti = kanca.degisti
   const alan = h('label', 'field')
   alan.appendChild(h('span', null, tanim.ad))
 
@@ -1265,11 +1329,30 @@ function alanDugumu(tanim, ayarlar, bozar, degisti) {
     if (tanim.min !== undefined) giris.min = String(tanim.min)
     if (tanim.max !== undefined) giris.max = String(tanim.max)
     giris.value = Number.isFinite(Number(mevcut)) ? String(Number(mevcut)) : ''
-    giris.addEventListener('change', () => {
-      const v = Number(giris.value)
-      if (!Number.isFinite(v)) return
+    // Bos deger "degisiklik yok" demektir (Number('') 0 doner, o yuzden ayri
+    // ele aliniyor). Aralik disi deger yamaya girmez ve kaydetmeyi kilitler.
+    const kontrol = () => {
+      const ham = String(giris.value).trim()
+      if (ham === '') {
+        giris.classList.remove('invalid')
+        kanca.gecerlilik(tanim.yol, true)
+        kanca.yamadanCikar(tanim.yol)
+        return
+      }
+      const v = Number(ham)
+      const gecerli = Number.isFinite(v) &&
+        (tanim.min === undefined || v >= Number(tanim.min)) &&
+        (tanim.max === undefined || v <= Number(tanim.max))
+      giris.classList.toggle('invalid', !gecerli)
+      kanca.gecerlilik(tanim.yol, gecerli)
+      if (!gecerli) {
+        kanca.yamadanCikar(tanim.yol)
+        return
+      }
       degisti(tanim.yol, v, bozar)
-    })
+    }
+    giris.addEventListener('input', kontrol)
+    giris.addEventListener('change', kontrol)
   }
 
   giris.dataset.key = tanim.yol

@@ -146,6 +146,89 @@ function indikatorAyariniGocur(parsed) {
   return out
 }
 
+/**
+ * SAYISAL AYAR SINIRLARI
+ * ---------------------------------------------------------------------------
+ * Arayuzdeki min/max yalnizca HTML ozniteligidir, tarayici bunu zorlamaz ve
+ * bos birakilan alan 0 olarak gelebilir. Sinir disi bir esik sessizce
+ * kaydedilirse sonuclari anlasilmaz olur: minMatches 0 ise her olay sinyal
+ * olur, minSimilarity 5 ise hicbir olay eslesmez. Bu yuzden yazmadan once
+ * sayilar buradaki araliklara kirpilir; sayi olmayan veya sonsuz degerlerde
+ * onceki deger korunur.
+ */
+const SINIRLAR = {
+  livePollSeconds: [3, 3600],
+  'signalCfg.k': [1, 200],
+  'signalCfg.minSimilarity': [0, 0.999],
+  'signalCfg.minMatches': [1, 1000],
+  'signalCfg.minWinRate': [0, 1],
+  'signalCfg.minRr': [0, 10],
+  'signalCfg.minExpectancy': [-1, 5],
+  'signalCfg.tp1Pct': [1, 99],
+  'signalCfg.tp2Pct': [1, 99],
+  'signalCfg.slPct': [1, 99],
+  'signalCfg.excludeWithinSec': [0, 86400 * 365],
+  'outcomeCfg.horizonBars': [1, 5000],
+  'outcomeCfg.targetAtr': [0, 20],
+  'outcomeCfg.breakBufferAtr': [0, 20],
+  'outcomeCfg.minTargetAtr': [0, 20],
+  'outcomeCfg.formTargetRr': [0, 10],
+  'outcomeCfg.maxFormRiskAtr': [0, 50],
+  'outcomeCfg.tpAtr': [0, 20],
+  'outcomeCfg.slAtr': [0, 20],
+  'indicatorParams.pivotLen': [1, 100],
+  'indicatorParams.atrLen': [1, 500],
+  'indicatorParams.zoneAtrMult': [0.01, 10],
+  'indicatorParams.mergeAtrMult': [0, 10],
+  'indicatorParams.maxZones': [1, 500],
+  'indicatorParams.maxAgeBars': [1, 5000],
+  'indicatorParams.touchCooldown': [0, 1000],
+  'indicatorParams.boxLengthBars': [1, 5000],
+  'indicatorParams.volumeLen': [1, 1000],
+  'indicatorParams.minVolRatio': [0, 100],
+  'indicatorParams.minFlowToShow': [0, 10],
+  'indicatorParams.bbLen': [2, 1000],
+  'indicatorParams.bbMult': [0, 10],
+  'indicatorParams.breakAtrMult': [0, 10],
+  'indicatorParams.minScoreForSignal': [0, 5],
+  'indicatorParams.strongScoreLevel': [0, 5],
+  'indicatorParams.strongFlowLevel': [0, 10],
+  'indicatorParams.wickMinRatio': [0, 1],
+  'indicatorParams.emaFastLen': [1, 1000],
+  'indicatorParams.emaSlowLen': [1, 2000],
+  'indicatorParams.mintick': [1e-8, 1000],
+}
+
+/** Bilinen zaman dilimleri; gecersiz timeframe yazilmasin diye. */
+const TF_LISTESI = coreConst('../core/tf', 'TF_SECONDS', {})
+
+/**
+ * Yazilacak ayar nesnesindeki sayisal degerleri SINIRLAR araliklarina kirpar.
+ * Sayi olmayan degerde `current` icindeki onceki deger korunur.
+ * @param {object} next Yazilacak tam ayar nesnesi
+ * @param {object} current Diskteki mevcut tam ayar nesnesi
+ */
+function sinirla(next, current) {
+  const out = deepClone(next)
+  for (const yol of Object.keys(SINIRLAR)) {
+    const ham = getPath(out, yol)
+    if (ham === undefined) continue
+    const [alt, ust] = SINIRLAR[yol]
+    const deger = typeof ham === 'number' ? ham : Number(ham)
+    if (!Number.isFinite(deger)) {
+      const eski = getPath(current, yol)
+      if (eski !== undefined) setPath(out, yol, eski)
+      continue
+    }
+    setPath(out, yol, Math.min(ust, Math.max(alt, deger)))
+  }
+  const tf = out.timeframe
+  if (tf !== undefined && !Object.prototype.hasOwnProperty.call(TF_LISTESI, String(tf))) {
+    out.timeframe = current.timeframe
+  }
+  return out
+}
+
 /** Bellek onbellegi, her cagrida diskten okumamak icin. */
 let cache = null
 
@@ -179,7 +262,24 @@ function load() {
  */
 function save(patch) {
   const current = load()
-  const next = deepMerge(current, patch || {})
+  const next = sinirla(deepMerge(current, patch || {}), current)
+  return yaz(next)
+}
+
+/**
+ * Verilen TAM ayar nesnesini diske yazar (birlestirme yapmaz, eski anahtarlar
+ * dusertir). Varsayilanlara donus icin gereklidir: `save` derin birlestirdigi
+ * icin dosyada kalan fazla anahtarlari silemez.
+ * @param {object} next
+ * @returns {object} Guncel tam ayar nesnesi
+ */
+function replace(next) {
+  const current = load()
+  return yaz(sinirla(deepMerge(DEFAULTS, next || {}), current))
+}
+
+/** Ayar nesnesini atomik olarak diske yazar ve onbellege alir. */
+function yaz(next) {
   const file = paths.settingsPath()
   const tmp = file + '.tmp'
   fs.mkdirSync(path.dirname(file), { recursive: true })
@@ -211,6 +311,39 @@ function set(key, val) {
   return save(all)
 }
 
+/**
+ * `settings:set` yuk bicimini tek yerde cozer. Arayuz uc bicimde cagiriyordu
+ * ve ipc yalnizca birini taniyordu; ciplak yama gonderildiginde `save({})`
+ * calisiyor, yani hicbir degisiklik kaydedilmiyordu (ekranda "kaydedildi"
+ * yazmasina ragmen). DEFAULTS icinde key, patch veya value adinda ust duzey
+ * bir alan olmadigi icin ciplak yamayi tanimak guvenlidir.
+ * @param {{key?:string, value?:*, patch?:object}|object} p
+ * @returns {object} Guncel tam ayar nesnesi
+ */
+function applySetPayload(p) {
+  if (!isPlainObject(p)) return load()
+  if (p.key !== undefined && p.key !== null && p.key !== '') return set(p.key, p.value)
+  if (isPlainObject(p.patch)) return save(p.patch)
+  if (isPlainObject(p.value)) return save(p.value)
+  return save(p)
+}
+
+/**
+ * Varsayilanlara doner ama API anahtarlarini, saglayici secimini ve acik olan
+ * zaman dilimini KORUR. Anahtarlarin tek kopyasi bu dosyadadir; sifirlama
+ * onlari silerse kullanici ucretli saglayiciya yeniden abone olmak zorunda
+ * kalabilir.
+ * @returns {object} Guncel tam ayar nesnesi
+ */
+function varsayilanlaraDon() {
+  const current = load()
+  const next = deepClone(DEFAULTS)
+  next.apiKeys = deepClone(current.apiKeys || DEFAULTS.apiKeys)
+  next.providers = deepClone(current.providers || DEFAULTS.providers)
+  next.timeframe = current.timeframe || DEFAULTS.timeframe
+  return replace(next)
+}
+
 /** Onbellegi bosaltir (test ve veri klasoru degisimi icin). */
 function reset() {
   cache = null
@@ -218,10 +351,15 @@ function reset() {
 
 module.exports = {
   DEFAULTS,
+  SINIRLAR,
   load,
   save,
+  replace,
+  applySetPayload,
+  varsayilanlaraDon,
   get,
   set,
   reset,
   deepMerge,
+  sinirla,
 }

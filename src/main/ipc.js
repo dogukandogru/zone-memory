@@ -103,15 +103,14 @@ async function dispatch(cmd, payload) {
     case 'settings:get':
       return settings.get(p.key)
 
-    case 'settings:set': {
-      if (p.key !== undefined && p.key !== null && p.key !== '') {
-        return settings.set(p.key, p.value)
-      }
-      return settings.save(p.patch || p.value || {})
-    }
+    // Yuk bicimi: {key, value} veya {patch} ya da ciplak yama nesnesi.
+    // Cozumleme settings.js icindedir, boylece testten de ayni yol gecer.
+    case 'settings:set':
+      return settings.applySetPayload(p)
 
+    // API anahtarlari, saglayici secimi ve acik zaman dilimi korunur.
     case 'settings:reset':
-      return settings.save(settings.DEFAULTS)
+      return settings.varsayilanlaraDon()
 
     // Arayuz 'data:providers' adiyla cagirir; 'providers:list' eski addir.
     case 'data:providers':
@@ -191,4 +190,7 @@ module.exports = {
   unregister,
   setWindow,
   send,
+  // Test icin: komut yonlendirici dogrudan cagrilabilsin (yuk bicimi
+  // uyusmazliklari burada yakalanir, arayuzde degil).
+  dispatch,
 }

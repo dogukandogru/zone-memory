@@ -155,6 +155,9 @@ b { font-weight: 600; }
 .select { cursor: pointer; }
 .input { user-select: text; }
 .select:focus, .input:focus { border-color: var(--accent); }
+/* Aralik disi ayar degeri: kaydetme bu alan duzelene kadar kapalidir. */
+.input.invalid, .input.invalid:focus { border-color: var(--down); background: rgba(239, 83, 80, 0.08); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
 select.mini, input.mini { height: 20px; font-size: 10px; }
 
 /* Canli anahtari */

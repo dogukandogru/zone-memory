@@ -838,10 +838,27 @@ module.exports = {
 
 - `paths.js`: `dataDir()` = `app.getPath('userData')/data`, `candlePath(tf)`,
   `memoryPath(tf)`, `settingsPath()`. Klasorleri olusturur.
-- `settings.js`: `load()`, `save(obj)`, `get(key)`, `set(key, val)`, `DEFAULTS`.
-  DEFAULTS icinde: `symbol:'XAUUSD'`, `timeframe:'15m'`, `indicatorParams`,
-  `outcomeCfg`, `signalCfg`, `providers:{history:'histdata', live:'yahoo'}`,
-  `apiKeys:{twelvedata:'', polygon:''}`, `livePollSeconds:20`, `theme:'dark'`.
+- `settings.js`: `load()`, `save(patch)`, `replace(tam)`, `get(key)`,
+  `set(key, val)`, `applySetPayload(p)`, `varsayilanlaraDon()`, `DEFAULTS`,
+  `SINIRLAR`. DEFAULTS icinde: `symbol:'XAUUSD'`, `timeframe:'5m'`,
+  `indicatorParams`, `outcomeCfg`, `signalCfg`,
+  `providers:{history:'histdata', live:'binance'}`,
+  `apiKeys:{twelvedata:'', polygon:''}`, `livePollSeconds:20`,
+  `autoStartLive:true`, `autoPrepareOnTfChange:true`, `theme:'dark'`.
+
+  **`settings:set` yuk sozlesmesi.** Uc bicim de kabul edilir ve tek yerde
+  (`applySetPayload`) cozulur: `{key:'apiKeys.polygon', value:'...'}`,
+  `{patch:{...}}` veya dogrudan yamanin kendisi (`{timeframe:'1h'}`). Renderer
+  `{patch}` bicimini kullanir. DEFAULTS icinde `key`, `patch` veya `value`
+  adinda ust duzey alan YOKTUR, ciplak yamayi tanimak bu yuzden guvenlidir.
+
+  **Sinir denetimi.** `save` ve `replace`, yazmadan once `SINIRLAR` tablosuna
+  gore sayisal alanlari kirpar; sayi olmayan degerde onceki deger korunur,
+  bilinmeyen `timeframe` yazilmaz. Arayuzdeki min/max yalnizca ipucudur,
+  baglayici olan bu tablodur.
+
+  **Sifirlama.** `settings:reset` -> `varsayilanlaraDon()`: tum ayarlar
+  varsayilana doner ama `apiKeys`, `providers` ve `timeframe` KORUNUR.
 - `engine.js`: `worker_threads` ile tek isci baslatir, `call(cmd, payload, onProgress)`
   Promise dondurur, id ile eslestirir. Isci cokerse yeniden baslatir.
 - `worker/engine.worker.js`: komut yonlendirici. Komutlar:
