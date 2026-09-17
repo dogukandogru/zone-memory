@@ -29,6 +29,11 @@ olay geldiginde ayni turdeki en benzer gecmis olaylarla karsilastirilip
 | Ayar sinir denetimi (`settings.SINIRLAR`) | Aralik disi veya bos esikler diske yazilmaz, arayuzde kaydetme kilitlenir. |
 | Yikici islemlerde onay | Hafiza silme ve varsayilanlara donus onay ister; sifirlama API anahtarlarini ve saglayici secimini korur. |
 | Depo butunlugu testi (`test/repo.test.js`) | Kaynak kodun yanlislikla `.gitignore` ile disarida kalmasini yakalar. |
+| Tek ayar birlestirme (`presets.resolveCfg`) | Tarama, test ve canli ayni esikleri ve ayni hedefi kullanir. Katman sirasi: cekirdek varsayilani, zaman dilimi hazir ayari, kullanicinin yamasi. |
+| Ayar dosyasi yalnizca degisiklikleri tutuyor | Dokunulmayan alanlarda hazir ayar gercekten devreye giriyor, cekirdek varsayilan degisiklikleri kullaniciya ulasiyor. |
+| Hafizanin ayar izi (`cfgHash`) | Hafiza hangi indikator ayari ve etiket tanimiyla kuruldugunu saklar. Ayar degisip tarama yapilmazsa canli sinyal uretilmez, test sonucu "eski ayara ait" diye isaretlenir. |
+| Kalici test ozeti (`<ad>_memory.backtest.json`) | "Hangi ayarla ne olculdu" bilgisi uygulama kapaninca kaybolmuyor; Test paneli fiilen kullanilan ayari gosteriyor. |
+| Yapi damgasi olcume baglandi | Tarama ve test ciktilari uretildikleri commit ve kaynak ozetini tasir; kirli calisma agaci basligta gorunur, paketleme kirli agacta durur. |
 
 ## Duzeltilen hatalar (olcumu veya veriyi etkileyenler)
 
@@ -46,6 +51,16 @@ olay geldiginde ayni turdeki en benzer gecmis olaylarla karsilastirilip
   %63'u etkilenmisti.
 - **Veri Cek bos tur atiyordu.** Gecmise dogru tarama artik yalnizca acikca
   istenirse yapilir.
+- **Test sekmesi baska bir sistemi olcuyordu.** Esikler ve isinma degeri
+  motora hic ulasmiyordu (yuk bicimi uyusmazligi), yani olculen sey
+  kullanicinin canlida kullandigi sistem degildi.
+- **Ayni dokunus uc farkli hedefle degerlendiriliyordu.** Tarama kullanicinin
+  hedefiyle etiketliyor, test hazir ayarin hedefiyle olcuyor, canli ise
+  varsayilan hedefle plan kuruyordu. Artik hepsi hafizanin etiket hedefini
+  kullanir.
+- **Tarama kullanicinin olcumunu siliyordu.** Her yeni barda otomatik tarama
+  basliyor ve test sinyalleriyle ozeti siliyordu. Artik yalnizca ayar izi
+  degistiyse silinir.
 
 ## Depoda yapilan tek seferlik islemler
 

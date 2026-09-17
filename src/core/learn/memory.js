@@ -31,6 +31,7 @@ const { labelTouch, DEFAULT_OUTCOME_CFG } = require('./outcome')
 const { buildFeatures, CTX_NAMES, WINDOW_BARS } = require('./features')
 const { sliceSeries, lastIndexAtOrBefore } = require('../series')
 const { tfSeconds } = require('../tf')
+const { createMarketCalendar } = require('../session')
 
 /** Ozet tablolarinda her zaman gorunmesini istedigimiz seans adlari. */
 const SESSION_NAMES = ['Asia', 'London', 'New York', 'Other']
@@ -123,18 +124,34 @@ function buildMemory (s, cfg, onProgress) {
   // eksik saatler HistData kaynaginda da yok). Boyle bir bolgede pivot, ATR,
   // hacim ortalamasi ve 48 barlik sonuc ufku gercekte cok daha uzun bir
   // zamana yayilir; olay hafizaya farkli bir sey olcen bir kayit olarak
-  // girer. Bu yuzden olayin penceresinde 2 bardan uzun bir zaman atlamasi
-  // varsa olay hafizaya ALINMAZ, yalnizca sayilir.
+  // girer. Bu yuzden olayin penceresinde GERCEK bir veri boslugu varsa olay
+  // hafizaya ALINMAZ, yalnizca sayilir.
+  //
+  // ONEMLI: hafta sonu ve gunluk ara (New York 17:00-18:00) zaman atlamasi
+  // yaratir ama bunlar veri boslugu DEGILDIR, piyasa kapalidir. Bu ayrim
+  // yapilmadiginda 15 dakikalikta 6890 olayin 6485'i atiliyordu. Bu yuzden
+  // atlamalar kural tabanli piyasa takvimiyle suzulur.
   const oncekiBar = 50
   const sonrakiBar = num(outcomeCfg.horizonBars, 48)
-  /** Olayin penceresinde zaman atlamasi var mi. */
+  const piyasaAcikMi = createMarketCalendar()
+  // Bar basina "oncesinde acik saatte eksik bar var mi" bayragi, sonra
+  // kumulatif toplam: pencere sorgusu iki cikarma ile yapilir.
+  const bosluktanSonra = new Int32Array(s.length + 1)
+  for (let i = 1; i < s.length; i++) {
+    let eksik = 0
+    if (s.time[i] - s.time[i - 1] > 2 * tfSec) {
+      for (let t = s.time[i - 1] + tfSec; t < s.time[i]; t += tfSec) {
+        if (piyasaAcikMi(t)) { eksik = 1; break }
+      }
+    }
+    bosluktanSonra[i + 1] = bosluktanSonra[i] + eksik
+  }
+  /** Olayin penceresinde gercek veri boslugu var mi. */
   function penceredeBosluk(bar) {
     const bas = Math.max(1, bar - oncekiBar)
     const bit = Math.min(s.length - 1, bar + sonrakiBar)
-    for (let k = bas; k <= bit; k++) {
-      if (s.time[k] - s.time[k - 1] > 2 * tfSec) return true
-    }
-    return false
+    if (bit < bas) return false
+    return bosluktanSonra[bit + 1] - bosluktanSonra[bas] > 0
   }
 
   const labelProgress = scaleProgress(onProgress, 60, 100)

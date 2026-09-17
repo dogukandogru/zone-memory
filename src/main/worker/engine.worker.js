@@ -680,6 +680,9 @@ handlers['engine:scan'] = async function (payload, ctx) {
 
   const events = built.events || []
   const zones = built.zones || []
+  // Ayar izi: hem hafiza meta'sina yazilir hem eski olcumlerin gecerli olup
+  // olmadigini belirler (tek yerde hesaplanir).
+  const yeniIz = ayarIzi(params, uygulanan.outcomeCfg, built.ctxNames)
 
   ctx.progress(82, 'Hafiza diske yaziliyor')
   await memstore.saveMemory(paths.memoryPath(tf), {
@@ -698,7 +701,7 @@ handlers['engine:scan'] = async function (payload, ctx) {
     indicatorParams: params,
     outcomeCfg: uygulanan.outcomeCfg,
     featureVersion: core('learn/features').FEATURE_VERSION,
-    cfgHash: ayarIzi(params, uygulanan.outcomeCfg, built.ctxNames),
+    cfgHash: yeniIz,
   })
 
   ctx.progress(88, 'Bolgeler kaydediliyor')
@@ -715,13 +718,31 @@ handlers['engine:scan'] = async function (payload, ctx) {
   await writeJsonAtomic(paths.protosPath(tf), protosToJson(protos))
 
   // Onbellekleri tazele, eski sinyaller artik gecersiz.
-  memoryCache = { tf: tf, memory: { tf: tf, ctxNames: built.ctxNames, events: events } }
+  // Onbellege ayar izi de konur; aksi halde taramadan hemen sonra yapilan
+  // test ve canli kontrol "iz bilinmiyor" sayip uyumu dogrulayamiyordu.
+  memoryCache = {
+    tf: tf,
+    memory: {
+      tf: tf,
+      ctxNames: built.ctxNames,
+      events: events,
+      meta: {
+        builtToTime: s.length > 0 ? s.time[s.length - 1] : 0,
+        cfgHash: yeniIz,
+        indicatorParams: params,
+        outcomeCfg: uygulanan.outcomeCfg,
+        featureVersion: core('learn/features').FEATURE_VERSION,
+        builtAt: new Date().toISOString(),
+        buildCommit: buildDamgasi().buildCommit,
+        buildSrcHash: buildDamgasi().buildSrcHash,
+      },
+    },
+  }
   zonesCache = { tf: tf, zones: zones }
   protoCache = { tf: tf, protos: protos }
   // Test sinyalleri ve son test ozeti YALNIZCA ayar izi degistiyse silinir.
   // Onceden her taramada siliniyordu: canli akis depoya bar ekledikce
   // otomatik tarama basliyor ve kullanicinin olcumu sessizce kayboluyordu.
-  const yeniIz = ayarIzi(params, uygulanan.outcomeCfg, built.ctxNames)
   const sonTest = await readJson(paths.backtestPath(tf))
   const eskiIz = sonTest && sonTest.cfgHash ? String(sonTest.cfgHash) : null
   if (eskiIz && eskiIz !== yeniIz) {
