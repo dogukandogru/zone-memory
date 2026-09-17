@@ -218,8 +218,45 @@ function fillHtfTrend (s, p, tfSec, bullTrend, bearTrend) {
  *          `touches`, geriye uyumluluk icin bu adi tasir; icinde hem 'form'
  *          hem 'touch' turunde olaylar vardir, ayrimi `kind` alani yapar.
  */
+/**
+ * Pine input araliklari. Pine'da her girdi `minval`/`maxval` ile sinirlidir;
+ * port bu sinirlari uygulamazsa kullanici Pine'da mumkun OLMAYAN bir ayarla
+ * tarama yapip "grafikle ayni degil" sonucuna varir. Kirpilan alanlar
+ * stats.paramsClamped icinde raporlanir.
+ */
+const PINE_ARALIKLARI = {
+  pivotLen: [2, 20],
+  atrLen: [5, 100],
+  zoneAtrMult: [0.05, 2.0],
+  // 0 "birlestirme kapali" anlaminda kabul edilir (Pine'da boyle bir secenek
+  // yok, port ekidir); 0 disindaki degerler Pine araligina kirpilir.
+  mergeAtrMult: [0.10, 3.0],
+  maxZones: [5, 100],
+  maxAgeBars: [50, 5000],
+  touchCooldown: [1, 100],
+  boxLengthBars: [1, 5000],
+  volumeLen: [10, 300],
+  minVolRatio: [0.1, 5.0],
+  minFlowToShow: [1.0, 10.0],
+  bbLen: [1, 1000],
+  bbMult: [0.1, 50],
+}
+
 function runIndicator (s, params, tfSec, onProgress) {
   const p = Object.assign({}, DEFAULT_PARAMS, params || {})
+  // Pine araliklarina kirp.
+  const paramsClamped = {}
+  for (const alan of Object.keys(PINE_ARALIKLARI)) {
+    const deger = +p[alan]
+    if (!Number.isFinite(deger)) continue
+    if (alan === 'mergeAtrMult' && deger === 0) continue
+    const [alt, ust] = PINE_ARALIKLARI[alan]
+    const kirpilmis = deger < alt ? alt : (deger > ust ? ust : deger)
+    if (kirpilmis !== deger) {
+      paramsClamped[alan] = { istenen: deger, kullanilan: kirpilmis }
+      p[alan] = kirpilmis
+    }
+  }
   const n = s ? (s.length | 0) : 0
   const step = tfSec > 0 ? tfSec : 60
 
@@ -240,6 +277,8 @@ function runIndicator (s, params, tfSec, onProgress) {
     blockedByVolume: 0, blockedByBB: 0,
     formEvents: 0, touchEvents: 0, firstTouches: 0,
     qualified: 0, gateBlockedSession: 0, scoreHist: {},
+    // Pine araligina kirpilan ayarlar (bos ise hicbir kirpma olmadi).
+    paramsClamped: paramsClamped,
   }
 
   if (n === 0) {
@@ -535,23 +574,34 @@ function runIndicator (s, params, tfSec, onProgress) {
       bbDistAtr = d > 0 ? d / atrPivot : 0
     }
 
-    // Pine: yakin ve ayni yonlu aktif kutu varsa yeni kutu acilmaz, mevcut
-    // kutu genisletilir ve skoru artar. Mesafe olcusu GUNCEL barin ATR'si.
-    const newMid = (top + bottom) / 2.0
+    // BIRLESTIRME (Pine ile birebir)
+    // Pine: `math.abs(ph - midOld) <= atr * mergeAtrMult` yani mesafe PIVOT
+    // FIYATI ile eski kutunun orta noktasi arasinda olculur (yeni kutunun
+    // orta noktasiyla DEGIL) ve dongu ilk eslesmede DURMAZ: yakin olan TUM
+    // ayni yonlu kutular genisler. ATR yoksa (na) birlesme olmaz.
+    // Olculdu: bu farklar 15m'de kutularin yaklasik %1'ini degistiriyordu.
     const atrI = atrNow[i]
-    const limit = (atrI === atrI ? atrI : atrPivot) * mergeAtrMult
-    for (let j = 0; j < live.length; j++) {
-      const z = live[j]
-      if (z.isSupport !== isSupport) continue
-      const midOld = (z.top + z.bottom) / 2.0
-      const d = midOld - newMid
-      if ((d < 0 ? -d : d) > limit) continue
+    let merged = false
+    if (mergeAtrMult > 0 && atrI === atrI) {
+      const limit = atrI * mergeAtrMult
+      for (let j = 0; j < live.length; j++) {
+        const z = live[j]
+        if (z.isSupport !== isSupport) continue
+        const midOld = (z.top + z.bottom) / 2.0
+        const d = pv - midOld
+        if ((d < 0 ? -d : d) > limit) continue
 
-      const boosted = z.flow + score * 0.25
-      z.flow = boosted > FLOW_MAX ? FLOW_MAX : boosted
-      if (top > z.top) z.top = top
-      if (bottom < z.bottom) z.bottom = bottom
-      z.mergeCount++
+        const boosted = z.flow + score * 0.25
+        z.flow = boosted > FLOW_MAX ? FLOW_MAX : boosted
+        if (top > z.top) z.top = top
+        if (bottom < z.bottom) z.bottom = bottom
+        z.mergeCount++
+        merged = true
+      }
+    }
+    if (merged) {
+      // Pine'da sayac pivot basina bir kez artar, kac kutu genisledigine
+      // bakilmaz.
       stats.zonesMerged++
       return
     }

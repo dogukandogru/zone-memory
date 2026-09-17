@@ -327,6 +327,10 @@ function knn (query, memory, opts) {
     const ev = events[i]
     if (!ev) continue
     if (ev.outcome === undefined || ev.outcome === null) continue
+    // 'nofill': kenara konan limit emir hic dolmadi, yani bu olaydan gercekte
+    // bir islem cikmadi. Aday havuzunda tutmak isabet oranini yanlis
+    // hesaplatir (ne kazanc ne kayip), bu yuzden komsu olarak kullanilmaz.
+    if (ev.outcome === 'nofill') continue
     const f = ev.features
     if (!f || !f.shape) continue
     if (yon !== null && ev.direction !== yon) continue

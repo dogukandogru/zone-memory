@@ -62,6 +62,22 @@
 const DEFAULT_OUTCOME_CFG = {
   mode: 'zone',
   horizonBars: 48,
+  // DOKUNUS OLAYINDA GIRIS MODELI
+  // 'afterClose' (VARSAYILAN): karar dokunus barinin KAPANISINDA verilir,
+  //   giris o kapanistan SONRA gelir. Kapanis kenarin lehte tarafindaysa
+  //   bir sonraki bardan itibaren kenara limit emir konur (dolum kosulu
+  //   fiyatin kenari fillOffsetAtr * ATR kadar gecmesi); kapanis bolgenin
+  //   icindeyse kapanistan girilir; kapanis gecersizligin otesindeyse olay
+  //   islem uretmez.
+  // 'zoneEdge' (ESKI): giris dokunus barinin ICINDE kenardan dolmus sayilir.
+  //   Bu, bar ici ILERIYE BAKMA idi: karar bar kapanisindaki bilgiyle
+  //   (fitil reddi, penetration, hacim) veriliyor ama giris o bilgi
+  //   olusmadan onceki bir fiyattan yaziliyordu. Olculdu: 5m fitil reddi
+  //   alt kumesi bu modelde %58.4 isabet / +0.490 ATR, gerceklestirilebilir
+  //   modelde %30.9 / -0.117 ATR. Karsilastirma icin korundu.
+  touchEntryMode: 'afterClose',
+  // Limit emrin dolmus sayilmasi icin fiyatin kenari gecmesi gereken pay.
+  fillOffsetAtr: 0.05,
   // 'zone' modu.
   // targetAtr varsayilani 1 DAKIKALIK grafik icin secildi (uygulamanin
   // varsayilan zaman dilimi). Ornek disi olculdu (ayar 2009-2018 / dogrulama
@@ -149,23 +165,38 @@ function zoneLevels (touch, atr, cfg) {
   // Kutu olusum olayinda fiyat bolgenin icinde degildir, o yuzden kenara limit
   // emir konamaz: giris her zaman onay barinin kapanisidir.
   const form = touch.kind === 'form'
-  const entryMode = form ? 'close' : (c.entryMode === 'close' ? 'close' : 'zoneEdge')
-
   // Bolgenin YAKIN kenari: destekte ust, dirençte alt.
   const edge = yukari ? zt : zb
-
-  let entry
-  if (entryMode === 'close') {
-    entry = +touch.price
-    if (!Number.isFinite(entry)) return null
-  } else {
-    // Kenardan limit emir. Dokunus tanimi (low <= zoneTop && high >= zoneBottom)
-    // geregi fiyat bu kenari gecmistir, yani emir dolar.
-    entry = edge
-  }
+  const kapanis = +touch.price
 
   // Gecersizlik: bolgenin UZAK kenarindan disari tasma.
   const invalid = yukari ? zb - bufferAtr * a : zt + bufferAtr * a
+
+  // Dokunus olayinda giris modeli (bkz. DEFAULT_OUTCOME_CFG.touchEntryMode).
+  let entryMode
+  if (form) {
+    entryMode = 'close'
+  } else if (c.entryMode === 'close') {
+    entryMode = 'close'
+  } else if (c.touchEntryMode === 'zoneEdge') {
+    entryMode = 'zoneEdge'
+  } else {
+    // 'afterClose': kararin verildigi kapanisin konumu belirler.
+    if (!Number.isFinite(kapanis)) return null
+    const kapanisLehte = yukari ? kapanis > edge : kapanis < edge
+    const kapanisGecersiz = yukari ? kapanis <= invalid : kapanis >= invalid
+    if (kapanisGecersiz) return null       // bolge o barda kirilmis, islem yok
+    entryMode = kapanisLehte ? 'limitAfterClose' : 'close'
+  }
+
+  let entry
+  if (entryMode === 'close') {
+    entry = kapanis
+    if (!Number.isFinite(entry)) return null
+  } else {
+    // Kenardan limit emir.
+    entry = edge
+  }
 
   // Giris zaten gecersizlik tarafindaysa ortada islem yoktur. Form olayinda
   // olabilir: pivot onaylanana kadar fiyat kutunun ta obur tarafina gecmis
@@ -260,12 +291,14 @@ function labelTouch (s, touch, atrAtTouch, cfg) {
   let hedef
   let gecersiz
   let kenardanGiris = false
+  let girisModu = 'close'
   if (mode === 'zone') {
     const lv = zoneLevels(touch, atr, Object.assign({}, c, { price: undefined }))
     if (!lv) return null
     entry = lv.entry
     hedef = lv.target
     gecersiz = lv.invalid
+    girisModu = lv.entryMode
     kenardanGiris = lv.entryMode === 'zoneEdge'
   } else {
     const tpAtr = sayi(c.tpAtr, DEFAULT_OUTCOME_CFG.tpAtr)
@@ -296,11 +329,14 @@ function labelTouch (s, touch, atrAtTouch, cfg) {
         maeExitAtr: Math.abs(entry - gecersiz) / atr,
         fwdReturnPct: Number.isFinite(cikis0) ? (yon * (cikis0 - entry) / entry) * 100 : 0,
         barsToOutcome: 0,
+        resolvedBar: bar,
         atr,
         mode,
         entryPrice: entry,
         targetPrice: hedef,
         invalidPrice: gecersiz,
+        exitPrice: gecersiz,
+        realizedR: -1,
         riskAtr: Math.abs(entry - gecersiz) / atr,
         rewardAtr: Math.abs(hedef - entry) / atr,
       }
@@ -308,6 +344,90 @@ function labelTouch (s, touch, atrAtTouch, cfg) {
   }
 
   const son = bar + horizonBars
+
+  // LIMIT EMIR DOLUMU (dokunus, 'afterClose' modeli)
+  // Karar bar kapanisinda verildigi icin emir en erken BIR SONRAKI barda
+  // dolar. Dolum kosulu, fiyatin kenari fillOffsetAtr * ATR kadar gecmesidir
+  // (kenara tam degen fiyat gercekte doldurmayabilir). Dolumdan once hedefe
+  // gidilirse ya da ufuk boyunca dolum olmazsa sonuc 'nofill' olur: bu olay
+  // hafizada kalir ama isabet oranina ve taban hesabina GIRMEZ.
+  let dolumBar = bar
+  if (girisModu === 'limitAfterClose') {
+    const pay = sayi(c.fillOffsetAtr, DEFAULT_OUTCOME_CFG.fillOffsetAtr) * atr
+    const dolumFiyati = yukari ? entry - pay : entry + pay
+    let bulundu = -1
+    let hedefOnce = false
+    for (let i = bar + 1; i <= son; i++) {
+      const h = +high[i]
+      const l = +low[i]
+      if (!Number.isFinite(h) || !Number.isFinite(l)) continue
+      const doldu = yukari ? l <= dolumFiyati : h >= dolumFiyati
+      if (doldu) { bulundu = i; break }
+      // Dolmadan hedefe gidildiyse islem hic acilmadi.
+      const hedefVurdu = yukari ? h >= hedef : l <= hedef
+      if (hedefVurdu) { hedefOnce = true; break }
+    }
+    if (bulundu < 0) {
+      const cikisNF = +close[son]
+      return {
+        outcome: 'nofill',
+        success: false,
+        filled: false,
+        mfeAtr: 0,
+        maeAtr: 0,
+        mfeExitAtr: 0,
+        maeExitAtr: 0,
+        fwdReturnPct: Number.isFinite(cikisNF) ? (yon * (cikisNF - entry) / entry) * 100 : 0,
+        barsToOutcome: -1,
+        resolvedBar: son,
+        atr,
+        mode,
+        entryMode: girisModu,
+        entryPrice: entry,
+        targetPrice: hedef,
+        invalidPrice: gecersiz,
+        exitPrice: entry,
+        realizedR: 0,
+        riskAtr: Math.abs(entry - gecersiz) / atr,
+        rewardAtr: Math.abs(hedef - entry) / atr,
+        missedTarget: hedefOnce,
+      }
+    }
+    dolumBar = bulundu
+    // Dolum barinda gecersizlik de gorulduyse bar ici sirayi bilemedigimiz
+    // icin MUHAFAZAKAR davranilir: kirilma yazilir.
+    const hd = +high[dolumBar]
+    const ld = +low[dolumBar]
+    const gecersizAyniBar = yukari
+      ? (Number.isFinite(ld) && ld <= gecersiz)
+      : (Number.isFinite(hd) && hd >= gecersiz)
+    if (gecersizAyniBar) {
+      const cikisD = +close[son]
+      return {
+        outcome: 'break',
+        success: false,
+        filled: true,
+        mfeAtr: 0,
+        maeAtr: Math.abs(entry - gecersiz) / atr,
+        mfeExitAtr: 0,
+        maeExitAtr: Math.abs(entry - gecersiz) / atr,
+        fwdReturnPct: Number.isFinite(cikisD) ? (yon * (cikisD - entry) / entry) * 100 : 0,
+        barsToOutcome: dolumBar - bar,
+        resolvedBar: dolumBar,
+        atr,
+        mode,
+        entryMode: girisModu,
+        entryPrice: entry,
+        targetPrice: hedef,
+        invalidPrice: gecersiz,
+        exitPrice: gecersiz,
+        realizedR: -1,
+        riskAtr: Math.abs(entry - gecersiz) / atr,
+        rewardAtr: Math.abs(hedef - entry) / atr,
+      }
+    }
+  }
+
   let enIyi = 0        // lehte azami hareket, fiyat biriminde, TUM ufuk
   let enKotu = 0       // aleyhte azami hareket, fiyat biriminde, TUM ufuk
   let enIyiCikis = 0   // lehte azami hareket, yalnizca SONUCA kadar
@@ -315,7 +435,7 @@ function labelTouch (s, touch, atrAtTouch, cfg) {
   let sonucBar = -1
   let respect = false
 
-  for (let i = bar + 1; i <= son; i++) {
+  for (let i = dolumBar + 1; i <= son; i++) {
     const h = +high[i]
     const l = +low[i]
     if (!Number.isFinite(h) || !Number.isFinite(l)) continue
@@ -348,6 +468,23 @@ function labelTouch (s, touch, atrAtTouch, cfg) {
 
   const outcome = sonucBar === -1 ? 'timeout' : (respect ? 'respect' : 'break')
 
+  // CIKIS FIYATI VE GERCEKLESEN R
+  // Zaman asimina ugrayan islem bir donem TAM STOP ZARARI sayiliyordu. Formda
+  // risk 1.2-2.8 ATR oldugu icin her timeout ortalama -2.5 ATR sahte zarar
+  // yaziyordu; ufuk sonu kapanisindan degerlenince ortalama sifira yakin
+  // (olculdu: 5m -0.018, 15m +0.043 ATR). Bu yuzden cikis fiyati ve risk
+  // birimi cinsinden gerceklesen sonuc burada hesaplanir ve testte,
+  // sinyalde, canli gunlukte hep AYNI tanim kullanilir.
+  const riskAtrSon = Math.abs(entry - gecersiz) / atr
+  const odulAtrSon = Math.abs(hedef - entry) / atr
+  const cikisFiyati = outcome === 'respect' ? hedef : (outcome === 'break' ? gecersiz : cikis)
+  let realizedR = 0
+  if (outcome === 'respect') realizedR = riskAtrSon > 0 ? odulAtrSon / riskAtrSon : 0
+  else if (outcome === 'break') realizedR = -1
+  else if (Number.isFinite(cikis) && riskAtrSon > 0) {
+    realizedR = (yon * (cikis - entry) / atr) / riskAtrSon
+  }
+
   return {
     outcome,
     success: outcome === 'respect',
@@ -357,13 +494,21 @@ function labelTouch (s, touch, atrAtTouch, cfg) {
     maeExitAtr: enKotuCikis > 0 ? enKotuCikis / atr : 0,
     fwdReturnPct,
     barsToOutcome: sonucBar === -1 ? -1 : sonucBar - bar,
+    barsToFill: dolumBar - bar,
+    // Sonucun BELLI OLDUGU bar. Ambargo bu bara gore isler: bir olay,
+    // sonucu henuz cozulmemisken baska bir olaya komsu olamaz.
+    resolvedBar: sonucBar === -1 ? son : sonucBar,
     atr,
     mode,
+    entryMode: girisModu,
+    filled: true,
     entryPrice: entry,
     targetPrice: hedef,
     invalidPrice: gecersiz,
-    riskAtr: Math.abs(entry - gecersiz) / atr,
-    rewardAtr: Math.abs(hedef - entry) / atr,
+    exitPrice: Number.isFinite(cikisFiyati) ? cikisFiyati : entry,
+    realizedR: Number.isFinite(realizedR) ? realizedR : 0,
+    riskAtr: riskAtrSon,
+    rewardAtr: odulAtrSon,
   }
 }
 

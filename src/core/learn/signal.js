@@ -236,7 +236,11 @@ function evaluateTouch (touch, features, memory, prototypes, cfg, beforeTime) {
   // Yalnizca benzerlik esigini gecen kayitlar plana ve orana girer.
   const matches = []
   for (let i = 0; i < candidates.length; i++) {
-    if (num(candidates[i].similarity, 0) >= minSimilarity) matches.push(candidates[i])
+    const aday = candidates[i]
+    // Dolmamis limit emirler (nofill) islem uretmedigi icin oran hesabina
+    // girmez; knn zaten filtreliyor, bu ek koruma eski hafizalar icin.
+    if (aday && aday.event && aday.event.outcome === 'nofill') continue
+    if (num(aday.similarity, 0) >= minSimilarity) matches.push(aday)
   }
 
   const matchCount = matches.length
@@ -244,11 +248,21 @@ function evaluateTouch (touch, features, memory, prototypes, cfg, beforeTime) {
   let wins = 0
   let sumMfe = 0
   let sumMae = 0
+  // Sonuc dagilimi: tutma, kirilma ve zaman asimi ORANLARI ayri tutulur.
+  // Beklenen deger hesabinda zaman asimini tam zarar saymak yanlisti; o
+  // olaylarda ufuk sonunda cikiliyor ve ortalama sonuc sifira yakin.
+  let breaks = 0
+  let timeouts = 0
+  let sumTimeoutR = 0
   for (let i = 0; i < matchCount; i++) {
     const m = matches[i]
     sumSim += num(m.similarity, 0)
     const ev = m.event
     if (ev.success === true || ev.outcome === 'respect') wins++
+    else if (ev.outcome === 'timeout') {
+      timeouts++
+      sumTimeoutR += num(ev.realizedR, 0)
+    } else breaks++
     sumMfe += num(ev.mfeAtr, 0)
     sumMae += num(ev.maeAtr, 0)
   }
@@ -374,7 +388,20 @@ function evaluateTouch (touch, features, memory, prototypes, cfg, beforeTime) {
   // yeterli degil, kurulumun matematigi de olumlu olmali.
   const minRr = Math.max(0, num(conf.minRr, 0))
   const minExpectancy = num(conf.minExpectancy, -Infinity)
-  const expectancy = winRate * rr - (1 - winRate)
+  // BEKLENEN DEGER (risk birimi cinsinden)
+  //   pR * rr - pB + pT * mT
+  // pR tutma, pB kirilma, pT zaman asimi orani; mT zaman asimina ugrayan
+  // komsularin ortalama gerceklesen R'si. Eski formul (winRate * rr -
+  // (1 - winRate)) zaman asimini TAM ZARAR sayiyordu, yani ufuk sonunda
+  // sifira yakin kapanan islemler -1R gibi goruluyordu. Alan tasimayan eski
+  // hafizada eski formule dusulur.
+  const pR = matchCount > 0 ? wins / matchCount : 0
+  const pB = matchCount > 0 ? breaks / matchCount : 0
+  const pT = matchCount > 0 ? timeouts / matchCount : 0
+  const mT = timeouts > 0 ? sumTimeoutR / timeouts : 0
+  const expectancy = matchCount > 0
+    ? pR * rr - pB + pT * mT
+    : winRate * rr - (1 - winRate)
   const rrOk = rr >= minRr
   const evOk = expectancy >= minExpectancy
 
@@ -492,6 +519,12 @@ function evaluateTouch (touch, features, memory, prototypes, cfg, beforeTime) {
     // Risk birimi cinsinden beklenen deger: winRate * rr - (1 - winRate).
     // Pozitifse kurulumun matematigi lehte.
     expectancy: expectancy,
+    // Eslesmelerin sonuc dagilimi: tutma, kirilma, zaman asimi oranlari ve
+    // zaman asimlarinin ortalama gerceklesen R'si.
+    respectRate: pR,
+    breakRate: pB,
+    timeoutRate: pT,
+    timeoutAvgR: mT,
   }
 }
 

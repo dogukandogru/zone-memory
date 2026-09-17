@@ -198,7 +198,17 @@ function buildMemory (s, cfg, onProgress) {
       if (penceredeBosluk(t.bar)) {
         lowCoverage++
       } else {
-        events.push(Object.assign({}, t, outcome, { features: features }))
+        // Sonucun belli oldugu zaman: ambargo ve aday havuzu bunu kullanir,
+        // olay zamanini degil. Aksi halde sonucu henuz bilinmeyen bir olay
+        // komsu olarak kullanilabiliyordu.
+        const cozumBar = Math.min(
+          Math.max(0, num(outcome.resolvedBar, t.bar)) + 1,
+          s.length - 1
+        )
+        events.push(Object.assign({}, t, outcome, {
+          features: features,
+          resolvedTime: s.time[cozumBar],
+        }))
         if (form) formStored++
         else touchStored++
       }

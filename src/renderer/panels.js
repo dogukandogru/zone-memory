@@ -1001,17 +1001,17 @@ function ayarGruplari(saglayiciSecenekleri) {
           not: 'Kutunun yüksekliği, pivot barındaki ATR ile çarpılır.' },
         { yol: 'indicatorParams.mergeAtrMult', ad: 'Yakın kutuları birleştir (ATR)', tip: 'sayi', adim: 0.05, min: 0, max: 3,
           not: 'Bu mesafeden yakın aynı yönlü kutu varsa yeni kutu açılmaz, mevcut kutu büyür. 0 kapatır.' },
-        { yol: 'indicatorParams.maxAgeBars', ad: 'Kutu ömrü (bar)', tip: 'sayi', adim: 1, min: 10,
+        { yol: 'indicatorParams.maxAgeBars', ad: 'Kutu ömrü (bar)', tip: 'sayi', adim: 1, min: 50, max: 5000,
           not: 'Kutu pivot barından itibaren kaç bar canlı kalır. Süre dolunca dokunuş aranmaz.' },
-        { yol: 'indicatorParams.boxLengthBars', ad: 'Kutu çizim uzunluğu (bar)', tip: 'sayi', adim: 1, min: 1,
+        { yol: 'indicatorParams.boxLengthBars', ad: 'Kutu çizim uzunluğu (bar)', tip: 'sayi', adim: 1, min: 1, max: 5000,
           not: 'Kutunun grafikte ileriye doğru uzatıldığı bar sayısı.' },
         { yol: 'indicatorParams.maxZones', ad: 'Azami canlı kutu', tip: 'sayi', adim: 1, min: 5, max: 100,
           not: 'Aynı anda takip edilen kutu sayısı. Aşılınca en eski kutu takipten düşer.' },
         { yol: 'indicatorParams.breakAtrMult', ad: 'Kırılım payı (ATR)', tip: 'sayi', adim: 0.05, min: 0,
           not: 'Kapanış kutunun bu kadar dışına taşarsa kutu kırılır. Onay barı yoktur, tek bar yeter.' },
-        { yol: 'indicatorParams.touchCooldown', ad: 'Dokunuş sayım aralığı (bar)', tip: 'sayi', adim: 1, min: 1,
+        { yol: 'indicatorParams.touchCooldown', ad: 'Dokunuş sayım aralığı (bar)', tip: 'sayi', adim: 1, min: 1, max: 100,
           not: 'Aynı kutuya yapılan dokunuşların akış gücünü kaç barda bir artıracağı.' },
-        { yol: 'indicatorParams.atrLen', ad: 'ATR uzunluğu', tip: 'sayi', adim: 1, min: 1,
+        { yol: 'indicatorParams.atrLen', ad: 'ATR uzunluğu', tip: 'sayi', adim: 1, min: 5, max: 100,
           not: 'Kutu kalınlığında, kırılım payında ve plan mesafelerinde kullanılan ATR periyodu.' },
       ],
     },
@@ -1041,7 +1041,7 @@ function ayarGruplari(saglayiciSecenekleri) {
         { yol: 'indicatorParams.useBBFilter', ad: 'Bollinger filtresini kullan' },
       ],
       alanlar: [
-        { yol: 'indicatorParams.bbLen', ad: 'Bollinger periyodu', tip: 'sayi', adim: 1, min: 2,
+        { yol: 'indicatorParams.bbLen', ad: 'Bollinger periyodu', tip: 'sayi', adim: 1, min: 1, max: 1000,
           not: 'Orta bandın hareketli ortalama uzunluğu.' },
         { yol: 'indicatorParams.bbMult', ad: 'Bollinger std sapma', tip: 'sayi', adim: 0.1, min: 0.1,
           not: 'Bant genişliği çarpanı. Büyütmek kutu sayısını azaltır.' },
@@ -1411,23 +1411,60 @@ export function renderBacktest(el, result, opts) {
     el.appendChild(uyari)
   }
 
-  el.appendChild(bolumBasligi('Özet (' + tam(s.total) + ' olay tarandı)'))
+  el.appendChild(bolumBasligi('Özet (' + tam(s.total) + ' olay değerlendirildi)'))
+
+  // Orneklem yetersizse katki rakami yaniltir; sayinin yerine uyari gosterilir.
+  if (s.warning) {
+    const uyari = uyariKutusu('Bu ölçüm güvenilir değil: ' + s.warning +
+      '. Değerlendirilen olay sayısı istatistik için yetersiz.')
+    uyari.style.color = 'var(--warn, ' + RENK.warn + ')'
+    el.appendChild(uyari)
+  }
+
   const pf = sayi(s.profitFactor, 0)
+  // TABAN: ayni tur, ayni donem, ayni plan. Karisik taban (tum olaylar, tum
+  // turler) ekranda +9 ile +13 puanlik sahte katki gosteriyordu.
+  const tabanOran = Number.isFinite(s.baselineWinRate) ? s.baselineWinRate : null
   el.appendChild(statIzgara([
     stat('Üretilen sinyal', tam(s.fired)),
-    stat('Başarı oranı', formatPercent(s.winRate, 1), sayi(s.winRate, 0) >= 0.5 ? 'up' : 'down'),
+    stat('Başarı oranı', formatPercent(s.winRate, 1),
+      tabanOran === null ? 'muted' : (sayi(s.winRate, 0) >= tabanOran ? 'up' : 'down')),
     stat('Beklenti (ATR)', formatNumber(s.expectancyAtr, 3), sayi(s.expectancyAtr, 0) >= 0 ? 'up' : 'down'),
-    stat('Kâr faktörü', Number.isFinite(pf) ? formatNumber(pf, 2) : 'Sonsuz', pf >= 1 ? 'up' : 'down'),
+    stat('Kâr faktörü', Number.isFinite(pf) && pf !== Infinity ? formatNumber(pf, 2) : (s.fired > 0 ? 'Sonsuz' : '-'),
+      pf >= 1 ? 'up' : 'down'),
     stat('Azami geri çekilme', formatNumber(s.maxDrawdownAtr, 2) + ' ATR', 'down'),
-    stat('Taban başarı oranı', formatPercent(s.baselineWinRate, 1), 'muted'),
+    stat('Taban başarı oranı (aynı tür)', tabanOran === null ? '-' : formatPercent(tabanOran, 1), 'muted'),
   ]))
 
-  const fark = sayi(s.winRate, 0) - sayi(s.baselineWinRate, 0)
-  el.appendChild(kv('Tabana göre katkı',
-    (fark >= 0 ? '+' : '') + formatNumber(fark * 100, 1) + ' puan', fark >= 0 ? 'up' : 'down'))
+  const katkiPuan = Number.isFinite(s.edgePts) ? s.edgePts : null
+  const katkiNet = Number.isFinite(s.edgeNetAtr) ? s.edgeNetAtr : null
+  el.appendChild(kv('Tabana göre katkı (isabet)',
+    katkiPuan === null ? '-' : (katkiPuan >= 0 ? '+' : '') + formatNumber(katkiPuan, 1) + ' puan',
+    katkiPuan === null ? 'muted' : (katkiPuan >= 0 ? 'up' : 'down')))
+  el.appendChild(kv('Tabana göre katkı (net)',
+    katkiNet === null ? '-' : (katkiNet >= 0 ? '+' : '') + formatNumber(katkiNet, 3) + ' ATR',
+    katkiNet === null ? 'muted' : (katkiNet >= 0 ? 'up' : 'down')))
+  el.appendChild(kv('Taban beklentisi',
+    Number.isFinite(s.baselineExpectancyAtr) ? formatNumber(s.baselineExpectancyAtr, 3) + ' ATR' : '-', 'muted'))
   el.appendChild(kv('Kazanan / kaybeden', tam(s.wins) + ' / ' + tam(s.losses)))
+  // Zaman asimi: hedefe de stopa da degmeyen islemler ufuk sonu kapanisiyla
+  // degerlenir, tam stop zarari sayilmaz.
+  if (Number.isFinite(s.timeouts)) {
+    el.appendChild(kv('Zaman aşımı', tam(s.timeouts) +
+      (s.timeouts > 0 ? ' işlem, ' + formatNumber(s.timeoutPnlAtr, 2) + ' ATR' : '')))
+  }
+  if (Number.isFinite(s.nofill) && s.nofill > 0) {
+    el.appendChild(kv('Limit emir dolmadı', tam(s.nofill) + ' olay' +
+      (Number.isFinite(s.fillRate) ? ' (dolum oranı ' + formatPercent(s.fillRate, 0) + ')' : '')))
+  }
   el.appendChild(kv('Ortalama RR', formatNumber(s.avgRr, 2)))
-  el.appendChild(kv('Isınma olayı', tam(s.warmupEvents)))
+  if (Number.isFinite(s.evalFrom) && Number.isFinite(s.evalTo)) {
+    el.appendChild(kv('Değerlendirilen dönem',
+      new Date(s.evalFrom * 1000).toISOString().slice(0, 10) + ' - ' +
+      new Date(s.evalTo * 1000).toISOString().slice(0, 10)))
+  }
+  el.appendChild(kv('Isınma (tür ve yön başına asgari aday)',
+    tam(Number.isFinite(s.warmupPerBucket) ? s.warmupPerBucket : s.warmupEvents)))
 
   // FIILEN KULLANILAN AYAR. Test sekmesi bir donem kullanicinin esiklerini
   // motora hic iletmiyordu; ne olculdugu artik ekranda yazili.
@@ -1457,12 +1494,23 @@ export function renderBacktest(el, result, opts) {
     const satirlar = []
     for (let i = 0; i < turler.length; i++) {
       const k = turler[i]
+      const katki = Number.isFinite(k.edgePts) ? (k.edgePts >= 0 ? '+' : '') + formatNumber(k.edgePts, 1) : '-'
+      const katkiNet = Number.isFinite(k.edgeNetAtr) ? (k.edgeNetAtr >= 0 ? '+' : '') + formatNumber(k.edgeNetAtr, 3) : '-'
       satirlar.push([
-        turAdi(k.kind), tam(k.total), tam(k.fired), tam(k.wins), tam(k.losses),
-        formatPercent(k.winRate, 1), formatNumber(k.expectancyAtr, 3),
+        turAdi(k.kind), tam(k.total), tam(k.fired),
+        formatPercent(k.winRate, 1),
+        Number.isFinite(k.baselineWinRate) ? formatPercent(k.baselineWinRate, 1) : '-',
+        katki,
+        formatNumber(k.expectancyAtr, 3),
+        Number.isFinite(k.baselineExpectancyAtr) ? formatNumber(k.baselineExpectancyAtr, 3) : '-',
+        katkiNet,
       ])
     }
-    el.appendChild(tablo(['Tür', 'Olay', 'Sinyal', 'Kazanan', 'Kaybeden', 'Oran', 'Beklenti'], satirlar))
+    // Her turun tabani KENDI turunun taban oranidir: form ve dokunusun taban
+    // oranlari birbirinden cok farklidir, karistirmak sahte katki uretir.
+    el.appendChild(tablo(
+      ['Tür', 'Olay', 'Sinyal', 'Oran', 'Taban', 'Katkı', 'Beklenti', 'Taban bek.', 'Net katkı'],
+      satirlar))
   }
 
   // Sermaye egrisi
@@ -1500,12 +1548,19 @@ export function renderBacktest(el, result, opts) {
     const satirlar = []
     for (let i = 0; i < yillar.length; i++) {
       const y = yillar[i]
+      // Yilin tabani, o yil tetiklenen islemlerin tur karisimiyla agirliklanir.
       satirlar.push([
         yil(y.year), tam(y.fired), tam(y.wins), tam(y.losses),
-        formatPercent(y.winRate, 1), formatNumber(y.expectancyAtr, 3),
+        formatPercent(y.winRate, 1),
+        Number.isFinite(y.baselineWinRate) ? formatPercent(y.baselineWinRate, 1) : '-',
+        Number.isFinite(y.edgePts) ? (y.edgePts >= 0 ? '+' : '') + formatNumber(y.edgePts, 1) : '-',
+        formatNumber(y.expectancyAtr, 3),
+        Number.isFinite(y.edgeNetAtr) ? (y.edgeNetAtr >= 0 ? '+' : '') + formatNumber(y.edgeNetAtr, 3) : '-',
       ])
     }
-    el.appendChild(tablo(['Yıl', 'Sinyal', 'Kazanan', 'Kaybeden', 'Oran', 'Beklenti'], satirlar))
+    el.appendChild(tablo(
+      ['Yıl', 'Sinyal', 'Kazanan', 'Kaybeden', 'Oran', 'Taban', 'Katkı', 'Beklenti', 'Net katkı'],
+      satirlar))
   }
 
   // Son islemler
