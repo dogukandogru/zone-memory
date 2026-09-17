@@ -40,6 +40,22 @@ const DEFAULTS = {
   // En dogru canli spot fiyat icin Polygon (C:XAUUSD) anahtari onerilir.
   providers: { history: 'histdata', live: 'binance' },
   apiKeys: { twelvedata: '', polygon: '' },
+  // GERIYE TEST VE PLAN MALIYETI
+  // Islem maliyeti ve kayma olcumun en belirleyici girdisidir (1 dakikalikta
+  // brut edimin tamamini yiyor) ama bir donem yalnizca kodda sabitti ve
+  // kullanici kendi spreadini giremiyordu. Tek kaynak burasidir: tarama,
+  // test ve plan hesabi bu degerleri kullanir.
+  backtestCfg: {
+    // Fiyata oranli maliyet (gidis-donus). 0.000068 = 4400 dolarlik altinda
+    // yaklasik 0,30 dolar.
+    costPct: 0.000068,
+    // Sabit dolar maliyet; yalnizca costPct 0 ise kullanilir.
+    costUsd: 0,
+    // Limit emirde beklenen kayma, ATR biriminde (giris aleyhine eklenir).
+    slippageAtr: 0,
+    // Tur ve yon basina asgari aday sayisi (isinma olcutu).
+    warmupPerBucket: 100,
+  },
   livePollSeconds: 20,
   // Uygulama acilir acilmaz canli takibi kendiliginden baslatir. Kapatmak
   // istersen Ayarlar ekranindan kapatabilirsin; basarisiz olursa uygulama
@@ -158,6 +174,10 @@ function indikatorAyariniGocur(parsed) {
  */
 const SINIRLAR = {
   livePollSeconds: [3, 3600],
+  'backtestCfg.costPct': [0, 0.01],
+  'backtestCfg.costUsd': [0, 100],
+  'backtestCfg.slippageAtr': [0, 2],
+  'backtestCfg.warmupPerBucket': [0, 5000],
   'signalCfg.k': [1, 200],
   'signalCfg.minSimilarity': [0, 0.999],
   'signalCfg.minMatches': [1, 1000],

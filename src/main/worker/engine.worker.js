@@ -399,6 +399,228 @@ async function getSignals(tf, force) {
 }
 
 // ---------------------------------------------------------------------------
+// Canli sinyal gunlugu (JSON Lines)
+// ---------------------------------------------------------------------------
+//
+// Canli uretilen sinyaller hicbir yere kaydedilmiyordu: yenileme, zaman dilimi
+// degisimi veya yeniden baslatma hepsini siliyordu ve canli performans Test
+// sekmesindeki olcumle hic karsilastirilamiyordu. Artik her canli olay bir
+// satir olarak `<hafiza>.live.jsonl` dosyasina yazilir, ufku dolunca da sonucu
+// ikinci bir satirla eklenir. Satir tipleri:
+//   {type:'event',   key, tf, time, fetchedAt, ageBars, providerId, isProxy,
+//                    basis, volScale, cfgHash, touch, signal}
+//   {type:'outcome', key, outcome, win, realizedR, pnlAtr, barsToOutcome}
+// Dosyaya YALNIZCA ekleme yapilir; tarama ve hafiza silme ona dokunmaz.
+
+/** Gunluk yazilamadigi durum kullaniciya bir kez bildirilir. */
+let liveLogWarned = false
+
+/**
+ * Gunluge tek satir ekler. Yazilamazsa canli dongu DURMAZ, kayit tutmak
+ * sinyal uretmekten daha az onemlidir.
+ * @param {string} tf
+ * @param {object} satir
+ * @param {string[]} [logs] Uyari buraya yazilir
+ * @returns {Promise<boolean>}
+ */
+async function liveLogEkle(tf, satir, logs) {
+  const yol = paths.liveLogPath(tf)
+  const metin = JSON.stringify(satir) + '\n'
+  try {
+    await fsp.appendFile(yol, metin, 'utf8')
+    return true
+  } catch (err) {
+    // Klasor henuz yoksa bir kez olusturup tekrar deneriz.
+    try {
+      await fsp.mkdir(paths.dataDir(), { recursive: true })
+      await fsp.appendFile(yol, metin, 'utf8')
+      return true
+    } catch (err2) {
+      if (!liveLogWarned) {
+        liveLogWarned = true
+        if (Array.isArray(logs)) {
+          logs.push('Canli sinyal gunlugu yazilamadi: ' + (err2 && err2.message ? err2.message : String(err2)))
+        }
+      }
+      return false
+    }
+  }
+}
+
+/**
+ * Gunlugu okur ve olay satirlariyla sonuc satirlarini birlestirir.
+ * Yarim yazilmis bir satir dosyanin tamamini bozmaz, yalnizca o satir atlanir.
+ * @param {string} tf
+ * @returns {Promise<{records:Array<object>}>}
+ */
+async function liveLogOku(tf) {
+  let ham
+  try {
+    ham = await fsp.readFile(paths.liveLogPath(tf), 'utf8')
+  } catch (err) {
+    return { records: [] }
+  }
+  const records = []
+  const byKey = new Map()
+  const satirlar = ham.split('\n')
+  for (let i = 0; i < satirlar.length; i++) {
+    const s = satirlar[i].trim()
+    if (!s) continue
+    let obj = null
+    try {
+      obj = JSON.parse(s)
+    } catch (err) {
+      continue
+    }
+    if (!obj || typeof obj !== 'object') continue
+    const key = String(obj.key === undefined || obj.key === null ? '' : obj.key)
+    if (obj.type === 'outcome') {
+      const rec = byKey.get(key)
+      if (!rec) continue
+      rec.labeled = true
+      rec.outcome = obj.outcome || null
+      rec.win = obj.win === undefined ? null : !!obj.win
+      rec.realizedR = typeof obj.realizedR === 'number' ? obj.realizedR : null
+      rec.pnlAtr = typeof obj.pnlAtr === 'number' ? obj.pnlAtr : null
+      rec.barsToOutcome = typeof obj.barsToOutcome === 'number' ? obj.barsToOutcome : null
+      continue
+    }
+    if (obj.type !== 'event') continue
+    // Ayni olay iki kez yazildiysa (onceki surumun kalintisi) bir kez sayilir.
+    if (byKey.has(key)) continue
+    const rec = {
+      key: key,
+      tf: obj.tf || null,
+      time: num(obj.time, 0),
+      fetchedAt: num(obj.fetchedAt, 0),
+      ageBars: typeof obj.ageBars === 'number' ? obj.ageBars : null,
+      providerId: obj.providerId || null,
+      isProxy: !!obj.isProxy,
+      basis: typeof obj.basis === 'number' ? obj.basis : null,
+      volScale: typeof obj.volScale === 'number' ? obj.volScale : null,
+      cfgHash: obj.cfgHash || null,
+      touch: obj.touch || null,
+      signal: obj.signal || null,
+      labeled: false,
+      outcome: null,
+      win: null,
+      realizedR: null,
+      pnlAtr: null,
+      barsToOutcome: null,
+    }
+    byKey.set(key, rec)
+    records.push(rec)
+  }
+  return { records: records }
+}
+
+/** Sinyalin gunluge yazilan ozeti (topMatches gibi agir alanlar yazilmaz). */
+function signalOzeti(sig) {
+  if (!sig) return null
+  return {
+    fired: !!sig.fired,
+    direction: sig.direction || null,
+    kind: sig.kind === 'form' ? 'form' : 'touch',
+    winRate: num(sig.winRate, 0),
+    matchCount: num(sig.matchCount, 0),
+    confidence: num(sig.confidence, 0),
+    expectancy: num(sig.expectancy, 0),
+    entry: num(sig.entry, 0),
+    tp1: num(sig.tp1, 0),
+    sl: num(sig.sl, 0),
+    rr: num(sig.rr, 0),
+    atr: num(sig.atr, 0),
+    stale: !!sig.stale,
+  }
+}
+
+/**
+ * Ufku dolmus ve henuz etiketlenmemis kayitlarin sonucunu hesaplar, her biri
+ * icin gunluge bir 'outcome' satiri ekler.
+ *
+ * Etiket `learn/outcome.labelTouch`, kazanc `learn/backtest.tradeResult` ile
+ * hesaplanir: canli gunlukteki rakam ile Test sekmesindeki rakam AYNI tanimdan
+ * gelmek zorunda, aksi halde ikisi karsilastirilamaz.
+ *
+ * @param {string} tf
+ * @param {object} s Depodaki seri (yalnizca kapanmis barlar)
+ * @param {number} tfSec
+ * @param {object} outcomeCfg Hafizanin etiketlendigi tanim (planOutcomeCfg)
+ * @param {string[]} [logs]
+ * @returns {Promise<number>} Yazilan sonuc satiri sayisi
+ */
+async function liveLogEtiketle(tf, s, tfSec, outcomeCfg, logs) {
+  if (!s || s.length === 0) return 0
+  const okunan = await liveLogOku(tf)
+  const records = okunan.records
+  if (records.length === 0) return 0
+
+  const seriesMod = core('series')
+  const outcomeMod = core('learn/outcome')
+  const bt = core('learn/backtest')
+  const cfg = Object.assign({}, outcomeMod.DEFAULT_OUTCOME_CFG, outcomeCfg || {})
+  const horizon = clampInt(cfg.horizonBars, 1, 100000, outcomeMod.DEFAULT_OUTCOME_CFG.horizonBars)
+  const sonBar = s.time[s.length - 1]
+  const costCfg = {
+    costPct: num(bt.DEFAULT_BACKTEST_CFG.costPct, 0),
+    costUsd: num(bt.DEFAULT_BACKTEST_CFG.costUsd, 0),
+  }
+
+  let yazilan = 0
+  for (let i = 0; i < records.length; i++) {
+    const rec = records[i]
+    if (rec.labeled) continue
+    const zaman = num(rec.time, 0)
+    if (!(zaman > 0)) continue
+    // Ufuk henuz dolmadi: sonraki tiklarda yeniden denenir.
+    if (zaman + horizon * tfSec > sonBar) continue
+
+    // Olayin GUNCEL seri icindeki bar indeksi. Gunluge yazilan `bar` alani
+    // canli kuyruk penceresine aittir, depodaki seride baska bir indekstir.
+    const idx = seriesMod.lastIndexAtOrBefore(s, zaman)
+    if (idx < 0) continue
+    const olay = Object.assign({}, rec.touch || {}, { bar: idx, time: zaman })
+    const atr = num(olay.atr, 0)
+    if (!(atr > 0)) continue
+
+    let sonuc = null
+    try {
+      sonuc = outcomeMod.labelTouch(s, olay, atr, cfg)
+    } catch (err) {
+      sonuc = null
+    }
+    if (!sonuc) continue
+
+    // Kazanc kurali testle AYNI fonksiyondan gelir, ayri bir kopya yazilmaz.
+    let pnlAtr = null
+    let win = null
+    const sig = rec.signal
+    if (sig && Number.isFinite(sig.entry) && Number.isFinite(sig.tp1) && Number.isFinite(sig.sl) &&
+      sig.entry !== sig.sl) {
+      const islem = bt.tradeResult(Object.assign({}, olay, sonuc), {
+        entry: sig.entry, tp1: sig.tp1, sl: sig.sl,
+      }, costCfg)
+      if (islem && islem.ok) {
+        pnlAtr = islem.pnlAtr
+        win = !!islem.win
+      }
+    }
+
+    const eklendi = await liveLogEkle(tf, {
+      type: 'outcome',
+      key: rec.key,
+      outcome: sonuc.outcome,
+      win: win,
+      realizedR: num(sonuc.realizedR, 0),
+      pnlAtr: pnlAtr,
+      barsToOutcome: num(sonuc.barsToOutcome, -1),
+    }, logs)
+    if (eklendi) yazilan++
+  }
+  return yazilan
+}
+
+// ---------------------------------------------------------------------------
 // Komutlar
 // ---------------------------------------------------------------------------
 
@@ -1028,6 +1250,13 @@ handlers['engine:memory-delete'] = async function (payload) {
  * Canli dongunun tek adimi. live.js saglayicidan cektigi barlari buraya
  * yollar; fiyat kaydirmasi, depoya ekleme, indikator kontrolu ve sinyal
  * uretimi burada yapilir (buyuk seri ana iplige asla kopyalanmaz).
+ *
+ * Yuk: {tf, series, isProxy, providerId, basis, volScale, basisWarned,
+ *       fetchedAt, sinceTime, seenKeys, params, cfgPatch, tailBars}
+ * `seenKeys`: daha once degerlendirilmis olay anahtarlari (bkz.
+ * core/learn/liveEvents.js). Donen `events` dizisi bu tikte yeni olan TUM
+ * olaylari tasir; tekil `signal` / `touch` alanlari geriye uyum icin dizinin
+ * sonuncusuyla doldurulur. Her olay canli sinyal gunlugune de yazilir.
  */
 handlers['engine:live-tick'] = async function (payload) {
   const tf = requireTf(payload.tf)
@@ -1038,7 +1267,11 @@ handlers['engine:live-tick'] = async function (payload) {
 
   let inc = toSeries(payload.series)
   if (!inc || inc.length === 0) {
-    return { tf: tf, added: 0, basis: payload.basis === undefined ? null : payload.basis, lastBar: null, signal: null, touch: null, logs: ['Saglayicidan mum gelmedi.'] }
+    return {
+      tf: tf, added: 0, basis: payload.basis === undefined ? null : payload.basis,
+      lastBar: null, events: [], labeled: 0, signal: null, touch: null,
+      logs: ['Saglayicidan mum gelmedi.'],
+    }
   }
   inc = seriesMod.sanitize(inc)
 
@@ -1096,7 +1329,8 @@ handlers['engine:live-tick'] = async function (payload) {
   if (!inc || inc.length === 0) {
     return {
       tf: tf, added: 0, basis: basis, volScale: volScale, basisWarned: basisWarned,
-      needsSync: needsSync, lastBar: null, signal: null, touch: null,
+      needsSync: needsSync, lastBar: null, events: [], labeled: 0,
+      signal: null, touch: null,
       logs: logs.length ? logs : ['Duzeltmeden sonra yazilacak bar kalmadi.'],
     }
   }
@@ -1185,9 +1419,17 @@ handlers['engine:live-tick'] = async function (payload) {
   }
 
   // Yeni kapanmis bar olustuysa son pencerede indikatoru kostur.
+  //
+  // KILITLENEN HATA: onceden yalnizca SON olay aliniyordu. Ayni barda iki
+  // bolge olayi olustugunda (bir kutu dogarken baska bir kutuya dokunulmasi
+  // gibi) digerleri kalici olarak kayboluyordu, cunku `sinceTime` sonuncunun
+  // zamanina cekiliyordu. Artik `learn/liveEvents.selectNewEvents` yeni olan
+  // TUM olaylari verir ve hepsi ayni hafiza ve ayarla degerlendirilir.
   let signal = null
   let touch = null
   let lastTouchTime = null
+  const events = []
+  let labeled = 0
   if (added > 0) {
     try {
       const s = await getSeries(tf, false)
@@ -1197,56 +1439,120 @@ handlers['engine:live-tick'] = async function (payload) {
       const ind = core('indicator/proZones').runIndicator(sub, payload.params || {}, tfSec)
       const touches = ind && Array.isArray(ind.touches) ? ind.touches : []
       const since = num(payload.sinceTime, 0)
-
-      let cand = null
-      for (let i = touches.length - 1; i >= 0; i--) {
-        if (num(touches[i].time, 0) > since) {
-          cand = touches[i]
-          break
-        }
-      }
       if (touches.length > 0) lastTouchTime = num(touches[touches.length - 1].time, 0)
 
-      if (cand) {
-        touch = lightEvent(cand)
-        const feats = core('learn/features').buildFeatures(sub, cand, ind.context)
-        const mem = await getMemory(tf, false)
-        const memMeta = mem && mem.meta ? mem.meta : null
-        // Canli de tarama ve test ile AYNI birlestirmeyi kullanir; plan
-        // hedefi hafizanin etiketlendigi outcomeCfg'den gelir.
-        const canliCfg = core('learn/presets').resolveCfg(
-          tf,
-          payload.cfgPatch || cfgPatchGeriUyum(payload),
-          memMeta
+      const liveEvents = core('learn/liveEvents')
+      const adaylar = liveEvents.selectNewEvents(touches, since, payload.seenKeys)
+
+      // Hafiza, ayar ve prototipler TEK KEZ yuklenir; butun adaylar ayni
+      // ayarla olculur.
+      const mem = await getMemory(tf, false)
+      const memMeta = mem && mem.meta ? mem.meta : null
+      // Canli de tarama ve test ile AYNI birlestirmeyi kullanir; plan
+      // hedefi hafizanin etiketlendigi outcomeCfg'den gelir.
+      const canliCfg = core('learn/presets').resolveCfg(
+        tf,
+        payload.cfgPatch || cfgPatchGeriUyum(payload),
+        memMeta
+      )
+      const hafizaVar = !!(mem && mem.events && mem.events.length > 0)
+      // Hafiza farkli bir ayarla kurulduysa karsilastirma anlamsizdir: yeni
+      // tanimla uretilen olay, eski tanimla etiketlenmis gecmisle olculur ve
+      // bu hicbir yerde gorunmezdi.
+      const izUyum = memMeta && memMeta.cfgHash
+        ? memMeta.cfgHash === ayarIzi(
+          payload.params || memMeta.indicatorParams || null,
+          canliCfg.outcomeCfg,
+          mem.ctxNames
         )
-        // Hafiza farkli bir ayarla kurulduysa karsilastirma anlamsizdir:
-        // yeni tanimla uretilen olay, eski tanimla etiketlenmis gecmisle
-        // olculur ve bu hicbir yerde gorunmezdi.
-        const izUyum = memMeta && memMeta.cfgHash
-          ? memMeta.cfgHash === ayarIzi(
-            payload.params || memMeta.indicatorParams || null,
-            canliCfg.outcomeCfg,
-            mem.ctxNames
-          )
-          : null
-        if (!feats) {
-          logs.push('Yeni bolge olayi bulundu ama ozellik penceresi yetersiz.')
-        } else if (!mem || !mem.events || mem.events.length === 0) {
+        : null
+
+      if (adaylar.length > 0) {
+        if (!hafizaVar) {
           logs.push('Yeni bolge olayi bulundu ama hafiza bos. Once "Geçmişi Tara" calistirin.')
         } else if (izUyum === false) {
           cfgMismatch = true
           logs.push('Hafiza farkli bir ayarla kuruldu, sinyal uretilmedi. "Geçmişi Tara" calistirin.')
-        } else {
-          const protos = await getProtos(tf, false)
-          signal = core('learn/signal').evaluateTouch(cand, feats, mem, protos, canliCfg.signalCfg, num(cand.time, fetchedAt))
-          if (signal && basis !== null && basis !== 0 && Array.isArray(signal.reasons)) {
-            signal.reasons.push('Vekil kaynak fiyati ' + basis.toFixed(2) + ' birim kaydirildi.')
-          }
         }
       }
+      const uretilebilir = hafizaVar && izUyum !== false
+      const protos = uretilebilir && adaylar.length > 0 ? await getProtos(tf, false) : []
+      let ozellikYok = 0
+
+      for (let i = 0; i < adaylar.length; i++) {
+        const cand = adaylar[i]
+        const hafif = lightEvent(cand)
+        let sig = null
+        if (uretilebilir) {
+          const feats = core('learn/features').buildFeatures(sub, cand, ind.context)
+          if (!feats) {
+            ozellikYok++
+          } else {
+            sig = core('learn/signal').evaluateTouch(
+              cand, feats, mem, protos, canliCfg.signalCfg, num(cand.time, fetchedAt)
+            )
+            if (sig && basis !== null && basis !== 0 && Array.isArray(sig.reasons)) {
+              sig.reasons.push('Vekil kaynak fiyati ' + basis.toFixed(2) + ' birim kaydirildi.')
+            }
+          }
+        }
+        // GECIKME: olay barinin kapanisindan degerlendirme anina kadar kac bar
+        // gectigi. 1'den buyukse fiyat coktan kacmis olabilir; sinyal yine
+        // yayinlanir ama gecikmeli oldugu isaretlenir.
+        const ageBars = (fetchedAt - (num(cand.time, 0) + tfSec)) / tfSec
+        if (sig && ageBars > 1) {
+          sig.stale = true
+          if (!Array.isArray(sig.reasons)) sig.reasons = []
+          sig.reasons.push('Gecikmeli degerlendirildi (' + ageBars.toFixed(1) + ' bar sonra).')
+        }
+        events.push({
+          key: liveEvents.eventKey(cand),
+          touch: hafif,
+          signal: sig,
+          ageBars: ageBars,
+        })
+      }
+      if (ozellikYok > 0) {
+        logs.push(ozellikYok + ' yeni bolge olayi bulundu ama ozellik penceresi yetersiz.')
+      }
+
+      // GUNLUK: tetiklenmeyen olaylar da yazilir. Canli performansi olcmek
+      // icin "esik gecilmedi" kayitlari da gerekir.
+      const cfgIz = memMeta && memMeta.cfgHash ? memMeta.cfgHash : null
+      for (let i = 0; i < events.length; i++) {
+        const e = events[i]
+        await liveLogEkle(tf, {
+          type: 'event',
+          key: e.key,
+          tf: tf,
+          time: e.touch ? num(e.touch.time, 0) : 0,
+          fetchedAt: fetchedAt,
+          ageBars: e.ageBars,
+          providerId: payload.providerId || null,
+          isProxy: !!payload.isProxy,
+          basis: basis,
+          volScale: volScale,
+          cfgHash: cfgIz,
+          touch: e.touch,
+          signal: signalOzeti(e.signal),
+        }, logs)
+      }
+
+      // Ufku dolmus kayitlarin sonucu her yeni barda hesaplanir. Sonuclar
+      // ancak yeni bar geldikce olgunlastigi icin bar gelmeyen tikte
+      // yapilacak is yoktur.
+      labeled = await liveLogEtiketle(tf, s, tfSec, canliCfg.planOutcomeCfg, logs)
     } catch (err) {
       logs.push('Canli kontrol hatasi: ' + (err && err.message ? err.message : String(err)))
     }
+  }
+
+  // GERIYE UYUM: arayuz ve live.js tekil `signal` / `touch` alanlarini da
+  // okur, bunlar dizinin SONUNCU elemaniyla doldurulur.
+  if (events.length > 0) {
+    const son = events[events.length - 1]
+    signal = son.signal
+    touch = son.touch
   }
 
   return {
@@ -1263,10 +1569,108 @@ handlers['engine:live-tick'] = async function (payload) {
     // Hafiza baska bir ayarla kuruldu: yeniden tarama gerekiyor.
     cfgMismatch: cfgMismatch,
     lastBar: lastBar,
+    // Bu tikte yeni olan TUM olaylar, zaman sirasiyla.
+    events: events,
+    // Bu tikte gunluge yazilan sonuc satiri sayisi.
+    labeled: labeled,
     signal: signal,
     touch: touch,
     lastTouchTime: lastTouchTime,
     logs: logs,
+  }
+}
+
+/**
+ * Canli sinyal gunlugunun ozeti. Arayuzdeki Test paneli bunu "Testte olculen"
+ * rakamla yan yana gosterir, boylece canli ile olcum arasindaki sapma (drift)
+ * gorunur olur.
+ * Yuk: {tf, limit}
+ */
+handlers['engine:live-log'] = async function (payload) {
+  const tf = requireTf(payload.tf)
+  const limit = clampInt(payload.limit, 1, 2000, 50)
+  const okunan = await liveLogOku(tf)
+  const records = okunan.records
+
+  const bos = {
+    tf: tf,
+    found: false,
+    count: 0,
+    fired: 0,
+    labeled: 0,
+    wins: 0,
+    winRate: null,
+    netAtr: 0,
+    expectancyAtr: null,
+    stale: 0,
+    firstTime: null,
+    lastTime: null,
+    records: [],
+  }
+  if (records.length === 0) return bos
+
+  let fired = 0
+  let labeledCount = 0
+  let wins = 0
+  let netAtr = 0
+  let stale = 0
+  let firstTime = null
+  let lastTime = null
+  for (let i = 0; i < records.length; i++) {
+    const rec = records[i]
+    const t = num(rec.time, 0)
+    if (firstTime === null || t < firstTime) firstTime = t
+    if (lastTime === null || t > lastTime) lastTime = t
+    if (num(rec.ageBars, 0) > 1) stale++
+    const tetiklendi = !!(rec.signal && rec.signal.fired)
+    if (!tetiklendi) continue
+    fired++
+    // Isabet ve net ATR YALNIZCA tetiklenen sinyaller uzerinden olculur:
+    // esigi gecmeyen olay bir islem degildir. Test ozetindeki `winRate` ve
+    // `expectancyAtr` de ayni tabani kullanir.
+    if (!rec.labeled) continue
+    labeledCount++
+    if (rec.win === true) wins++
+    if (Number.isFinite(rec.pnlAtr)) netAtr += rec.pnlAtr
+  }
+
+  const bas = Math.max(0, records.length - limit)
+  const son = []
+  for (let i = records.length - 1; i >= bas; i--) {
+    const rec = records[i]
+    son.push({
+      key: rec.key,
+      time: rec.time,
+      ageBars: rec.ageBars,
+      kind: rec.signal && rec.signal.kind ? rec.signal.kind : (rec.touch ? rec.touch.kind : null),
+      direction: rec.signal && rec.signal.direction
+        ? rec.signal.direction
+        : (rec.touch ? rec.touch.direction : null),
+      fired: !!(rec.signal && rec.signal.fired),
+      winRate: rec.signal ? num(rec.signal.winRate, 0) : null,
+      entry: rec.signal ? num(rec.signal.entry, 0) : null,
+      providerId: rec.providerId,
+      outcome: rec.outcome,
+      win: rec.win,
+      pnlAtr: rec.pnlAtr,
+      barsToOutcome: rec.barsToOutcome,
+    })
+  }
+
+  return {
+    tf: tf,
+    found: true,
+    count: records.length,
+    fired: fired,
+    labeled: labeledCount,
+    wins: wins,
+    winRate: labeledCount > 0 ? wins / labeledCount : null,
+    netAtr: netAtr,
+    expectancyAtr: labeledCount > 0 ? netAtr / labeledCount : null,
+    stale: stale,
+    firstTime: firstTime,
+    lastTime: lastTime,
+    records: son,
   }
 }
 

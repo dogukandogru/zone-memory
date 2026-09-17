@@ -659,6 +659,15 @@ function runBacktest(memory, prototypes, cfg, onProgress) {
           timeoutPnlAtr: k.timeoutPnlAtr,
           nofill: k.nofill,
           winRateCI: k.fired > 0 ? stats.wilson(k.wins, k.fired) : null,
+          // R cinsinden net beklentinin %95 araligi. Kanit rozeti (S5) bunu
+          // kullanir: alt sinir sifirin ustundeyse "kanitli".
+          expectancyRCI: (function () {
+            const kayitlar = istatistikKayitlari
+              .filter((x) => x.kind === girdi[0])
+              .map((x) => ({ value: x.pnlR, day: x.day }))
+            const c = stats.blockBootstrapMean(kayitlar, { reps: 1000, seed: 12345 })
+            return c ? { lo: c.lo, hi: c.hi, mean: c.mean } : null
+          })(),
           baselinePValue: k.fired > 0 && tabanOran !== null
             ? stats.binomTwoSided(k.wins, k.fired, tabanOran)
             : null,

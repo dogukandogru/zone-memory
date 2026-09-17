@@ -11,7 +11,8 @@
  * Yayinlanan olaylar:
  *   'live:candle'  her cekimde son bar
  *   'live:signal'  yeni bir bolge olayinda (kutu olusumu veya ilk dokunus)
- *                  uretilen Signal
+ *                  uretilen Signal. Ayni barda birden fazla olay olustuysa
+ *                  HER BIRI icin ayri olay yayinlanir.
  *   'live:status'  baslama, durma ve durum degisimi
  *   'log'          Turkce bilgi ve hata mesajlari
  */
@@ -22,6 +23,12 @@ const settings = require('./settings')
 const FETCH_BARS = 200
 const MIN_POLL_SECONDS = 5
 const MAX_POLL_SECONDS = 3600
+/**
+ * Degerlendirilmis olay anahtarlarindan en fazla bu kadari hatirlanir.
+ * Anahtarlar yalnizca "bu olayi zaten olctum" demek icin tutulur; kuyruk
+ * penceresi kaydikca eski olaylar indikator ciktisindan zaten dusuyor.
+ */
+const MAX_SEEN_KEYS = 500
 
 /** @type {((type:string, data:*)=>void)|null} */
 let emitter = null
@@ -37,6 +44,13 @@ const state = {
   // Vekil kaynagin hacmini depodaki olcege tasiyan katsayi.
   volScale: null,
   sinceTime: 0,
+  /**
+   * Degerlendirilmis olay anahtarlari. Ayni olayin iki tikte iki kez
+   * degerlendirilmesini onler; zoneId'ye guvenilemez, cunku indikator her
+   * calismada kutulari sifirdan numaralandirir (bkz. core/learn/liveEvents.js).
+   * @type {Set<string>}
+   */
+  seenKeys: new Set(),
   lastPollTime: null,
   lastBarTime: null,
   lastError: null,
@@ -138,6 +152,7 @@ async function start(opts) {
   state.addedBars = 0
   // Baslangictan ONCEKI olaylar icin sinyal uretilmez.
   state.sinceTime = Math.floor(Date.now() / 1000)
+  state.seenKeys = new Set()
   basisLogged = false
   basisWarned = false
 
@@ -227,11 +242,16 @@ async function tick() {
         volume: fetched.volume,
       },
       isProxy: state.isProxy,
+      // Hangi saglayicidan geldigi canli sinyal gunlugune yazilir: sonradan
+      // "bu olcu hangi kaynakla alindi" sorusu cevaplanabilmeli.
+      providerId: state.providerId,
       basis: state.basis,
       volScale: state.volScale,
       basisWarned: basisWarned,
       fetchedAt: now,
       sinceTime: state.sinceTime,
+      // Zaten degerlendirilmis olaylar tekrar degerlendirilmez.
+      seenKeys: Array.from(state.seenKeys),
       params: cfg.indicatorParams || {},
       // Esikler ve hedef, isci tarafinda presets.resolveCfg ile cozulur:
       // tarama, test ve canli AYNI birlestirmeyi kullanmak zorunda

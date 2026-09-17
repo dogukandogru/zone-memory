@@ -20,6 +20,7 @@
  *   <userData>/data/XAUUSD_<tf>_memory.zones.json
  *   <userData>/data/XAUUSD_<tf>_memory.protos.json
  *   <userData>/data/XAUUSD_<tf>_memory.signals.json
+ *   <userData>/data/XAUUSD_<tf>_memory.live.jsonl   canli sinyal gunlugu
  */
 
 const core = require('../core/paths-core')
@@ -114,6 +115,20 @@ function backtestPath(tf, symbol) {
   return memoryPath(tf, symbol) + '.backtest.json'
 }
 
+/**
+ * Canli sinyal gunlugu (JSON Lines). Canli uretilen her bolge olayi ve ufku
+ * dolunca hesaplanan sonucu buraya satir satir yazilir.
+ *
+ * Neden ayri dosya: canli sinyaller hicbir yere kaydedilmiyordu, yenileme
+ * veya yeniden baslatma hepsini siliyordu ve canli performans Test sekmesinde
+ * olculen rakamla hic karsilastirilamiyordu. Tarama (`engine:scan`) ve hafiza
+ * silme (`engine:memory-delete`) bu dosyaya DOKUNMAZ: canli olcu taramadan
+ * bagimsiz birikmelidir.
+ */
+function liveLogPath(tf, symbol) {
+  return memoryPath(tf, symbol) + '.live.jsonl'
+}
+
 /** Gerekli klasorleri olusturur, olusan yollari dondurur. */
 function ensureDirs() {
   const user = core.ensureDir(userDataDir())
@@ -133,5 +148,6 @@ module.exports = {
   protosPath,
   signalsPath,
   backtestPath,
+  liveLogPath,
   ensureDirs,
 }

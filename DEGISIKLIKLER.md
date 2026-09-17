@@ -40,6 +40,10 @@ olay geldiginde ayni turdeki en benzer gecmis olaylarla karsilastirilip
 | Sonuc zamanina gore ambargo | Bir olay, sonucu henuz belli degilken baska bir olaya komsu olamaz. |
 | Tur ve yon basina isinma | Sabit 500 olay yerine "ayni tur ve yonden en az N aday"; orneklem yetersizse sayi yerine uyari. |
 | Pine aralik kirpmasi | Indikator ayarlari Pine input araliklarina kirpilir, kirpilanlar raporlanir. |
+| Istatistik modulu (`src/core/learn/stats.js`) | Wilson araligi, binom testi, gunluk blok onyukleme, permutasyon, kalibrasyon ve Brier skoru. Test ozeti artik belirsizligi de gosterir. |
+| Kalibrasyon tablosu | "Sistem %62 dedi, gerceklesen %50" gibi sapmalar ekranda gorunur. |
+| Maliyet ve kayma ayari (`backtestCfg`) | Kendi spreadini girebilirsin; maliyet kirilimi, maliyet iki kat duyarliligi ve maliyet dahil basa bas isabet raporlanir. |
+| Tekrarlanabilir olcum betigi (`scripts/measure-all.mjs`) | Tum zaman dilimlerini tek komutla olcup istatistikli tablo basar (`--scan`, `--json`). |
 
 ## Duzeltilen hatalar (olcumu veya veriyi etkileyenler)
 
