@@ -1396,6 +1396,21 @@ export function renderBacktest(el, result, opts) {
   }
   const s = r.summary
 
+  // Hafizanin kuruldugu ayar ile su anki ayar uyusmuyorsa bu olcum eski
+  // etiketlere aittir. Onceden bu hicbir yerde gorunmuyordu.
+  if (r.cfgMatch === false) {
+    const uyari = uyariKutusu(
+      'Bu sonuç, hafızanın kurulduğu ayarlardan farklı bir ayarla alındı. ' +
+      'Ölçümün geçerli olması için "Geçmişi Tara" ile hafızayı yeniden kurun.')
+    uyari.style.color = 'var(--down, ' + RENK.down + ')'
+    el.appendChild(uyari)
+  }
+  if (r.stillValid === false) {
+    const uyari = uyariKutusu('Bu sonuç eski ayarlara ait, hafıza o zamandan beri yeniden kuruldu.')
+    uyari.style.color = 'var(--down, ' + RENK.down + ')'
+    el.appendChild(uyari)
+  }
+
   el.appendChild(bolumBasligi('Özet (' + tam(s.total) + ' olay tarandı)'))
   const pf = sayi(s.profitFactor, 0)
   el.appendChild(statIzgara([
@@ -1413,6 +1428,26 @@ export function renderBacktest(el, result, opts) {
   el.appendChild(kv('Kazanan / kaybeden', tam(s.wins) + ' / ' + tam(s.losses)))
   el.appendChild(kv('Ortalama RR', formatNumber(s.avgRr, 2)))
   el.appendChild(kv('Isınma olayı', tam(s.warmupEvents)))
+
+  // FIILEN KULLANILAN AYAR. Test sekmesi bir donem kullanicinin esiklerini
+  // motora hic iletmiyordu; ne olculdugu artik ekranda yazili.
+  const kullanilan = r.usedCfg || null
+  if (kullanilan && kullanilan.signalCfg) {
+    const sc = kullanilan.signalCfg
+    const oc = kullanilan.outcomeCfg || {}
+    el.appendChild(bolumBasligi('Kullanılan ayar'))
+    el.appendChild(kv('Benzerlik eşiği', formatNumber(sc.minSimilarity, 2)))
+    el.appendChild(kv('En az eşleşme', tam(sc.minMatches)))
+    el.appendChild(kv('En az tutma oranı', formatPercent(sc.minWinRate, 0)))
+    el.appendChild(kv('En az R/R', formatNumber(sc.minRr, 2)))
+    el.appendChild(kv('En az beklenti', formatNumber(sc.minExpectancy, 2)))
+    el.appendChild(kv('Hedef (plan)', formatNumber(oc.targetAtr, 2) + ' ATR' +
+      (kullanilan.sources && kullanilan.sources.plan ? ' (' + kullanilan.sources.plan + ')' : '')))
+    el.appendChild(kv('Ufuk', tam(oc.horizonBars) + ' bar'))
+    if (r.memory && r.memory.builtAt) {
+      el.appendChild(kv('Hafıza kuruldu', String(r.memory.builtAt).slice(0, 16).replace('T', ' ')))
+    }
+  }
 
   // Iki sinyal turu ayri ayri. Toplam rakam, birinin digerini tasidigi
   // durumlari gizler; asil karar bu tabloda verilir.

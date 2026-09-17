@@ -229,8 +229,126 @@ function sinirla(next, current) {
   return out
 }
 
+/**
+ * AYAR DOSYASI YALNIZCA KULLANICININ DEGISTIRDIGI ALANLARI TUTAR
+ * ---------------------------------------------------------------------------
+ * Onceden `save` birlesik nesnenin TAMAMINI yaziyordu. Bunun iki kotu sonucu
+ * vardi: (1) cekirdek varsayilanlari veya zaman dilimi hazir ayarlari
+ * degistiginde kullaniciya hic ulasmiyordu, (2) hazir ayarlar fiilen hic
+ * devreye girmiyordu, cunku dosyadaki her alan "kullanici boyle istedi"
+ * sayiliyordu. Artik diske yalnizca DEFAULTS'tan FARKLI alanlar ve
+ * `settingsVersion` yazilir; hazir ayar katmani arada calisir
+ * (bkz. core/learn/presets.js resolveCfg).
+ */
+const SETTINGS_VERSION = 2
+
+/**
+ * Kullanici yamasindaki alanlar: bu alanlar varsayilana esit olsa bile
+ * korunur, cunku hazir ayar onlari ezmesin diye ACIKCA secilmis olabilirler.
+ */
+const HAZIR_AYARIN_YONETTIGI = [
+  'outcomeCfg.targetAtr',
+  'signalCfg.minSimilarity',
+  'signalCfg.minMatches',
+  'signalCfg.minWinRate',
+]
+
+/** Nesnedeki tum yaprak yollarini (nokta ile) toplar. */
+function yapraklar(obj, onek, out) {
+  const liste = out || []
+  if (!isPlainObject(obj)) return liste
+  for (const k of Object.keys(obj)) {
+    const yol = onek ? onek + '.' + k : k
+    if (isPlainObject(obj[k])) yapraklar(obj[k], yol, liste)
+    else liste.push(yol)
+  }
+  return liste
+}
+
+/**
+ * `tam` nesnesinin `taban` ile ayni olmayan alanlarini dondurur (derin fark).
+ * @param {object} tam
+ * @param {object} taban
+ * @returns {object}
+ */
+function fark(tam, taban) {
+  const out = {}
+  if (!isPlainObject(tam)) return out
+  for (const k of Object.keys(tam)) {
+    const a = tam[k]
+    const b = isPlainObject(taban) ? taban[k] : undefined
+    if (isPlainObject(a) && isPlainObject(b)) {
+      const alt = fark(a, b)
+      if (Object.keys(alt).length > 0) out[k] = alt
+    } else if (Array.isArray(a) || Array.isArray(b)) {
+      if (JSON.stringify(a) !== JSON.stringify(b)) out[k] = deepClone(a)
+    } else if (a !== b) {
+      out[k] = deepClone(a)
+    }
+  }
+  return out
+}
+
+/**
+ * Diske yazilacak yamayi uretir: varsayilandan farkli her alan, ayrica
+ * kullanicinin daha once veya bu cagrida acikca verdigi alanlar.
+ */
+function yamayiUret(birlesik, oncekiYama, gelenYama) {
+  const yama = fark(birlesik, DEFAULTS)
+  const korunacak = new Set()
+  for (const yol of yapraklar(oncekiYama || {})) {
+    if (HAZIR_AYARIN_YONETTIGI.indexOf(yol) >= 0) korunacak.add(yol)
+  }
+  for (const yol of yapraklar(gelenYama || {})) korunacak.add(yol)
+  for (const yol of korunacak) {
+    const deger = getPath(birlesik, yol)
+    if (deger !== undefined) setPath(yama, yol, deger)
+  }
+  delete yama.settingsVersion
+  return yama
+}
+
+/**
+ * Eski surumden gelen ayar dosyasini yeni bicime cevirir: kullanicinin sinyal
+ * ve sonuc ayarlari AYNEN korunur (canli davranis degismesin), yalnizca
+ * `signalCfg.outcomeCfg` (dosyada `null` duruyordu ve plan hedefini
+ * varsayilana dusuruyordu) atilir. Diger alanlarda varsayilana esit olanlar
+ * yamadan cikar.
+ * @param {object} parsed Diskten okunan ham nesne
+ * @returns {{yama:object, gocuruldu:boolean}}
+ */
+function ayarGocu(parsed) {
+  const ham = indikatorAyariniGocur(parsed || {})
+  if (num(ham.settingsVersion) === SETTINGS_VERSION) {
+    const yama = deepClone(ham)
+    delete yama.settingsVersion
+    return { yama: yama, gocuruldu: false }
+  }
+  const birlesik = deepMerge(DEFAULTS, ham)
+  const yama = fark(birlesik, DEFAULTS)
+  // Kullanicinin esikleri aynen korunur.
+  if (isPlainObject(ham.signalCfg)) {
+    const s = deepClone(ham.signalCfg)
+    delete s.outcomeCfg
+    yama.signalCfg = Object.assign({}, yama.signalCfg || {}, s)
+  }
+  if (isPlainObject(ham.outcomeCfg)) {
+    yama.outcomeCfg = Object.assign({}, yama.outcomeCfg || {}, deepClone(ham.outcomeCfg))
+  }
+  delete yama.settingsVersion
+  return { yama: yama, gocuruldu: true }
+}
+
+/** Sayiya cevirir, olmazsa NaN. */
+function num(v) {
+  const n = Number(v)
+  return Number.isFinite(n) ? n : NaN
+}
+
 /** Bellek onbellegi, her cagrida diskten okumamak icin. */
 let cache = null
+/** Kullanicinin acikca degistirdigi alanlar (diske yazilan yama). */
+let patchCache = null
 
 /** Ayarlari diskten okur ve DEFAULTS ile birlestirir. */
 function load() {
@@ -250,8 +368,28 @@ function load() {
       parsed = null
     }
   }
-  cache = deepMerge(DEFAULTS, indikatorAyariniGocur(parsed || {}))
+  const goc = ayarGocu(parsed || {})
+  patchCache = goc.yama
+  cache = deepMerge(DEFAULTS, patchCache)
+  if (goc.gocuruldu && raw) {
+    // Dosyayi yeni bicime cevir; basarisiz olursa bellekteki hali gecerlidir.
+    try {
+      yaz(cache)
+    } catch (err) {
+      // Salt okunur klasor olabilir, sessizce gec.
+    }
+  }
   return deepClone(cache)
+}
+
+/**
+ * Kullanicinin acikca degistirdigi alanlar. Tarama, test ve canli bu yamayi
+ * hazir ayar katmaniyla birlestirir (presets.resolveCfg).
+ * @returns {object}
+ */
+function loadPatch() {
+  load()
+  return deepClone(patchCache || {})
 }
 
 /**
@@ -263,7 +401,7 @@ function load() {
 function save(patch) {
   const current = load()
   const next = sinirla(deepMerge(current, patch || {}), current)
-  return yaz(next)
+  return yaz(next, patch || {})
 }
 
 /**
@@ -275,18 +413,29 @@ function save(patch) {
  */
 function replace(next) {
   const current = load()
-  return yaz(sinirla(deepMerge(DEFAULTS, next || {}), current))
+  const birlesik = sinirla(deepMerge(DEFAULTS, next || {}), current)
+  // Onceki yamayi tasimayiz: replace "yalnizca bunlar kaldi" demektir.
+  patchCache = {}
+  return yaz(birlesik, next || {})
 }
 
-/** Ayar nesnesini atomik olarak diske yazar ve onbellege alir. */
-function yaz(next) {
+/**
+ * Ayarlari atomik olarak diske yazar. Dosyaya yalnizca kullanicinin
+ * degistirdigi alanlar ve surum numarasi gider.
+ * @param {object} birlesik Tam (varsayilanlarla birlesmis) ayar nesnesi
+ * @param {object} [gelenYama] Bu cagrida acikca verilen alanlar
+ */
+function yaz(birlesik, gelenYama) {
+  const yama = yamayiUret(birlesik, patchCache, gelenYama)
+  const govde = Object.assign({ settingsVersion: SETTINGS_VERSION }, yama)
   const file = paths.settingsPath()
   const tmp = file + '.tmp'
   fs.mkdirSync(path.dirname(file), { recursive: true })
-  fs.writeFileSync(tmp, JSON.stringify(next, null, 2), 'utf8')
+  fs.writeFileSync(tmp, JSON.stringify(govde, null, 2), 'utf8')
   fs.renameSync(tmp, file)
-  cache = next
-  return deepClone(next)
+  patchCache = yama
+  cache = deepMerge(DEFAULTS, yama)
+  return deepClone(cache)
 }
 
 /**
@@ -352,7 +501,9 @@ function reset() {
 module.exports = {
   DEFAULTS,
   SINIRLAR,
+  SETTINGS_VERSION,
   load,
+  loadPatch,
   save,
   replace,
   applySetPayload,

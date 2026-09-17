@@ -54,6 +54,9 @@
  * ATR'ye gore buyudukce 1.0 ATR'lik hedef yeterli risk/odul birakmaz.
  */
 
+const { DEFAULT_OUTCOME_CFG } = require('./outcome')
+const { DEFAULT_SIGNAL_CFG } = require('./signal')
+
 /** @type {Object<string, {targetAtr:number, minSimilarity:number, minMatches:number, minWinRate:number, note:string}>} */
 const PRESETS = {
   '1m': {
@@ -140,9 +143,91 @@ function applyPreset (tf, outcomeCfg, signalCfg) {
   return { outcomeCfg: o, signalCfg: s, preset: p }
 }
 
+/**
+ * TEK AYAR BIRLESTIRME NOKTASI
+ * ---------------------------------------------------------------------------
+ * Ayni dokunus olayi bir donem UC farkli hedefle degerlendiriliyordu: tarama
+ * kullanicinin targetAtr degeriyle etiketliyor, test hazir ayarin degeriyle
+ * olcuyor, canli ise varsayilan 1.0 ile plan kuruyordu. Sonuc: "gecmiste %X
+ * tuttu" oranı bir hedefe, ekrandaki TP1 baska bir hedefe aitti ve
+ * minRr/minExpectancy kapilari yanlis risk/odul ile calisiyordu.
+ *
+ * Artik tarama, test ve canli AYNI fonksiyondan gecer. Katman sirasi:
+ *   1. cekirdek varsayilanlari (DEFAULT_OUTCOME_CFG / DEFAULT_SIGNAL_CFG)
+ *   2. zaman dilimine ait hazir ayar (PRESETS[tf])
+ *   3. kullanicinin Ayarlar ekranindan verdigi degerler
+ * Plan geometrisi (TP1, SL) ise HAFIZANIN etiketlendigi outcomeCfg'den gelir:
+ * "bolge tuttu" ile "TP1 vuruldu" ayni olay olmak zorundadir.
+ *
+ * @param {string} tf
+ * @param {{outcomeCfg?:object, signalCfg?:object}} [userPatch] Yalnizca
+ *        kullanicinin ACIKCA degistirdigi alanlar
+ * @param {{outcomeCfg?:object}} [memMeta] Hafiza dosyasinin ust verisi
+ * @returns {{outcomeCfg:object, signalCfg:object, planOutcomeCfg:object,
+ *            preset:object, sources:Object<string,string>}}
+ */
+function resolveCfg (tf, userPatch, memMeta) {
+  const patch = userPatch || {}
+  const preset = presetFor(tf)
+  const kullaniciOutcome = patch.outcomeCfg || {}
+  const kullaniciSignal = Object.assign({}, patch.signalCfg || {})
+  // Ayar dosyasinda bu alan `null` olarak duruyordu ve plan hedefini ezip
+  // varsayilana dusuruyordu. Plan hedefi asagida hafizadan belirlenir.
+  delete kullaniciSignal.outcomeCfg
+
+  const outcomeCfg = Object.assign(
+    {},
+    DEFAULT_OUTCOME_CFG,
+    { targetAtr: preset.targetAtr },
+    kullaniciOutcome
+  )
+  const signalCfg = Object.assign(
+    {},
+    DEFAULT_SIGNAL_CFG,
+    {
+      minSimilarity: preset.minSimilarity,
+      minMatches: preset.minMatches,
+      minWinRate: preset.minWinRate,
+    },
+    kullaniciSignal
+  )
+
+  // Hafiza hangi etiket tanimiyla kurulduysa plan da onu kullanir.
+  const hafizaOutcome = memMeta && memMeta.outcomeCfg && typeof memMeta.outcomeCfg === 'object'
+    ? memMeta.outcomeCfg
+    : null
+  const planOutcomeCfg = hafizaOutcome
+    ? Object.assign({}, DEFAULT_OUTCOME_CFG, hafizaOutcome)
+    : Object.assign({}, outcomeCfg)
+  signalCfg.outcomeCfg = planOutcomeCfg
+
+  // Hangi degerin nereden geldigi (arayuzde gostermek ve hata ayiklamak icin).
+  const sources = {}
+  for (const alan of ['targetAtr', 'horizonBars', 'breakBufferAtr', 'formTargetRr']) {
+    sources[alan] = Object.prototype.hasOwnProperty.call(kullaniciOutcome, alan)
+      ? 'kullanici'
+      : (alan === 'targetAtr' ? 'hazir ayar' : 'varsayilan')
+  }
+  for (const alan of ['minSimilarity', 'minMatches', 'minWinRate', 'minRr', 'minExpectancy', 'k']) {
+    sources[alan] = Object.prototype.hasOwnProperty.call(kullaniciSignal, alan)
+      ? 'kullanici'
+      : (alan === 'minSimilarity' || alan === 'minMatches' || alan === 'minWinRate' ? 'hazir ayar' : 'varsayilan')
+  }
+  sources.plan = hafizaOutcome ? 'hafiza' : sources.targetAtr
+
+  return {
+    outcomeCfg: outcomeCfg,
+    signalCfg: signalCfg,
+    planOutcomeCfg: planOutcomeCfg,
+    preset: preset,
+    sources: sources,
+  }
+}
+
 module.exports = {
   PRESETS,
   DEFAULT_TF,
   presetFor,
   applyPreset,
+  resolveCfg,
 }

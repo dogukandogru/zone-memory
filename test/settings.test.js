@@ -102,3 +102,45 @@ test('replace dosyadaki artik anahtarlari dusurur', () => {
   assert.strictEqual(diskten(dir).eskiAlan, undefined)
   assert.strictEqual(diskten(dir).timeframe, '1h')
 })
+
+// O2 - dosyaya yalnizca kullanicinin degistirdigi alanlar yazilir. Onceden
+// birlesik nesnenin tamami yaziliyordu: zaman dilimi hazir ayarlari fiilen
+// hic devreye girmiyor, cekirdek varsayilan degisiklikleri kullaniciya
+// ulasmiyordu.
+test('diske yalnizca varsayilandan farkli alanlar ve surum yazilir', () => {
+  const { dir, settings } = tazeAyarlar()
+  settings.applySetPayload({ patch: { signalCfg: { minMatches: 7 } } })
+  const disk = diskten(dir)
+  assert.strictEqual(disk.settingsVersion, settings.SETTINGS_VERSION)
+  assert.strictEqual(disk.signalCfg.minMatches, 7)
+  assert.strictEqual(disk.indicatorParams, undefined, 'dokunulmayan indikator ayarlari yazilmamali')
+  assert.strictEqual(disk.theme, undefined, 'varsayilana esit alan yazilmamali')
+  // Birlesik ayar yine tam gelir.
+  assert.strictEqual(settings.get('theme'), settings.DEFAULTS.theme)
+  assert.strictEqual(settings.get('indicatorParams.pivotLen'), settings.DEFAULTS.indicatorParams.pivotLen)
+  // Kullanici yamasi ayrica okunabilir (hazir ayar katmani icin gerekli).
+  assert.deepStrictEqual(settings.loadPatch().signalCfg, { minMatches: 7 })
+})
+
+test('eski bicimli dosya gocurulur: esikler korunur, signalCfg.outcomeCfg atilir', () => {
+  const { dir, settings } = tazeAyarlar()
+  // Eski surum: tum varsayilanlar diske donmus ve signalCfg.outcomeCfg null.
+  const eski = JSON.parse(JSON.stringify(settings.DEFAULTS))
+  eski.signalCfg.outcomeCfg = null
+  eski.signalCfg.minMatches = 5
+  eski.signalCfg.minWinRate = 0.6
+  eski.outcomeCfg.targetAtr = 1.5
+  eski.timeframe = '15m'
+  fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify(eski, null, 2))
+  settings.reset()
+
+  const yama = settings.loadPatch()
+  assert.strictEqual(yama.signalCfg.minMatches, 5, 'kullanicinin esigi korunmali')
+  assert.strictEqual(yama.signalCfg.minWinRate, 0.6)
+  assert.strictEqual(yama.outcomeCfg.targetAtr, 1.5)
+  assert.ok(!('outcomeCfg' in yama.signalCfg), 'signalCfg.outcomeCfg atilmali')
+  assert.strictEqual(yama.indicatorParams, undefined, 'varsayilana esit indikator ayarlari atilmali')
+  assert.strictEqual(yama.timeframe, '15m')
+  // Goc diske de yazilir.
+  assert.strictEqual(diskten(dir).settingsVersion, settings.SETTINGS_VERSION)
+})

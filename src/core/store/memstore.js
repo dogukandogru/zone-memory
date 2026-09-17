@@ -14,6 +14,7 @@
 
 const fs = require('fs')
 const path = require('path')
+const crypto = require('crypto')
 
 const VERSION = 1
 const DEFAULT_SHAPE_LEN = 16
@@ -23,6 +24,29 @@ const CHUNK_BYTES = 4 * 1024 * 1024
 
 // Hedef platformlar little endian; degilse bayt takasi yapilir.
 const LITTLE_ENDIAN = new Uint8Array(new Uint16Array([1]).buffer)[0] === 1
+
+/**
+ * Ayar izi: anahtarlari sirali JSON'un sha256 ozetinin ilk 12 hanesi.
+ * Hafizanin hangi ayarla kuruldugunu karsilastirmak icin kullanilir; amac
+ * gizlilik degil, sabit ve kisa bir kimlik uretmektir.
+ * @param {object} parcalar
+ * @returns {string}
+ */
+function cfgHash(parcalar) {
+  const sirali = function (deger) {
+    if (Array.isArray(deger)) return deger.map(sirali)
+    if (deger && typeof deger === 'object') {
+      const out = {}
+      for (const k of Object.keys(deger).sort()) out[k] = sirali(deger[k])
+      return out
+    }
+    // Kayan noktali kucuk farklar iz degistirmesin.
+    if (typeof deger === 'number' && Number.isFinite(deger)) return Number(deger.toFixed(8))
+    return deger
+  }
+  const metin = JSON.stringify(sirali(parcalar || {}))
+  return crypto.createHash('sha256').update(metin).digest('hex').slice(0, 12)
+}
 
 /** Uzantili verilse bile temel yolu dondurur. */
 function normalizeBase(basePath) {
@@ -146,6 +170,26 @@ async function saveMemory(basePath, memory) {
     ctxNames: ctxNames,
     count: count,
     builtToTime: Number.isFinite(mem.builtToTime) ? mem.builtToTime : 0,
+    // Hafizayi ureten yapi damgasi. Verilmezse null kalir; eski dosyalarda
+    // alan hic olmayabilir, okuma tarafi bunu bos kabul eder.
+    buildCommit: mem.buildCommit ? String(mem.buildCommit) : null,
+    buildSrcHash: mem.buildSrcHash ? String(mem.buildSrcHash) : null,
+    // AYAR IZI. Hafiza hangi indikator ayari ve hangi etiket tanimiyla
+    // kuruldu? Onceden yalnizca baglam vektorunun uzunluguna bakiliyordu, bu
+    // yuzden kullanici targetAtr gibi bir ayari degistirip taramayi
+    // unuttugunda canli sinyal yeni tanimla uretilen olayi eski tanimla
+    // etiketlenmis gecmisle karsilastiriyor ve bu hicbir yerde gorunmuyordu.
+    indicatorParams: mem.indicatorParams && typeof mem.indicatorParams === 'object'
+      ? mem.indicatorParams
+      : null,
+    outcomeCfg: mem.outcomeCfg && typeof mem.outcomeCfg === 'object' ? mem.outcomeCfg : null,
+    featureVersion: Number.isFinite(mem.featureVersion) ? mem.featureVersion : null,
+    cfgHash: mem.cfgHash ? String(mem.cfgHash) : cfgHash({
+      indicatorParams: mem.indicatorParams || null,
+      outcomeCfg: mem.outcomeCfg || null,
+      ctxNames: ctxNames,
+    }),
+    builtAt: mem.builtAt ? String(mem.builtAt) : new Date().toISOString(),
     events: plain,
   }
 
@@ -248,7 +292,23 @@ async function loadMemory(basePath) {
     }
   }
 
-  return { tf: meta.tf || null, ctxNames: ctxNames, events: events }
+  // `meta` alani ayar izini tasir: plan geometrisi ve uyumluluk kontrolu
+  // hafizanin kuruldugu outcomeCfg uzerinden yapilir (presets.resolveCfg).
+  return {
+    tf: meta.tf || null,
+    ctxNames: ctxNames,
+    events: events,
+    meta: {
+      builtToTime: Number.isFinite(meta.builtToTime) ? meta.builtToTime : 0,
+      cfgHash: meta.cfgHash ? String(meta.cfgHash) : null,
+      indicatorParams: meta.indicatorParams || null,
+      outcomeCfg: meta.outcomeCfg || null,
+      featureVersion: Number.isFinite(meta.featureVersion) ? meta.featureVersion : null,
+      builtAt: meta.builtAt || null,
+      buildCommit: meta.buildCommit || null,
+      buildSrcHash: meta.buildSrcHash || null,
+    },
+  }
 }
 
 /**
@@ -281,6 +341,15 @@ async function statMemory(basePath) {
     // Bu alani tasimayan eski dosyalarda 0 doner; cagiran taraf onu "guncelligi
     // bilinmiyor" sayip bir kez yeniden tarar.
     builtToTime: Number.isFinite(meta.builtToTime) ? meta.builtToTime : 0,
+    // Ayar izi ve yapi damgasi (eski dosyalarda null).
+    ctxNames: Array.isArray(meta.ctxNames) ? meta.ctxNames.slice() : null,
+    cfgHash: meta.cfgHash ? String(meta.cfgHash) : null,
+    indicatorParams: meta.indicatorParams || null,
+    outcomeCfg: meta.outcomeCfg || null,
+    featureVersion: Number.isFinite(meta.featureVersion) ? meta.featureVersion : null,
+    builtAt: meta.builtAt || null,
+    buildCommit: meta.buildCommit || null,
+    buildSrcHash: meta.buildSrcHash || null,
   }
 }
 
@@ -309,4 +378,5 @@ module.exports = {
   loadMemory,
   statMemory,
   deleteMemory,
+  cfgHash,
 }

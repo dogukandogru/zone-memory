@@ -1,7 +1,7 @@
 {
   "name": "zone-memory",
   "productName": "Zone Memory",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "XAUUSD destek/direnc bolge hafizasi ve canli patern eslestirme masaustu uygulamasi",
   "author": "Dogukan Dogru",
   "license": "UNLICENSED",
@@ -9,14 +9,14 @@
   "main": "src/main/main.js",
   "type": "commonjs",
   "scripts": {
-    "start": "electron .",
-    "dev": "electron . --dev",
+    "start": "node scripts/stamp-build.mjs && electron .",
+    "dev": "node scripts/stamp-build.mjs && electron . --dev",
     "test": "node --test \"test/*.test.js\"",
     "import-legacy": "node scripts/import-legacy.mjs",
     "fetch-history": "node scripts/fetch-history.mjs",
-    "dist": "node scripts/stamp-build.mjs && electron-builder",
-    "dist:mac": "node scripts/stamp-build.mjs && electron-builder --mac",
-    "dist:win": "node scripts/stamp-build.mjs && electron-builder --win",
+    "dist": "node scripts/stamp-build.mjs --dist && electron-builder",
+    "dist:mac": "node scripts/stamp-build.mjs --dist && electron-builder --mac",
+    "dist:win": "node scripts/stamp-build.mjs --dist && electron-builder --win",
     "stamp": "node scripts/stamp-build.mjs"
   },
   "devDependencies": {

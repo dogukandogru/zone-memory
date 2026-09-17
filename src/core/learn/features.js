@@ -19,6 +19,14 @@
  * kalir; motor bunu yakalayip yeniden tarama ister (engine.worker.js).
  */
 
+/**
+ * Ozellik surumu. CTX_NAMES veya hesaplama kurallari degistiginde ARTIRILIR;
+ * hafiza dosyasina yazilir, boylece eski bir hafizanin yeni olaylarla
+ * karsilastirilamayacagi yalnizca uzunluk esitligine bakilarak degil acikca
+ * anlasilir.
+ */
+const FEATURE_VERSION = 2
+
 const SHAPE_LEN = 16
 const RET_LEN = 32
 /** Sekil ve getiri penceresi. */
@@ -282,6 +290,7 @@ function unpackRow (buf, offset) {
 }
 
 module.exports = {
+  FEATURE_VERSION,
   SHAPE_LEN,
   RET_LEN,
   WINDOW_BARS,

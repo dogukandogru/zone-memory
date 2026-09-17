@@ -200,3 +200,43 @@ test('deleteMemory: her iki dosyayi da siler', async () => {
   assert.equal(fs.existsSync(base + '.vec'), false)
   assert.equal(await memstore.loadMemory(base), null)
 })
+
+// O6 - ayar izi: hafiza hangi indikator ayari ve etiket tanimiyla kuruldu?
+// Onceden yalnizca baglam vektorunun uzunlugu karsilastiriliyordu, bu yuzden
+// ayar degisip tarama yapilmadiginda uyumsuzluk hicbir yerde gorunmuyordu.
+test('saveMemory / loadMemory: ayar izi ve cfgHash yazilip okunur', async () => {
+  const base = yol('iz')
+  const indicatorParams = { pivotLen: 5, minFlowToShow: 6 }
+  const outcomeCfg = { targetAtr: 1.5, horizonBars: 48 }
+
+  await memstore.saveMemory(base, {
+    tf: '15m',
+    ctxNames: CTX_NAMES.slice(),
+    indicatorParams: indicatorParams,
+    outcomeCfg: outcomeCfg,
+    featureVersion: 2,
+    builtToTime: 1700000000,
+    events: [Object.assign(olay(1), { features: ozellik(1) })],
+  })
+
+  const yuklenen = await memstore.loadMemory(base)
+  assert.deepStrictEqual(yuklenen.meta.indicatorParams, indicatorParams)
+  assert.deepStrictEqual(yuklenen.meta.outcomeCfg, outcomeCfg)
+  assert.strictEqual(yuklenen.meta.featureVersion, 2)
+  assert.ok(yuklenen.meta.builtAt, 'builtAt yazilmali')
+  assert.match(yuklenen.meta.cfgHash, /^[0-9a-f]{12}$/)
+
+  const ozet = await memstore.statMemory(base)
+  assert.strictEqual(ozet.cfgHash, yuklenen.meta.cfgHash)
+
+  // Ayni ayar ayni izi, farkli ayar farkli izi verir.
+  const iz1 = memstore.cfgHash({ indicatorParams: indicatorParams, outcomeCfg: outcomeCfg, ctxNames: CTX_NAMES.slice() })
+  const iz2 = memstore.cfgHash({ indicatorParams: indicatorParams, outcomeCfg: { targetAtr: 1.0, horizonBars: 48 }, ctxNames: CTX_NAMES.slice() })
+  assert.strictEqual(iz1, yuklenen.meta.cfgHash)
+  assert.notStrictEqual(iz1, iz2)
+  // Anahtar sirasi izi degistirmez.
+  assert.strictEqual(
+    memstore.cfgHash({ ctxNames: CTX_NAMES.slice(), outcomeCfg: { horizonBars: 48, targetAtr: 1.5 }, indicatorParams: indicatorParams }),
+    iz1
+  )
+})

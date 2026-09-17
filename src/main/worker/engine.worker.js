@@ -110,6 +110,65 @@ async function readJson(file) {
   }
 }
 
+/**
+ * Yapi damgasini (src/build-info.json) bir kez okur, sonuc onbellege alinir.
+ *
+ * Neden: bir olcumun hangi kodla alindigi izlenemiyordu. Tarama ve geriye test
+ * ciktilarina commit ile kaynak ozeti yazilirsa eski bir olcum yeni koda
+ * bakilarak yorumlanmaz. Damga dosyasi gelistirmede olmayabilir, o zaman
+ * alanlar null kalir; olcum bu yuzden basarisiz olmaz.
+ * @returns {{buildCommit:string|null, buildSrcHash:string|null}}
+ */
+let buildInfoCache = null
+function buildDamgasi() {
+  if (buildInfoCache) return buildInfoCache
+  let bilgi = null
+  try {
+    bilgi = require('../../build-info.json')
+  } catch (err) {
+    bilgi = null
+  }
+  buildInfoCache = {
+    buildCommit: bilgi && bilgi.commit ? String(bilgi.commit) : null,
+    buildSrcHash: bilgi && bilgi.srcHash ? String(bilgi.srcHash) : null,
+  }
+  return buildInfoCache
+}
+
+/**
+ * Eski yuk bicimi icin geri uyum: bir donem `outcomeCfg` ve `signalCfg`
+ * dogrudan yukun icinde geliyordu. Artik kullanicinin YAMASI gonderilir ve
+ * hazir ayar katmani arada calisir; eski bicim gelirse yama olarak kabul
+ * edilir, boylece surum farkinda sessizce varsayilana dusmez.
+ * @param {object} payload
+ * @returns {object}
+ */
+function cfgPatchGeriUyum(payload) {
+  const yama = {}
+  if (payload && payload.outcomeCfg && typeof payload.outcomeCfg === 'object') {
+    yama.outcomeCfg = payload.outcomeCfg
+  }
+  if (payload && payload.signalCfg && typeof payload.signalCfg === 'object') {
+    yama.signalCfg = payload.signalCfg
+  }
+  return yama
+}
+
+/**
+ * Bir hafizanin hangi ayarla kuruldugunu gosteren iz. Tarama bu izi hafiza
+ * dosyasina yazar; canli ve test bunu etkin ayarin iziyle karsilastirir.
+ * @param {object} indicatorParams
+ * @param {object} outcomeCfg
+ * @param {string[]} ctxNames
+ */
+function ayarIzi(indicatorParams, outcomeCfg, ctxNames) {
+  return core('store/memstore').cfgHash({
+    indicatorParams: indicatorParams || null,
+    outcomeCfg: outcomeCfg || null,
+    ctxNames: Array.isArray(ctxNames) ? ctxNames : null,
+  })
+}
+
 /** Dosya var mi. */
 async function fileExists(file) {
   try {
@@ -365,7 +424,7 @@ handlers['data:doctor'] = async function (payload) {
   return Object.assign({ tf: tf }, rapor)
 }
 
-handlers['data:status'] = async function () {
+handlers['data:status'] = async function (payload) {
   const tfmod = core('tf')
   const binstore = core('store/binstore')
   let memstore = null
@@ -417,9 +476,21 @@ handlers['data:status'] = async function () {
       // Hafiza guncel indikator surumuyle mi uretilmis. false ise arayuz
       // yeniden tarama ister; okumaya kalkarsa zaten hata alir.
       memoryCurrent: !!(mem && mem.count > 0 && num(mem.ctxLen, 0) === guncelCtxLen),
+      // Hafiza hangi ayarla kuruldu ve etkin ayarla uyusuyor mu.
+      // Uyusmuyorsa canli sinyal uretilmez ve test sonucu eski etiketlere
+      // aittir; arayuz yeniden tarama onerir. null: iz bilinmiyor (eski dosya).
+      memoryCfgHash: mem && mem.cfgHash ? mem.cfgHash : null,
+      memoryCfgMatch: mem && mem.cfgHash
+        ? mem.cfgHash === ayarIzi(mem.indicatorParams || null,
+          core('learn/presets').resolveCfg(tf, payload && payload.cfgPatch ? payload.cfgPatch : {}, null).outcomeCfg,
+          mem.ctxNames)
+        : null,
+      memoryBuiltAt: mem && mem.builtAt ? mem.builtAt : null,
+      memoryBuildCommit: mem && mem.buildCommit ? mem.buildCommit : null,
       hasZones: await fileExists(paths.zonesPath(tf)),
       hasPrototypes: await fileExists(paths.protosPath(tf)),
       hasSignals: await fileExists(paths.signalsPath(tf)),
+      hasBacktest: await fileExists(paths.backtestPath(tf)),
     }
     list.push(row)
     byTf[tf] = row
@@ -594,14 +665,16 @@ handlers['engine:scan'] = async function (payload, ctx) {
   const memoryMod = core('learn/memory')
   const memstore = core('store/memstore')
 
-  // Zaman dilimine gore olculmus hazir ayar taban alinir; kullanicinin
-  // Ayarlar ekranindan verdigi degerler bunu ezer (bkz. learn/presets.js).
-  const uygulanan = core('learn/presets').applyPreset(tf, payload.outcomeCfg, null)
+  // Tarama, test ve canli AYNI birlestirmeyi kullanir: cekirdek varsayilani,
+  // zaman dilimine ait hazir ayar, sonra kullanicinin yamasi
+  // (bkz. core/learn/presets.js resolveCfg).
+  const uygulanan = core('learn/presets').resolveCfg(tf, payload.cfgPatch || cfgPatchGeriUyum(payload), null)
+  const params = Object.assign({}, payload.params || {})
 
   ctx.progress(2, 'Indikator calisiyor')
   const built = memoryMod.buildMemory(
     s,
-    { tf: tf, params: payload.params || {}, outcomeCfg: uygulanan.outcomeCfg },
+    { tf: tf, params: params, outcomeCfg: uygulanan.outcomeCfg },
     (pct, msg) => ctx.progress(2 + num(pct, 0) * 0.78, msg)
   )
 
@@ -616,6 +689,16 @@ handlers['engine:scan'] = async function (payload, ctx) {
     // Hangi bara kadar taradigimiz. Arayuz bunu deponun son bariyla
     // karsilastirip hafizanin geride kalip kalmadigini anlar.
     builtToTime: s.length > 0 ? s.time[s.length - 1] : 0,
+    // Bu hafizayi ureten kod. Indikator degistikce eski hafizalar anlamini
+    // yitiriyor, damga olmadan hangisinin hangi kodla kuruldugu bilinmiyordu.
+    buildCommit: buildDamgasi().buildCommit,
+    buildSrcHash: buildDamgasi().buildSrcHash,
+    // AYAR IZI: hangi indikator ayari ve hangi etiket tanimiyla kuruldu.
+    // Canli ve test bunu etkin ayarla karsilastirir; uyusmazsa uyarir.
+    indicatorParams: params,
+    outcomeCfg: uygulanan.outcomeCfg,
+    featureVersion: core('learn/features').FEATURE_VERSION,
+    cfgHash: ayarIzi(params, uygulanan.outcomeCfg, built.ctxNames),
   })
 
   ctx.progress(88, 'Bolgeler kaydediliyor')
@@ -635,11 +718,24 @@ handlers['engine:scan'] = async function (payload, ctx) {
   memoryCache = { tf: tf, memory: { tf: tf, ctxNames: built.ctxNames, events: events } }
   zonesCache = { tf: tf, zones: zones }
   protoCache = { tf: tf, protos: protos }
-  signalCache = { tf: tf, signals: [] }
-  try {
-    await fsp.unlink(paths.signalsPath(tf))
-  } catch (err) {
-    // Sinyal dosyasi yoksa sorun degil.
+  // Test sinyalleri ve son test ozeti YALNIZCA ayar izi degistiyse silinir.
+  // Onceden her taramada siliniyordu: canli akis depoya bar ekledikce
+  // otomatik tarama basliyor ve kullanicinin olcumu sessizce kayboluyordu.
+  const yeniIz = ayarIzi(params, uygulanan.outcomeCfg, built.ctxNames)
+  const sonTest = await readJson(paths.backtestPath(tf))
+  const eskiIz = sonTest && sonTest.cfgHash ? String(sonTest.cfgHash) : null
+  if (eskiIz && eskiIz !== yeniIz) {
+    signalCache = { tf: tf, signals: [] }
+    for (const dosya of [paths.signalsPath(tf), paths.backtestPath(tf)]) {
+      try {
+        await fsp.unlink(dosya)
+      } catch (err) {
+        // Dosya yoksa sorun degil.
+      }
+    }
+    log('Ayarlar degistigi icin eski test sinyalleri ve ozeti silindi.')
+  } else {
+    signalCache = { tf: null, signals: null }
   }
 
   ctx.progress(97, 'Ozet hazirlaniyor')
@@ -730,47 +826,50 @@ handlers['engine:signals'] = async function (payload) {
   return { tf: tf, signals: slice, total: total, truncated: total > slice.length }
 }
 
-/** Tek bir dokunusu hafizayla karsilastirir. */
-handlers['engine:evaluate'] = async function (payload) {
-  const tf = requireTf(payload.tf)
-  const mem = await requireMemory(tf, false)
-  const evs = mem.events
-
-  let ev = null
-  if (payload.touchId === undefined || payload.touchId === null) {
-    ev = evs[evs.length - 1]
-  } else {
-    const wanted = Number(payload.touchId)
-    for (let i = evs.length - 1; i >= 0; i--) {
-      if (evs[i].id === wanted) {
-        ev = evs[i]
-        break
-      }
-    }
-  }
-  if (!ev) throw new Error('Dokunus bulunamadi: ' + String(payload.touchId))
-  if (!ev.features) throw new Error('Bu dokunusun ozellik vektoru yok, hafizayi yeniden tarayin.')
-
-  const protos = await getProtos(tf, false)
-  const signalMod = core('learn/signal')
-  const signal = signalMod.evaluateTouch(ev, ev.features, mem, protos, payload.signalCfg || {}, ev.time)
-  return { tf: tf, signal: signal, touch: lightEvent(ev) }
-}
-
 /** Yuruyen ileri test. Uretilen sinyalleri diske yazar. */
 handlers['engine:backtest'] = async function (payload, ctx) {
   const tf = requireTf(payload.tf)
+
+  // YUK BICIMI: esikler ve isinma `payload.cfg` icinde gelir. Bir donem
+  // renderer bunlari UST DUZEYDE gonderiyordu, isci ise payload.cfg okuyordu:
+  // Test sekmesi kullanicinin esiklerini degil hazir ayari olcuyor ve bu
+  // hicbir yerde gorunmuyordu. Yanlis bicim artik sessizce yok sayilmaz.
+  if (!payload.cfg && (payload.signalCfg || payload.outcomeCfg || payload.warmupEvents !== undefined)) {
+    throw new Error(
+      'engine:backtest yuk bicimi degisti: esikler ve isinma ' +
+      '{ cfg: { warmupEvents, cfgPatch } } icinde gonderilmeli.'
+    )
+  }
+
   const mem = await requireMemory(tf, false)
   const protos = await getProtos(tf, false)
   const bt = core('learn/backtest')
 
-  // Hazir ayar taban, kullanicinin verdigi degerler ustte (bkz. learn/presets.js).
+  // Tarama, test ve canli AYNI birlestirmeyi kullanir. Plan geometrisi
+  // hafizanin etiketlendigi outcomeCfg'den gelir: "bolge tuttu" ile "TP1
+  // vuruldu" ayni olay olmak zorunda.
   const gelen = payload.cfg || {}
-  const uygulanan = core('learn/presets').applyPreset(tf, gelen.outcomeCfg, gelen.signalCfg)
+  const memMeta = mem.meta || null
+  const uygulanan = core('learn/presets').resolveCfg(tf, gelen.cfgPatch || cfgPatchGeriUyum(gelen), memMeta)
   const cfg = Object.assign({}, gelen, {
-    signalCfg: Object.assign({}, uygulanan.signalCfg, { outcomeCfg: uygulanan.outcomeCfg }),
-    outcomeCfg: uygulanan.outcomeCfg,
+    signalCfg: uygulanan.signalCfg,
+    outcomeCfg: uygulanan.planOutcomeCfg,
   })
+  delete cfg.cfgPatch
+
+  // Etkin ayar ile hafizanin izi uyusuyor mu? Uyusmuyorsa olcum eski
+  // etiketlerle yeni esikleri karistirir; uyari ozete yazilir.
+  const hafizaIz = memMeta && memMeta.cfgHash ? memMeta.cfgHash : null
+  // Etkin iz, KULLANICININ cozulmus ayarindan hesaplanir (plan hafizadan
+  // gelse bile). Boylece "ayari degistirdim ama yeniden taramadim" durumu
+  // gorunur hale gelir. Indikator ayari test yukunde gelmez, hafizadaki
+  // kullanilir; indikator degisikligi taramada zaten yeni iz uretir.
+  const etkinIz = ayarIzi(
+    memMeta && memMeta.indicatorParams ? memMeta.indicatorParams : null,
+    uygulanan.outcomeCfg,
+    mem.ctxNames
+  )
+  const izUyum = hafizaIz ? hafizaIz === etkinIz : null
 
   ctx.progress(1, 'Geriye test basliyor')
   const res = bt.runBacktest(mem, protos, cfg, (pct, msg) => ctx.progress(num(pct, 0) * 0.92, msg))
@@ -784,16 +883,76 @@ handlers['engine:backtest'] = async function (payload, ctx) {
   const tradeLimit = clampInt(payload.tradeLimit, 100, 20000, 3000)
   const shownTrades = trades.length > tradeLimit ? trades.slice(trades.length - tradeLimit) : trades
 
+  // Ozete testi ureten kodun damgasi eklenir: README'deki eski olcumlerin
+  // hangi indikatorle alindigi bilinmedigi icin yanlis karara goturuyordu.
+  const damga = buildDamgasi()
+  const ozet = res && res.summary
+    ? Object.assign({}, res.summary, {
+      buildCommit: damga.buildCommit,
+      buildSrcHash: damga.buildSrcHash,
+    })
+    : null
+
+  // Olcum diske yazilir: "hangi ayarla ne olculdu" bilgisi uygulama kapaninca
+  // kaybolmasin ve otomatik tarama gereksiz yere silmesin (bkz. engine:scan).
+  const kullanilanAyar = {
+    signalCfg: uygulanan.signalCfg,
+    outcomeCfg: uygulanan.planOutcomeCfg,
+    warmupEvents: num(cfg.warmupEvents, null),
+    sources: uygulanan.sources,
+  }
+  const hafizaOzeti = memMeta ? {
+    builtToTime: memMeta.builtToTime || 0,
+    builtAt: memMeta.builtAt || null,
+    cfgHash: hafizaIz,
+    buildCommit: memMeta.buildCommit || null,
+  } : null
+  try {
+    await writeJsonAtomic(paths.backtestPath(tf), {
+      tf: tf,
+      zaman: new Date().toISOString(),
+      cfgHash: hafizaIz || etkinIz,
+      usedCfg: kullanilanAyar,
+      memory: hafizaOzeti,
+      cfgMatch: izUyum,
+      summary: ozet,
+      byYear: res && Array.isArray(res.byYear) ? res.byYear : [],
+      equity: thinCurve(res ? res.equity : [], 3000),
+      buildCommit: damga.buildCommit,
+      buildSrcHash: damga.buildSrcHash,
+    })
+  } catch (err) {
+    log('Test ozeti diske yazilamadi: ' + (err && err.message ? err.message : String(err)))
+  }
+
   ctx.progress(100, 'Test tamamlandi')
   return {
     tf: tf,
-    summary: res ? res.summary : null,
+    usedCfg: kullanilanAyar,
+    memory: hafizaOzeti,
+    cfgMatch: izUyum,
+    summary: ozet,
     byYear: res && Array.isArray(res.byYear) ? res.byYear : [],
     equity: thinCurve(res ? res.equity : [], 3000),
     trades: shownTrades,
     tradeCount: trades.length,
     signalCount: signals.length,
   }
+}
+
+/**
+ * Diske yazilmis son test ozetini dondurur. Arayuz zaman dilimi yuklenirken
+ * bunu okur; boylece olcum uygulama kapandiktan sonra da elde kalir.
+ */
+handlers['engine:backtest-last'] = async function (payload) {
+  const tf = requireTf(payload.tf)
+  const kayit = await readJson(paths.backtestPath(tf))
+  if (!kayit) return { tf: tf, found: false }
+  // Hafizanin izi degistiyse bu ozet artik gecerli degil.
+  const mem = await getMemory(tf, false)
+  const hafizaIz = mem && mem.meta && mem.meta.cfgHash ? mem.meta.cfgHash : null
+  const gecerli = !hafizaIz || !kayit.cfgHash ? null : hafizaIz === kayit.cfgHash
+  return Object.assign({ tf: tf, found: true, stillValid: gecerli }, kayit)
 }
 
 /** Kayitli prototipler. */
@@ -877,6 +1036,8 @@ handlers['engine:live-tick'] = async function (payload) {
     ? payload.volScale
     : null
   let needsSync = false
+  // Hafiza ile etkin ayar uyusmuyor: canli sinyal uretilmez, arayuz uyarir.
+  let cfgMismatch = false
 
   if (payload.isProxy) {
     const loader = core('data/loader')
@@ -1029,13 +1190,34 @@ handlers['engine:live-tick'] = async function (payload) {
         touch = lightEvent(cand)
         const feats = core('learn/features').buildFeatures(sub, cand, ind.context)
         const mem = await getMemory(tf, false)
+        const memMeta = mem && mem.meta ? mem.meta : null
+        // Canli de tarama ve test ile AYNI birlestirmeyi kullanir; plan
+        // hedefi hafizanin etiketlendigi outcomeCfg'den gelir.
+        const canliCfg = core('learn/presets').resolveCfg(
+          tf,
+          payload.cfgPatch || cfgPatchGeriUyum(payload),
+          memMeta
+        )
+        // Hafiza farkli bir ayarla kurulduysa karsilastirma anlamsizdir:
+        // yeni tanimla uretilen olay, eski tanimla etiketlenmis gecmisle
+        // olculur ve bu hicbir yerde gorunmezdi.
+        const izUyum = memMeta && memMeta.cfgHash
+          ? memMeta.cfgHash === ayarIzi(
+            payload.params || memMeta.indicatorParams || null,
+            canliCfg.outcomeCfg,
+            mem.ctxNames
+          )
+          : null
         if (!feats) {
           logs.push('Yeni bolge olayi bulundu ama ozellik penceresi yetersiz.')
         } else if (!mem || !mem.events || mem.events.length === 0) {
           logs.push('Yeni bolge olayi bulundu ama hafiza bos. Once "Geçmişi Tara" calistirin.')
+        } else if (izUyum === false) {
+          cfgMismatch = true
+          logs.push('Hafiza farkli bir ayarla kuruldu, sinyal uretilmedi. "Geçmişi Tara" calistirin.')
         } else {
           const protos = await getProtos(tf, false)
-          signal = core('learn/signal').evaluateTouch(cand, feats, mem, protos, payload.signalCfg || {}, num(cand.time, fetchedAt))
+          signal = core('learn/signal').evaluateTouch(cand, feats, mem, protos, canliCfg.signalCfg, num(cand.time, fetchedAt))
           if (signal && basis !== null && basis !== 0 && Array.isArray(signal.reasons)) {
             signal.reasons.push('Vekil kaynak fiyati ' + basis.toFixed(2) + ' birim kaydirildi.')
           }
@@ -1057,6 +1239,8 @@ handlers['engine:live-tick'] = async function (payload) {
     // Duzeltme hesaplanamadi ya da akista bosluk olustu: arayuz bunu gorunce
     // eksik donemi Veri Cek ile kapatmali, yoksa canli bar hic yazilmaz.
     needsSync: needsSync,
+    // Hafiza baska bir ayarla kuruldu: yeniden tarama gerekiyor.
+    cfgMismatch: cfgMismatch,
     lastBar: lastBar,
     signal: signal,
     touch: touch,

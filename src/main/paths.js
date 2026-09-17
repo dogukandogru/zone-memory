@@ -105,6 +105,15 @@ function signalsPath(tf, symbol) {
   return memoryPath(tf, symbol) + '.signals.json'
 }
 
+/**
+ * Son yuruyen ileri test ozetinin yolu. Olcum diske yazilir, boylece
+ * uygulama kapanip acildiginda "hangi ayarla ne olculdu" bilgisi kaybolmaz
+ * (onceden her acilista ve zaman dilimi degisiminde siliniyordu).
+ */
+function backtestPath(tf, symbol) {
+  return memoryPath(tf, symbol) + '.backtest.json'
+}
+
 /** Gerekli klasorleri olusturur, olusan yollari dondurur. */
 function ensureDirs() {
   const user = core.ensureDir(userDataDir())
@@ -123,5 +132,6 @@ module.exports = {
   zonesPath,
   protosPath,
   signalsPath,
+  backtestPath,
   ensureDirs,
 }

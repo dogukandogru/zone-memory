@@ -248,8 +248,19 @@ eder ve yeniden yazar. Ayni zaman damgasi varsa YENI veri kazanir.
 ## 6. `src/core/store/memstore.js` (A1)
 
 Hafiza kayitlari iki dosyada tutulur:
-- `<ad>.json` : `{version:1, tf, rowLen, shapeLen, retLen, ctxLen, ctxNames:[], count, events:[...]}`
-  `events` icinde her kayit `features` HARIC tum Touch + Outcome alanlari.
+- `<ad>.json` : `{version:1, tf, rowLen, shapeLen, retLen, ctxLen, ctxNames:[],
+  count, builtToTime, events:[...]}` ve AYAR IZI alanlari:
+  `indicatorParams`, `outcomeCfg`, `featureVersion`, `cfgHash`, `builtAt`,
+  `buildCommit`, `buildSrcHash`. `events` icinde her kayit `features` HARIC tum
+  Event + Outcome alanlari.
+
+  **Ayar izi neden var.** Hafizanin hangi indikator ayari ve hangi etiket
+  tanimiyla kuruldugu yazilmazsa, kullanici bir ayari degistirip taramayi
+  unuttugunda canli sinyal YENI tanimla uretilen olayi ESKI tanimla
+  etiketlenmis gecmisle karsilastirir ve bu hicbir yerde gorunmez.
+  `cfgHash = memstore.cfgHash({indicatorParams, outcomeCfg, ctxNames})`
+  (anahtarlari sirali JSON'un sha256 ozetinin ilk 12 hanesi). `loadMemory`
+  bunlari `meta` alani icinde geri verir, `statMemory` da dondurur.
 - `<ad>.vec`  : `count * rowLen` adet float32. Satir duzeni: `[shape(16), ret(32), ctx(ctxLen)]`.
 
 ```js
@@ -873,10 +884,30 @@ module.exports = {
 - `engine.js`: `worker_threads` ile tek isci baslatir, `call(cmd, payload, onProgress)`
   Promise dondurur, id ile eslestirir. Isci cokerse yeniden baslatir.
 - `worker/engine.worker.js`: komut yonlendirici. Komutlar:
-  `data:status`, `data:import`, `data:sync`, `data:candles`,
+  `data:status`, `data:doctor`, `data:import`, `data:sync`, `data:candles`,
   `engine:scan`, `engine:zones`, `engine:touches`, `engine:signals`,
-  `engine:evaluate`, `engine:backtest`, `engine:prototypes`, `engine:memory-summary`.
+  `engine:backtest`, `engine:backtest-last`, `engine:prototypes`,
+  `engine:memory-summary`, `engine:memory-delete`, `engine:live-tick`.
   Uzun islerde `{type:'progress', id, pct, msg}` mesaji gonderir.
+
+  **Ayar birlestirme (tek nokta).** `engine:scan`, `engine:backtest` ve
+  `engine:live-tick` esikleri `core/learn/presets.js` icindeki
+  `resolveCfg(tf, cfgPatch, memMeta)` ile cozer. Sira: cekirdek varsayilani,
+  zaman dilimine ait hazir ayar, kullanicinin YAMASI. Plan geometrisi (TP1, SL)
+  hafizanin etiketlendigi `outcomeCfg`den gelir, yani "bolge tuttu" ile "TP1
+  vuruldu" ayni olaydir. Yuk bicimi: `{tf, params, cfgPatch}` (tarama ve canli)
+  ve `{tf, cfg:{warmupEvents, cfgPatch}}` (test). Test yukunde esikler UST
+  DUZEYDE gelirse isci anlasilir bir hata firlatir; eskiden sessizce yok
+  sayiliyor ve hazir ayar olculuyordu.
+
+  `engine:backtest` sonucu `<ad>_memory.backtest.json` dosyasina yazilir
+  (`usedCfg`, `memory`, `cfgHash`, `cfgMatch`, `summary`, `byYear`, `equity`).
+  `engine:backtest-last` bunu geri verir ve hafizanin izi degistiyse
+  `stillValid:false` doner. `engine:scan` test sinyallerini ve bu ozeti
+  YALNIZCA ayar izi degistiyse siler.
+
+  Kaldirilan komut: `engine:evaluate` (renderer'dan hic cagrilmiyordu ve
+  ambargosuz, farkli ayarla sinyal uretiyordu).
 - `ipc.js`: `ipcMain.handle('api:call', (e, {cmd, payload}) => ...)`.
   Ilerleme ve canli olaylar `webContents.send('api:event', {type, data})` ile gider.
 - `live.js`: secili saglayicidan `livePollSeconds` araliginda son barlari ceker,

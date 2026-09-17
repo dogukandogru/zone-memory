@@ -233,8 +233,11 @@ async function tick() {
       fetchedAt: now,
       sinceTime: state.sinceTime,
       params: cfg.indicatorParams || {},
-      outcomeCfg: cfg.outcomeCfg || {},
-      signalCfg: cfg.signalCfg || {},
+      // Esikler ve hedef, isci tarafinda presets.resolveCfg ile cozulur:
+      // tarama, test ve canli AYNI birlestirmeyi kullanmak zorunda
+      // (onceden canli varsayilan 1.0 ATR hedefle plan kuruyordu, hafiza ise
+      // 1.5 ATR ile etiketlenmisti).
+      cfgPatch: settings.loadPatch(),
     })
 
     state.ticks += 1

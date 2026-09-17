@@ -88,8 +88,16 @@ sayı budur: Test sekmesinde `Taban başarı oranı` ile `Başarı oranı` fark�
 yoksa sistem bir şey katmıyordur.
 
 Zaman dilimini değiştirdiğinizde uygulama o zaman dilimi için kayıtlı hazır
-ayarı kendiliğinden uygular (`src/core/learn/presets.js`). Ayarlar ekranından
-girdiğiniz değerler bu hazır ayarı her zaman ezer.
+ayarı uygular (`src/core/learn/presets.js`). Sıra şudur: çekirdek varsayılanı,
+sonra zaman dilimine ait hazır ayar, en üstte Ayarlar ekranından girdiğiniz
+değerler. Ayarlar dosyasına yalnızca sizin değiştirdiğiniz alanlar yazılır,
+böylece dokunmadığınız bir eşikte hazır ayar gerçekten devreye girer.
+
+Tarama, Test sekmesi ve canlı mod aynı birleştirmeyi kullanır. Planın hedefi
+(TP1) hafızanın etiketlendiği hedefle aynıdır: "bölge tuttu" ile "TP1 vuruldu"
+aynı olaydır. Hafıza hangi ayarla kurulduğunu kendi içinde saklar; ayarı
+değiştirip yeniden taramazsanız canlı mod sinyal üretmez ve Test sekmesi
+sonucun eski ayarlara ait olduğunu söyler.
 
 Bu sonuçların ne olmadığı da önemlidir, bkz. **7. Bilinen sınırlar**.
 

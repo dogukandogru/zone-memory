@@ -59,6 +59,9 @@ const ARALIK_GECIKMESI_MS = 200
 const durum = {
   ayarlar: null,
   ayarYamasi: {},
+  // Kullanicinin kayitli (diskteki) ayar yamasi; motor bunu hazir ayarla
+  // birlestirir. Birlesik ayar gonderilse hazir ayar katmani devre disi kalir.
+  ayarYamasiKayitli: null,
   saglayicilar: [],
   tf: '15m',
   bars: [],
@@ -838,7 +841,14 @@ async function hafizayiYukle() {
       ? proto
       : (proto && Array.isArray(proto.prototypes) ? proto.prototypes : [])
   }
+  // Diske yazilmis son test ozeti. Onceden olcum yalnizca bellekteydi ve
+  // uygulama kapaninca kayboluyordu; "hangi ayarla ne olculdu" bilgisi
+  // kaybolmasin diye artik dosyadan geri yuklenir.
+  const sonTest = await cagirGuvenli('engine:backtest-last', { tf: durum.tf }, null)
+  if (sonTest && sonTest.found) durum.testSonucu = sonTest
+  else durum.testSonucu = null
   hafizaPaneliniCiz()
+  testPaneliniCiz()
 }
 
 /** Saglayici listesini yukler, komut yoksa yerlesik listeye duser. */
@@ -1000,19 +1010,28 @@ async function tfHazirla(tf) {
   const hafizaGeride = kuruldugu <= 0 || (veriSonu - kuruldugu) > tfSec * 2
 
   if (hafizaYok || hafizaEski || hafizaGeride) {
+    if (durum.taramaCalisiyor) return degisti
+    // Tarama bayragi: Durdur dugmesi gorunur olsun ve ikinci bir tarama
+    // kuyruga girmesin (otomatik hazirlik uzun surebilir).
+    durum.taramaCalisiyor = true
+    const taraDugmesi = el('scanBtn')
+    isBasladi(taraDugmesi, 'Taranıyor...')
     motorDurumu('geçmiş taranıyor')
     ilerleme(0, tf + ' için hafıza kuruluyor')
-    const sonuc = await cagirGuvenli('engine:scan', {
-      tf: tf,
-      params: ayar.indicatorParams,
-      indicatorParams: ayar.indicatorParams,
-      outcomeCfg: ayar.outcomeCfg,
-      signalCfg: ayar.signalCfg,
-    }, 'Geçmiş taranamadı')
-    if (sonuc) {
-      degisti = true
-      bildir(tf + ' hafızası hazır: ' + formatNumber(sayi(sonuc.events, 0), 0) + ' kayıt. ' +
-        'Sinyal listesi için Test sekmesinden testi çalıştırın.')
+    try {
+      const sonuc = await cagirGuvenli('engine:scan', {
+        tf: tf,
+        params: ayar.indicatorParams,
+        cfgPatch: durum.ayarYamasiKayitli || null,
+      }, 'Geçmiş taranamadı')
+      if (sonuc) {
+        degisti = true
+        bildir(tf + ' hafızası hazır: ' + formatNumber(sayi(sonuc.events, 0), 0) + ' kayıt. ' +
+          'Sinyal listesi için Test sekmesinden testi çalıştırın.')
+      }
+    } finally {
+      durum.taramaCalisiyor = false
+      isBitti(taraDugmesi)
     }
   }
 
@@ -1164,9 +1183,8 @@ async function taramaCalistir() {
     await cagir('engine:scan', {
       tf: durum.tf,
       params: ayar.indicatorParams,
-      indicatorParams: ayar.indicatorParams,
-      outcomeCfg: ayar.outcomeCfg,
-      signalCfg: ayar.signalCfg,
+      // Esikler ve hedef isci tarafinda hazir ayarla birlestirilir.
+      cfgPatch: durum.ayarYamasiKayitli || null,
     })
     bildir('Tarama tamamlandı, hafıza güncellendi.')
     ilerleme(100, 'Tamamlandı')
@@ -1749,6 +1767,13 @@ function tutmayanAlanlar(yeni, yama, onek) {
   return fark
 }
 
+/** Kullanicinin kayitli ayar yamasini motor icin tazeler. */
+async function ayarYamasiniYenile() {
+  const yama = await cagirGuvenli('settings:patch', {}, 'Ayar yaması okunamadı')
+  if (yama && typeof yama === 'object') durum.ayarYamasiKayitli = yama
+  return durum.ayarYamasiKayitli
+}
+
 /** Ayar yamasini diske yazar. */
 async function ayarlariKaydet(yama) {
   const gonderilecek = yama && Object.keys(yama).length ? yama : durum.ayarYamasi
@@ -1766,6 +1791,7 @@ async function ayarlariKaydet(yama) {
   } else {
     bildir('Ayarlar kaydedildi. Hafızayı etkileyen değişiklikler için "Geçmişi Tara" çalıştırın.')
   }
+  await ayarYamasiniYenile()
   ayarPaneliniCiz(true)
   saglayiciSecimleriniKur()
 }
@@ -1782,6 +1808,7 @@ async function ayarlariSifirla() {
   if (yeni && typeof yeni === 'object') durum.ayarlar = yeni
   durum.ayarYamasi = {}
   bildir('Ayarlar varsayılanlara döndü, yeniden tarama gerekir.')
+  await ayarYamasiniYenile()
   ayarPaneliniCiz(true)
   saglayiciSecimleriniKur()
 }
@@ -1815,10 +1842,15 @@ async function testCalistir() {
     : varsayilanIsinma
 
   try {
+    // Yuk BICIMI onemli: isci `payload.cfg` okur. Bir donem ust duzeyde
+    // gonderiliyordu ve sessizce yok sayiliyordu, yani Test sekmesi
+    // kullanicinin esiklerini degil hazir ayari olcuyordu.
     const sonuc = await cagir('engine:backtest', {
       tf: durum.tf,
-      warmupEvents: isinma,
-      signalCfg: (durum.ayarlar || {}).signalCfg,
+      cfg: {
+        warmupEvents: isinma,
+        cfgPatch: durum.ayarYamasiKayitli || null,
+      },
     })
     durum.testSonucu = sonuc
     // Geriye test sinyal listesini de URETIR ve diske yazar. Yeniden okunmazsa
@@ -1970,14 +2002,31 @@ async function yapiDamgasiniYaz() {
         ' ' + SAAT_BICIMI.format(d))
     }
   }
-  if (bilgi.commit) parcalar.push(bilgi.commit)
+  if (bilgi.commit) {
+    // Kirli agacta commit tek basina yanlis yonlendirir: calisan kod o commit
+    // degildir. Kac dosyanin commit edilmedigini basliga yaziyoruz, boylece
+    // bir olcumun izlenemez olduguna bakarak karar verilebilir.
+    let damga = bilgi.commit
+    if (bilgi.dirty && bilgi.changedFiles > 0) {
+      damga += ' (commit edilmemiş ' + bilgi.changedFiles + ' değişiklik)'
+    } else if (bilgi.dirty) {
+      damga += ' (commit edilmemiş değişiklik var)'
+    }
+    parcalar.push(damga)
+  }
+  // Paketlenmemis calistirmada kaynak her an degisebilir, damga bir paketi
+  // isaret etmez; bunu ayrica belirtiyoruz.
+  if (bilgi.dev) parcalar.push('geliştirme')
   document.title = parcalar.join(' - ')
 
   const e = el('statusClock')
   if (e) {
     e.title = 'Sürüm ' + (bilgi.version || '?') +
       (bilgi.builtAt ? ', yapı ' + bilgi.builtAt : '') +
-      (bilgi.commit ? ', commit ' + bilgi.commit : '')
+      (bilgi.commit ? ', commit ' + bilgi.commit : '') +
+      (bilgi.srcHash ? ', kaynak ' + bilgi.srcHash : '') +
+      (bilgi.dirty ? ', commit edilmemiş ' + (bilgi.changedFiles || 0) + ' değişiklik' : '') +
+      (bilgi.dev ? ', geliştirme çalıştırması' : '')
   }
 }
 
@@ -2104,6 +2153,10 @@ async function baslat() {
     durum.ayarlar = ayarlar
     if (ayarlar.timeframe && TF_SANIYE[ayarlar.timeframe]) durum.tf = ayarlar.timeframe
   }
+  // Kullanicinin ACIKCA degistirdigi alanlar. Motor bunu zaman dilimine ait
+  // hazir ayarla birlestirir (presets.resolveCfg); birlesik ayari gondermek
+  // hazir ayarlari fiilen devre disi birakirdi.
+  await ayarYamasiniYenile()
 
   tfDugmeleriniKur()
   tvKaynagiGuncelle()

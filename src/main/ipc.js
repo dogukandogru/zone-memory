@@ -92,6 +92,12 @@ async function dispatch(cmd, payload) {
         version: app.getVersion(),
         builtAt: build && build.builtAt ? build.builtAt : null,
         commit: build && build.commit ? build.commit : null,
+        // Kirli agactan alinan olcum izlenemez; arayuz bunu basligta gosterir.
+        dirty: build && build.dirty !== undefined ? !!build.dirty : null,
+        changedFiles: build && Number.isFinite(build.changedFiles) ? build.changedFiles : null,
+        srcHash: build && build.srcHash ? build.srcHash : null,
+        // Paketlenmemis calistirmada kod her an degisebilir, damga bagsizdir.
+        dev: !app.isPackaged,
         platform: process.platform,
         electron: process.versions.electron,
         node: process.versions.node,
@@ -102,6 +108,12 @@ async function dispatch(cmd, payload) {
 
     case 'settings:get':
       return settings.get(p.key)
+
+    // Yalnizca kullanicinin acikca degistirdigi alanlar. Tarama, test ve canli
+    // bunu zaman dilimine ait hazir ayarla birlestirir (presets.resolveCfg);
+    // birlesik ayar gonderilse hazir ayar katmani devre disi kalirdi.
+    case 'settings:patch':
+      return settings.loadPatch()
 
     // Yuk bicimi: {key, value} veya {patch} ya da ciplak yama nesnesi.
     // Cozumleme settings.js icindedir, boylece testten de ayni yol gecer.
