@@ -107,6 +107,10 @@ function emptyResult(baselineWinRate, labeled, warmup, embargoSec) {
       profitFactor: 0,
       maxDrawdownAtr: 0,
       avgRr: 0,
+      byKind: [
+        { kind: 'form', total: 0, fired: 0, wins: 0, losses: 0, winRate: 0, expectancyAtr: 0, totalPnlAtr: 0 },
+        { kind: 'touch', total: 0, fired: 0, wins: 0, losses: 0, winRate: 0, expectancyAtr: 0, totalPnlAtr: 0 },
+      ],
       baselineWinRate: baselineWinRate,
       labeled: labeled,
       totalPnlAtr: 0,
@@ -212,6 +216,15 @@ function runBacktest(memory, prototypes, cfg, onProgress) {
   // Yil bazli kirilim: yil -> [fired, wins, losses, pnlToplam]
   const yearMap = new Map()
 
+  // Olay turu bazli kirilim. Iki sinyal turunun (kutu olusumu / bolgeye geri
+  // donus) ayri ayri ne yaptigini gormek, hangisinin gercekten calistigina
+  // karar vermenin tek yoludur; toplam rakam ikisini birbirine gizler.
+  const kindMap = new Map([
+    ['form', { total: 0, fired: 0, wins: 0, losses: 0, pnlAtr: 0 }],
+    ['touch', { total: 0, fired: 0, wins: 0, losses: 0, pnlAtr: 0 }],
+  ])
+  const kindOf = (e) => (e && e.kind === 'form' ? 'form' : 'touch')
+
   const step = Math.max(1, Math.floor(n / 100))
   if (typeof onProgress === 'function') onProgress(0, 'Yürüyen ileri test başlıyor')
 
@@ -236,6 +249,8 @@ function runBacktest(memory, prototypes, cfg, onProgress) {
     }
 
     total++
+    const kb = kindMap.get(kindOf(ev))
+    kb.total++
     const sig = evaluateTouch(ev, ev.features, poolMemory, protos, signalCfg, beforeTime)
 
     if (sig && sig.fired === true) {
@@ -275,6 +290,11 @@ function runBacktest(memory, prototypes, cfg, onProgress) {
         grossPnlAtr += grossAtr
         costTotalAtr += costAtr
 
+        kb.fired++
+        kb.pnlAtr += pnlAtr
+        if (win) kb.wins++
+        else kb.losses++
+
         // wins/losses ISABET oranidir (hedef vuruldu mu), maliyetten bagimsizdir.
         if (win) wins++
         else losses++
@@ -312,6 +332,8 @@ function runBacktest(memory, prototypes, cfg, onProgress) {
           time: ev.time,
           bar: ev.bar,
           year: year,
+          // Olay turu: 'form' kutu olusumu, 'touch' bolgeye geri donus.
+          kind: ev.kind === 'form' ? 'form' : 'touch',
           direction: sig.direction,
           session: ev.session,
           entry: sig.entry,
@@ -400,6 +422,19 @@ function runBacktest(memory, prototypes, cfg, onProgress) {
       profitFactor: profitFactor,
       maxDrawdownAtr: maxDrawdownAtr,
       avgRr: rrCount > 0 ? rrSum / rrCount : 0,
+      byKind: Array.from(kindMap.entries()).map(function (girdi) {
+        const k = girdi[1]
+        return {
+          kind: girdi[0],
+          total: k.total,
+          fired: k.fired,
+          wins: k.wins,
+          losses: k.losses,
+          winRate: k.fired > 0 ? k.wins / k.fired : 0,
+          expectancyAtr: k.fired > 0 ? k.pnlAtr / k.fired : 0,
+          totalPnlAtr: k.pnlAtr,
+        }
+      }),
       baselineWinRate: baselineWinRate,
       labeled: labeled,
       totalPnlAtr: totalPnl,

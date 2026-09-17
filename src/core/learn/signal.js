@@ -3,9 +3,15 @@
 /**
  * Sinyal uretimi (A6, sozlesme bolum 15).
  *
- * Bir ilk dokunusu hafizadaki benzer gecmis kurulumlarla karsilastirir,
+ * Bir bolge olayini hafizadaki benzer gecmis kurulumlarla karsilastirir,
  * islem planini benzer orneklerin MFE/MAE dagilimindan cikarir ve her durumda
  * (sinyal uretilsin ya da uretilmesin) Turkce gerekcelerle dolu bir nesne doner.
+ *
+ * Olay iki turden biridir (bkz. indicator/proZones.js):
+ *   kind = 'form'   kutu yeni dogdu, giris onay barinin kapanisi
+ *   kind = 'touch'  fiyat kutuya geri dondu, giris bolgenin yakin kenari
+ * Karsilastirma YALNIZCA ayni turdeki gecmis olaylarla yapilir; iki tur farkli
+ * kurulumlardir ve istatistikleri karistirilirsa sonuc yaniltici olur.
  *
  * Sozlesme notlari:
  * - `knn` secenekleri arasinda sorgunun zamani yok ama `excludeWithinSec`
@@ -165,15 +171,26 @@ function evaluateTouch (touch, features, memory, prototypes, cfg, beforeTime) {
   const sign = direction === 'BUY' ? 1 : -1
   const entry = num(t.price, 0)
   const time = num(t.time, 0)
+  // Eski hafiza dosyalarinda `kind` yoktur, o kayitlar dokunus sayilir.
+  const kind = t.kind === 'form' ? 'form' : 'touch'
+  const form = kind === 'form'
   const reasons = []
 
-  reasons.push(direction === 'BUY'
-    ? 'Destek bölgesine ilk dokunuş, yön BUY'
-    : 'Direnç bölgesine ilk dokunuş, yön SELL')
+  if (form) {
+    reasons.push(direction === 'BUY'
+      ? 'Hacimli aşırılıkta destek kutusu oluştu, yön BUY'
+      : 'Hacimli aşırılıkta direnç kutusu oluştu, yön SELL')
+    reasons.push('Kutu pivot barından ' + Math.max(0, num(t.zoneAgeBars, 0)) +
+      ' bar sonra onaylandı, ileriye bakma yok')
+  } else {
+    reasons.push(direction === 'BUY'
+      ? 'Destek bölgesine geri dönüş, ilk dokunuş, yön BUY'
+      : 'Direnç bölgesine geri dönüş, ilk dokunuş, yön SELL')
+  }
 
   const maxScore = num(t.maxScore, 0)
   if (maxScore > 0) {
-    reasons.push('Dokunuş skoru ' + Math.round(num(t.score, 0)) + '/' + Math.round(maxScore) +
+    reasons.push('Olay skoru ' + Math.round(num(t.score, 0)) + '/' + Math.round(maxScore) +
       (t.qualified ? ', indikatör eşiğini geçti' : ', indikatör eşiğini geçmedi'))
   }
 
@@ -193,6 +210,7 @@ function evaluateTouch (touch, features, memory, prototypes, cfg, beforeTime) {
     const opts = {
       k: Math.max(1, Math.round(num(conf.k, 25))),
       direction: direction,
+      kind: kind,
       excludeWithinSec: excludeWithinSec,
       beforeTime: bt,
       weights: conf.weights,
@@ -207,6 +225,7 @@ function evaluateTouch (touch, features, memory, prototypes, cfg, beforeTime) {
       if (!r || !r.event) continue
       const ev = r.event
       if (ev.direction && ev.direction !== direction) continue
+      if ((ev.kind || 'touch') !== kind) continue
       if (bt !== null && !(num(ev.time, Infinity) < bt)) continue
       if (excludeWithinSec > 0 && Math.abs(num(ev.time, 0) - time) < excludeWithinSec) continue
       candidates.push(r)
@@ -274,10 +293,15 @@ function evaluateTouch (touch, features, memory, prototypes, cfg, beforeTime) {
   const levels = conf.useZoneStop === false
     ? null
     : zoneLevels(
-      { price: entry, zoneTop: t.zoneTop, zoneBottom: t.zoneBottom, direction: direction },
+      { price: entry, zoneTop: t.zoneTop, zoneBottom: t.zoneBottom, direction: direction, kind: kind },
       atr,
       Object.assign({}, DEFAULT_OUTCOME_CFG, conf.outcomeCfg || {})
     )
+  // Form olayinda seviyeler kurulamadiysa (fiyat pivottan cok kacti, risk
+  // maxFormRiskAtr esigini asti) ortada islenebilir bir kurulum yoktur.
+  // Hafiza da bu olayi etiketlemedi, yani boyle bir olay ogrenilmedi bile.
+  const formRiskBlocked = form && conf.useZoneStop !== false && !levels
+
   let zoneStopUsed = false
   if (levels && isFinite(levels.invalid) && isFinite(levels.target) &&
       levels.riskAtr > 0 && levels.rewardAtr > 0) {
@@ -354,7 +378,8 @@ function evaluateTouch (touch, features, memory, prototypes, cfg, beforeTime) {
   const rrOk = rr >= minRr
   const evOk = expectancy >= minExpectancy
 
-  const fired = matchCount >= minMatches && winRate >= minWinRate && rrOk && evOk
+  const fired = matchCount >= minMatches && winRate >= minWinRate && rrOk && evOk &&
+    !formRiskBlocked
 
   // Gerekceler: sinyalin neden olustugu veya neden olusmadigi.
   if (!features || !features.shape) {
@@ -366,7 +391,8 @@ function evaluateTouch (touch, features, memory, prototypes, cfg, beforeTime) {
       reasons.push('Yalnızca ' + dateText(bt) + ' öncesindeki kayıtlar kullanıldı, ileriye bakma yok')
     }
     if (candidates.length === 0) {
-      reasons.push('Hafızada ' + events.length + ' kayıt tarandı, aynı yönde uygun aday bulunamadı')
+      reasons.push('Hafızada ' + events.length + ' kayıt tarandı, aynı yönde ve aynı türde (' +
+        (form ? 'kutu oluşumu' : 'bölge dokunuşu') + ') uygun aday bulunamadı')
     } else if (matchCount === 0) {
       reasons.push('Benzerlik eşiğini (' + minSimilarity.toFixed(2) + ') geçen kayıt yok, en yüksek benzerlik ' +
         bestSimilarity.toFixed(2))
@@ -381,10 +407,15 @@ function evaluateTouch (touch, features, memory, prototypes, cfg, beforeTime) {
   }
 
   if (zoneStopUsed) {
-    reasons.push('Giriş bölge kenarına limit emirle: ' + planEntry.toFixed(2) +
-      ' (dokunuş barı kapanışı ' + entry.toFixed(2) + ')')
-    reasons.push('Hedef ' + tp1.toFixed(2) + ' (kenardan ' + tp1Atr.toFixed(2) +
-      ' ATR), zarar durdur ' + sl.toFixed(2) + ' (' + slAtr.toFixed(2) +
+    if (form) {
+      reasons.push('Giriş onay barının kapanışı: ' + planEntry.toFixed(2) +
+        ' (fiyat henüz kutuya dönmediği için kenara limit emir konmaz)')
+    } else {
+      reasons.push('Giriş bölge kenarına limit emirle: ' + planEntry.toFixed(2) +
+        ' (dokunuş barı kapanışı ' + entry.toFixed(2) + ')')
+    }
+    reasons.push('Hedef ' + tp1.toFixed(2) + ' (' + (form ? 'girişten ' : 'kenardan ') +
+      tp1Atr.toFixed(2) + ' ATR), zarar durdur ' + sl.toFixed(2) + ' (' + slAtr.toFixed(2) +
       ' ATR), bölge orada kırılmış sayılır. R/R ' + rr.toFixed(2))
     reasons.push('Hafızanın öğrendiği "bölge tuttu" etiketi ile bu TP1/SL ikilisi aynı olaydır')
   }
@@ -395,6 +426,11 @@ function evaluateTouch (touch, features, memory, prototypes, cfg, beforeTime) {
   } else {
     reasons.push('Benzer kayıt olmadığı için plan varsayılan ' + FALLBACK_TP1_ATR.toFixed(1) +
       ' ATR hedef ve ' + FALLBACK_SL_ATR.toFixed(1) + ' ATR zararla dolduruldu')
+  }
+
+  if (formRiskBlocked) {
+    reasons.push('Kutu onaylanana kadar fiyat çok uzağa kaçtı, giriş ile geçersizlik ' +
+      'arası kabul edilen azami riski aşıyor, sinyal üretilmedi')
   }
 
   if (fired) {
@@ -410,6 +446,10 @@ function evaluateTouch (touch, features, memory, prototypes, cfg, beforeTime) {
       reasons.push('Risk/ödül yetersiz (' + rr.toFixed(2) + ' < ' + minRr.toFixed(2) +
         '), kapanış bölgeden uzak kaldığı için kurulum matematiksel olarak zararlı')
     }
+    if (form && matchCount >= minMatches && winRate >= minWinRate && rrOk && !evOk) {
+      reasons.push('Kutu oluşumunda giriş kapanıştan olduğu için risk, fiyatın pivottan ' +
+        'kaçtığı kadar büyür; bu kurulumda geçersizlik seviyesi ' + slAtr.toFixed(2) + ' ATR uzakta')
+    }
     if (matchCount >= minMatches && winRate >= minWinRate && rrOk && !evOk) {
       reasons.push('Beklenen değer yetersiz (' + expectancy.toFixed(2) + ' < ' +
         minExpectancy.toFixed(2) + ' risk birimi), sinyal üretilmedi')
@@ -417,8 +457,9 @@ function evaluateTouch (touch, features, memory, prototypes, cfg, beforeTime) {
   }
 
   return {
-    id: 'sig-' + num(t.zoneId, 0) + '-' + time,
+    id: 'sig-' + kind + '-' + num(t.zoneId, 0) + '-' + time,
     fired: fired,
+    kind: kind,
     time: time,
     bar: num(t.bar, -1),
     direction: direction,
@@ -432,7 +473,8 @@ function evaluateTouch (touch, features, memory, prototypes, cfg, beforeTime) {
     confidence: confidence,
     expectedMfeAtr: expectedMfeAtr,
     expectedMaeAtr: expectedMaeAtr,
-    // Islem plani girisi (bolge kenari). Dokunus barinin kapanisi `price` alaninda.
+    // Islem plani girisi: dokunus olayinda bolge kenari, form olayinda onay
+    // barinin kapanisi. Olay barinin kapanisi her durumda `price` alanindadir.
     entry: planEntry,
     tp1: tp1,
     tp2: tp2,

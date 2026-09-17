@@ -86,7 +86,11 @@ async function writeVecTmp(tmpPath, arr) {
 /**
  * Hafizayi diske yazar.
  * @param {string} basePath Uzantisiz temel yol
- * @param {{tf:string, ctxNames:string[], events:Array<Object>}} memory
+ * @param {{tf:string, ctxNames:string[], events:Array<Object>, builtToTime?:number}} memory
+ *        `builtToTime`: hafizanin uretildigi serinin SON bar zamani. Olaylarin
+ *        son zamani bunun cok gerisinde kalir (etiketleme ufku kadar ileri bar
+ *        gerekir ve olaylar seyrektir), bu yuzden "hafiza guncel mi" sorusu
+ *        yalnizca olay zamanina bakilarak cevaplanamaz.
  * @returns {Promise<{count:number, rowLen:number, jsonPath:string, vecPath:string}>}
  */
 async function saveMemory(basePath, memory) {
@@ -141,6 +145,7 @@ async function saveMemory(basePath, memory) {
     ctxLen: ctxLen,
     ctxNames: ctxNames,
     count: count,
+    builtToTime: Number.isFinite(mem.builtToTime) ? mem.builtToTime : 0,
     events: plain,
   }
 
@@ -269,6 +274,13 @@ async function statMemory(basePath) {
     tf: meta.tf || null,
     firstTime: Number.isFinite(firstTime) ? firstTime : 0,
     lastTime: Number.isFinite(lastTime) ? lastTime : 0,
+    // Baglam vektoru uzunlugu. Cagiran taraf bunu guncel features.CTX_NAMES ile
+    // karsilastirip hafizanin eski bir indikator surumunden kalip kalmadigini
+    // dosyayi tumuyle okumadan anlayabilir.
+    ctxLen: Number.isFinite(meta.ctxLen) ? meta.ctxLen : (Array.isArray(meta.ctxNames) ? meta.ctxNames.length : 0),
+    // Bu alani tasimayan eski dosyalarda 0 doner; cagiran taraf onu "guncelligi
+    // bilinmiyor" sayip bir kez yeniden tarar.
+    builtToTime: Number.isFinite(meta.builtToTime) ? meta.builtToTime : 0,
   }
 }
 

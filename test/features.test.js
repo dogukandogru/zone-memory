@@ -31,17 +31,17 @@ function seriKur (closes) {
   return series.fromArrays({ time, open, high, low, close: closes, volume })
 }
 
-/** Sozlesmedeki tum alanlari tasiyan ornek dokunus. */
-function dokunus (bar) {
+/** Sozlesmedeki tum alanlari tasiyan ornek olay (proZones ciktisi). */
+function dokunus (bar, kind) {
   return {
-    id: 1, zoneId: 1, isSupport: true, direction: 'BUY',
+    id: 1, zoneId: 1, kind: kind || 'touch', isSupport: true, direction: 'BUY',
     bar: bar, time: T0 + bar * ADIM, price: 100,
-    zoneTop: 100.5, zoneBottom: 99.5, zoneFlow: 2.5,
-    zoneAgeBars: 30, penetration: 0.4, atr: 1.0,
-    score: 5, maxScore: 8, qualified: true, strong: false, session: 'London',
+    zoneTop: 100.5, zoneBottom: 99.5, zoneFlow: 5.0,
+    zoneAgeBars: 30, penetration: 0.4, entryDistAtr: 1.0,
+    bbDistAtr: 0.6, volRatio: 1.5, atr: 1.0,
+    score: 3, maxScore: 5, qualified: true, strong: false, session: 'London',
     parts: {
-      flow: true, trend: false, volatility: true, session: true,
-      sweep: false, rejection: true, mss: false, fvg: false,
+      flow: true, trend: false, session: true, rejection: true, volume: false,
     },
   }
 }
@@ -50,8 +50,9 @@ function dokunus (bar) {
 function baglam (n) {
   const f = (v) => { const a = new Float64Array(n); a.fill(v); return a }
   return {
-    atr: f(1.0), atr200: f(1.0), rsi: f(55), sma20: f(99.5), sma50: f(98.5),
-    flowStrength: f(1.2),
+    atr: f(1.0), rsi: f(55), sma20: f(99.5), sma50: f(98.5),
+    bbBasis: f(100), bbUpper: f(101), bbLower: f(99),
+    volRatio: f(1.2), flowScore: f(3.6),
     bullTrend: new Uint8Array(n).fill(1),
     bearTrend: new Uint8Array(n),
     sessionIdx: new Uint8Array(n).fill(1),
@@ -80,8 +81,8 @@ test('sabitler sozlesmedeki degerler', () => {
     'rsi', 'atrPct', 'distSma20Atr', 'distSma50Atr',
     'hourSin', 'hourCos', 'dowSin', 'dowCos',
     'zoneWidthAtr', 'zoneAge', 'zoneFlow', 'penetration',
-    'scoreRatio', 'pFlow', 'pTrend', 'pVolatility', 'pSession',
-    'pSweep', 'pRejection', 'pMss', 'isSupport', 'trendState',
+    'scoreRatio', 'pFlow', 'pTrend', 'pSession', 'pRejection', 'pVolume',
+    'isSupport', 'trendState', 'isForm', 'bbDistAtr', 'volRatio', 'entryDistAtr',
   ])
   assert.equal(rowLength(), SHAPE_LEN + RET_LEN + CTX_NAMES.length)
 })
@@ -199,23 +200,39 @@ test('ctx: sozlesmedeki hesap kurallari (secili alanlar)', () => {
   assert.ok(Math.abs(f.ctx[idx('zoneWidthAtr')] - 0.2) < 1e-6)
   // min(zoneAgeBars / 120, 1) -> 30/120 = 0.25
   assert.ok(Math.abs(f.ctx[idx('zoneAge')] - 0.25) < 1e-6)
-  // clamp(zoneFlow, 0, 5) / 5 -> 2.5/5 = 0.5
+  // clamp(zoneFlow, 0, 10) / 10 -> 5.0/10 = 0.5 (flow skoru Pine'da 1..10)
   assert.ok(Math.abs(f.ctx[idx('zoneFlow')] - 0.5) < 1e-6)
   // penetration dogrudan
   assert.ok(Math.abs(f.ctx[idx('penetration')] - 0.4) < 1e-6)
-  // score / maxScore -> 5/8
-  assert.ok(Math.abs(f.ctx[idx('scoreRatio')] - 5 / 8) < 1e-6)
+  // score / maxScore -> 3/5
+  assert.ok(Math.abs(f.ctx[idx('scoreRatio')] - 3 / 5) < 1e-6)
   // parts bayraklari
   assert.equal(f.ctx[idx('pFlow')], 1)
   assert.equal(f.ctx[idx('pTrend')], 0)
-  assert.equal(f.ctx[idx('pVolatility')], 1)
   assert.equal(f.ctx[idx('pSession')], 1)
-  assert.equal(f.ctx[idx('pSweep')], 0)
   assert.equal(f.ctx[idx('pRejection')], 1)
-  assert.equal(f.ctx[idx('pMss')], 0)
+  assert.equal(f.ctx[idx('pVolume')], 0)
   // isSupport ve trendState
   assert.equal(f.ctx[idx('isSupport')], 1)
   assert.equal(f.ctx[idx('trendState')], 1)
+  // olay turu: ornek dokunus, form degil
+  assert.equal(f.ctx[idx('isForm')], 0)
+  // clamp(bbDistAtr, 0, 3) / 3 -> 0.6/3 = 0.2
+  assert.ok(Math.abs(f.ctx[idx('bbDistAtr')] - 0.2) < 1e-6)
+  // clamp(volRatio, 0, 3) / 3 -> 1.5/3 = 0.5
+  assert.ok(Math.abs(f.ctx[idx('volRatio')] - 0.5) < 1e-6)
+  // clamp(entryDistAtr, 0, 5) / 5 -> 1.0/5 = 0.2
+  assert.ok(Math.abs(f.ctx[idx('entryDistAtr')] - 0.2) < 1e-6)
+})
+
+test('ctx: isForm boyutu iki olay turunu ayirir', () => {
+  const n = 60
+  const s = seriKur(new Array(n).fill(100))
+  const c = baglam(n)
+  const idx = CTX_NAMES.indexOf('isForm')
+
+  assert.equal(buildFeatures(s, dokunus(50, 'touch'), c).ctx[idx], 0)
+  assert.equal(buildFeatures(s, dokunus(50, 'form'), c).ctx[idx], 1)
 })
 
 test('ctx: trendState bearTrend durumunda -1 olur', () => {

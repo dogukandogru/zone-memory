@@ -74,9 +74,93 @@ test('DEFAULT_OUTCOME_CFG sozlesmedeki degerler', () => {
     breakBufferAtr: 0.25,
     minTargetAtr: 0.25,
     entryMode: 'zoneEdge',
+    formTargetRr: 1.0,
+    maxFormRiskAtr: 3.0,
     tpAtr: 1.0,
     slAtr: 1.0,
   })
+})
+
+// ---------------------------------------------------------------------------
+// KUTU OLUSUM (kind = 'form') OLAYLARI
+// ---------------------------------------------------------------------------
+
+// Destek kutusu 99.4 - 100.2 arasinda, kutu onaylandiginda fiyat 100.8'de.
+// ATR 1 ve varsayilan ayarlarla:
+//   giris   = 100.80 (onay barinin kapanisi, kenara limit emir konmaz)
+//   gecersiz= 99.4 - 0.25 = 99.15
+//   risk    = 1.65 ATR
+//   hedef   = giris + formTargetRr * risk = 100.80 + 1.65 = 102.45
+const FORM_ALIS = {
+  bar: 5, kind: 'form', direction: 'BUY', isSupport: true,
+  price: 100.8, zoneTop: 100.2, zoneBottom: 99.4,
+}
+
+test('form olayinda giris onay barinin kapanisidir, kenar degil', () => {
+  const lv = zoneLevels(FORM_ALIS, 1, {})
+  assert.notEqual(lv, null)
+  assert.equal(lv.entryMode, 'close')
+  assert.ok(Math.abs(lv.entry - 100.8) < 1e-9, 'giris kapanis olmali: ' + lv.entry)
+  assert.ok(Math.abs(lv.invalid - 99.15) < 1e-9, 'gecersizlik uzak kenar olmali: ' + lv.invalid)
+})
+
+test('form olayinda hedef riskin kati kadar uzaktir (formTargetRr)', () => {
+  const lv = zoneLevels(FORM_ALIS, 1, {})
+  assert.ok(Math.abs(lv.riskAtr - 1.65) < 1e-9, 'risk: ' + lv.riskAtr)
+  assert.ok(Math.abs(lv.rewardAtr - 1.65) < 1e-9, 'formTargetRr 1.0 ile odul riske esit olmali')
+  assert.ok(Math.abs(lv.target - 102.45) < 1e-9, 'hedef: ' + lv.target)
+
+  // formTargetRr = 2 ile odul riskin iki kati.
+  const iki = zoneLevels(FORM_ALIS, 1, { formTargetRr: 2 })
+  assert.ok(Math.abs(iki.rewardAtr - 3.3) < 1e-9, 'odul: ' + iki.rewardAtr)
+
+  // 0 kapatir: hedef sabit targetAtr mesafesinde.
+  const kapali = zoneLevels(FORM_ALIS, 1, { formTargetRr: 0, targetAtr: 1.0 })
+  assert.ok(Math.abs(kapali.rewardAtr - 1.0) < 1e-9, 'odul: ' + kapali.rewardAtr)
+})
+
+test('form olayinda asiri risk maxFormRiskAtr ile elenir', () => {
+  // Fiyat kutudan cok uzakta: risk 1 ATR'lik olcekte 10 birimin ustunde.
+  const uzak = Object.assign({}, FORM_ALIS, { price: 110 })
+  assert.equal(zoneLevels(uzak, 1, {}), null, 'esigi asan form olayi seviye uretmemeli')
+  assert.notEqual(zoneLevels(uzak, 1, { maxFormRiskAtr: 0 }), null, '0 siniri kapatmali')
+})
+
+test('form olayinda giris gecersizligin ters tarafindaysa seviye kurulmaz', () => {
+  // Destek kutusu ama kapanis kutunun ta altinda: ortada islem yok.
+  const ters = Object.assign({}, FORM_ALIS, { price: 99 })
+  assert.equal(zoneLevels(ters, 1, {}), null)
+})
+
+test('form olayi etiketlenir: hedef once vurulursa respect', () => {
+  // Hedef 102.45; 8. barda 102.6 gorulur, gecersizlik (99.15) hic gorulmez.
+  const s = seriKur(20, { 8: { high: 102.6 } })
+  const o = labelTouch(s, FORM_ALIS, 1, { horizonBars: 5 })
+  assert.notEqual(o, null)
+  assert.equal(o.outcome, 'respect')
+  assert.equal(o.success, true)
+  assert.ok(Math.abs(o.entryPrice - 100.8) < 1e-9)
+  assert.ok(Math.abs(o.targetPrice - 102.45) < 1e-9)
+  assert.ok(Math.abs(o.invalidPrice - 99.15) < 1e-9)
+})
+
+test('form olayi etiketlenir: kutu kirilirsa break', () => {
+  const s = seriKur(20, { 7: { low: 99.0 } })
+  const o = labelTouch(s, FORM_ALIS, 1, { horizonBars: 5 })
+  assert.notEqual(o, null)
+  assert.equal(o.outcome, 'break')
+  assert.equal(o.success, false)
+  assert.equal(o.barsToOutcome, 2)
+})
+
+test('form olayinda olay barinin kendisi gecersizlik saymaz', () => {
+  // Dokunus olayinda giris kenardan limit emirle DOLDUGU icin olay barinin
+  // gecersizligi aninda kirilma sayilir. Form olayinda giris kapanistan
+  // oldugu icin boyle bir kural yoktur: emir bar kapaninca dolar.
+  const s = seriKur(20, { 5: { low: 99.0 } })
+  const o = labelTouch(s, FORM_ALIS, 1, { horizonBars: 5 })
+  assert.notEqual(o, null)
+  assert.notEqual(o.barsToOutcome, 0, 'olay barinda aninda kirilma yazilmamali')
 })
 
 test('TP once vurulursa outcome respect olur', () => {

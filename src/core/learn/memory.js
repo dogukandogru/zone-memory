@@ -3,25 +3,30 @@
 /**
  * Hafiza katmani (A6, sozlesme bolum 14).
  *
- * Gorev: indikatoru tarih boyunca calistirmak, uretilen ILK dokunuslari
- * etiketlemek, ozellik vektorlerini cikarmak ve hafiza kayitlarini (MemoryEvent)
- * uretmek. Etiketlenemeyen dokunuslar (ufku dolmayan, serinin sonuna yakin
- * olanlar) hafizaya girmez ama istatistiklerde sayilir.
+ * Gorev: indikatoru tarih boyunca calistirmak, uretilen olaylari etiketlemek,
+ * ozellik vektorlerini cikarmak ve hafiza kayitlarini (MemoryEvent) uretmek.
+ * Etiketlenemeyen olaylar (ufku dolmayan, serinin sonuna yakin olanlar)
+ * hafizaya girmez ama istatistiklerde sayilir.
+ *
+ * proZones iki tur olay uretir ve ikisi de ayni boru hattindan gecer:
+ *   kind = 'form'   kutunun dogdugu an
+ *   kind = 'touch'  fiyatin kutuya geri donup ilk kez dokundugu an
+ * Bir bolge her turden EN FAZLA BIR olay uretir.
  *
  * Sozlesme notlari:
  * - `extendMemory` artimli tarama icin seriyi bastan degil, son olayin
  *   epeyce oncesinden yeniden tarar. Yeniden taramada bolge kimlikleri (zoneId)
- *   ve dokunus kimlikleri (id) sifirdan numaralanir. Bu yuzden sozlesmede
+ *   ve olay kimlikleri (id) sifirdan numaralanir. Bu yuzden sozlesmede
  *   istenen "ayni zoneId + time" tekrar kontrolu tek basina yeterli degildir;
  *   asil koruma "hafizadaki son olay zamanindan SONRAKI olaylar" filtresidir.
  *   Iki kontrol de uygulanir, yeni olaylarin kimlikleri mevcut hafizanin
  *   ustune kaydirilarak tekillestirilir.
- * - Bir bolge yalnizca TEK bir ilk dokunus urettigi icin, hafizada zaten olayi
- *   olan bir bolgenin yeniden olay uretmesi mumkun degildir; kimlik kaydirmasi
- *   bu yuzden guvenlidir.
+ * - Tekrar anahtarina olay TURU de girer (kind + zoneId + time). Bir bolge
+ *   ayni barda hem form hem touch olayi uretemez, ama anahtarin turu tasimasi
+ *   ileride bu varsayim degisirse sessiz veri kaybini onler.
  */
 
-const { runIndicator, DEFAULT_PARAMS } = require('../indicator/masterTouch')
+const { runIndicator, DEFAULT_PARAMS } = require('../indicator/proZones')
 const { labelTouch, DEFAULT_OUTCOME_CFG } = require('./outcome')
 const { buildFeatures, CTX_NAMES, WINDOW_BARS } = require('./features')
 const { sliceSeries, lastIndexAtOrBefore } = require('../series')
@@ -60,6 +65,11 @@ function num (v, def) {
   return typeof v === 'number' && isFinite(v) ? v : def
 }
 
+/** Artimli taramada tekrar kontrolu icin olay anahtari. */
+function olayAnahtari (e) {
+  return (e.kind || 'touch') + '|' + e.zoneId + '|' + e.time
+}
+
 /**
  * Tarih boyunca indikatoru calistirir, ilk dokunuslari etiketler,
  * ozellik vektorlerini cikarir ve hafiza kaydini uretir.
@@ -93,6 +103,10 @@ function buildMemory (s, cfg, onProgress) {
   const scoreHist = []
 
   let qualified = 0
+  let formCount = 0
+  let touchCount = 0
+  let formStored = 0
+  let touchStored = 0
   let labeled = 0
   let respected = 0
   let broken = 0
@@ -103,13 +117,16 @@ function buildMemory (s, cfg, onProgress) {
   let sumMae = 0
 
   const labelProgress = scaleProgress(onProgress, 60, 100)
-  if (labelProgress) labelProgress(0, 'Dokunuslar etiketleniyor')
+  if (labelProgress) labelProgress(0, 'Olaylar etiketleniyor')
 
   for (let i = 0; i < n; i++) {
     const t = touches[i]
     if (!t) continue
 
     if (t.qualified) qualified++
+    const form = t.kind === 'form'
+    if (form) formCount++
+    else touchCount++
 
     // Skor histogrami: indeks = skor degeri.
     const sc = Math.max(0, Math.round(num(t.score, 0)))
@@ -137,21 +154,28 @@ function buildMemory (s, cfg, onProgress) {
       sumMae += num(outcome.maeAtr, 0)
     }
 
-    // Ikisi de yoksa bu dokunus hafizaya girmez, yalnizca sayilir.
+    // Ikisi de yoksa bu olay hafizaya girmez, yalnizca sayilir.
     if (features && outcome) {
       events.push(Object.assign({}, t, outcome, { features: features }))
+      if (form) formStored++
+      else touchStored++
     }
 
     if (labelProgress && ((i & 127) === 0 || i === n - 1)) {
-      labelProgress(((i + 1) / n) * 100, 'Dokunuslar etiketleniyor')
+      labelProgress(((i + 1) / n) * 100, 'Olaylar etiketleniyor')
     }
   }
 
   const stats = {
     bars: s && typeof s.length === 'number' ? s.length : 0,
     zonesCreated: num(scanStats.zonesCreated, zones.length),
-    zonesMergedAway: num(scanStats.zonesMergedAway, 0),
-    firstTouches: n,
+    zonesMerged: num(scanStats.zonesMerged, 0),
+    totalEvents: n,
+    formEvents: formCount,
+    touchEvents: touchCount,
+    formStored: formStored,
+    touchStored: touchStored,
+    firstTouches: touchCount,
     qualified: qualified,
     labeled: labeled,
     respected: respected,
@@ -251,7 +275,7 @@ function extendMemory (s, memory, cfg, onProgress) {
   // Mevcut hafizadaki (zoneId, time) ciftleri: sozlesmenin istedigi tekrar kontrolu.
   const seen = new Set()
   for (let i = 0; i < base.length; i++) {
-    seen.add(base[i].zoneId + '|' + base[i].time)
+    seen.add(olayAnahtari(base[i]))
   }
 
   const zoneIdMap = new Map()
@@ -262,7 +286,7 @@ function extendMemory (s, memory, cfg, onProgress) {
   for (let i = 0; i < scan.events.length; i++) {
     const e = scan.events[i]
     if (!(e.time > lastTime)) continue
-    const key = e.zoneId + '|' + e.time
+    const key = olayAnahtari(e)
     if (seen.has(key)) continue
     seen.add(key)
 
@@ -351,6 +375,9 @@ function summarize (memory) {
   }
 
   const byDirection = { BUY: emptyBucket(), SELL: emptyBucket() }
+  // Olay turu kirilimi: kutu olusumu ile bolgeye geri donus ayri kurulumlardir,
+  // ham basari oranlarinin da ayri okunmasi gerekir.
+  const byKind = { form: emptyBucket(), touch: emptyBucket() }
   const bySession = {}
   for (let i = 0; i < SESSION_NAMES.length; i++) bySession[SESSION_NAMES[i]] = emptyBucket()
   const yearMap = new Map()
@@ -385,6 +412,8 @@ function summarize (memory) {
     const dir = ev.direction === 'SELL' ? 'SELL' : 'BUY'
     pushBucket(byDirection[dir], ev)
 
+    pushBucket(byKind[ev.kind === 'form' ? 'form' : 'touch'], ev)
+
     const ses = typeof ev.session === 'string' && ev.session ? ev.session : 'Other'
     if (!bySession[ses]) bySession[ses] = emptyBucket()
     pushBucket(bySession[ses], ev)
@@ -405,6 +434,8 @@ function summarize (memory) {
 
   closeBucket(byDirection.BUY)
   closeBucket(byDirection.SELL)
+  closeBucket(byKind.form)
+  closeBucket(byKind.touch)
   const sessionKeys = Object.keys(bySession)
   for (let i = 0; i < sessionKeys.length; i++) closeBucket(bySession[sessionKeys[i]])
 
@@ -434,6 +465,7 @@ function summarize (memory) {
     firstTime: firstTime,
     lastTime: lastTime,
     byDirection: byDirection,
+    byKind: byKind,
     bySession: bySession,
     byYear: byYear,
   }

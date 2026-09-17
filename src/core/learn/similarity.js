@@ -265,6 +265,13 @@ function yiginKokDegistir (hSim, hIdx, boyut, sim, idx) {
  *
  * Filtreler:
  *   opts.direction        Yalnizca ayni yondeki kayitlar
+ *   opts.kind             Yalnizca ayni turdeki olaylar ('form' | 'touch').
+ *                         Kutunun DOGDUGU an ile fiyatin ona GERI DONDUGU an
+ *                         iki farkli kurulumdur: girisleri, riskleri ve tipik
+ *                         sonuclari ayridir. Karistirilirsa "gecmiste bu yapi
+ *                         %78 tuttu" cumlesi baska bir kurulumun istatistigini
+ *                         tasir. Kayitta `kind` yoksa 'touch' kabul edilir
+ *                         (eski hafiza dosyalari).
  *   opts.beforeTime       Yalnizca bu zamandan ONCEKI kayitlar (ileriye bakma yasagi)
  *   opts.excludeWithinSec opts.queryTime ile birlikte, sorgu zamanina bu kadar
  *                         yakin kayitlari eler (komsu dislama)
@@ -273,7 +280,7 @@ function yiginKokDegistir (hSim, hIdx, boyut, sim, idx) {
  *
  * @param {{shape:ArrayLike<number>, ret:ArrayLike<number>, ctx:ArrayLike<number>}} query
  * @param {{events:Array<Object>}|Array<Object>} memory
- * @param {{k?:number, direction?:string, excludeWithinSec?:number,
+ * @param {{k?:number, direction?:string, kind?:string, excludeWithinSec?:number,
  *          beforeTime?:number|null, queryTime?:number|null, weights?:Object}} [opts]
  * @returns {Array<{event:Object, shapeSim:number, ctxSim:number, dtwSim:number, similarity:number}>}
  */
@@ -285,6 +292,7 @@ function knn (query, memory, opts) {
   const k = Number.isFinite(o.k) && o.k > 0 ? Math.floor(o.k) : 25
   const w = agirliklariCoz(o.weights)
   const yon = o.direction ? o.direction : null
+  const tur = o.kind ? o.kind : null
   const oncesi = Number.isFinite(o.beforeTime) ? o.beforeTime : null
   const sorguZamani = Number.isFinite(o.queryTime) ? o.queryTime : null
   const komsuSec = sorguZamani !== null && Number.isFinite(o.excludeWithinSec) && o.excludeWithinSec > 0
@@ -322,6 +330,7 @@ function knn (query, memory, opts) {
     const f = ev.features
     if (!f || !f.shape) continue
     if (yon !== null && ev.direction !== yon) continue
+    if (tur !== null && (ev.kind || 'touch') !== tur) continue
 
     const t = ev.time
     if (oncesi !== null && !(t < oncesi)) continue

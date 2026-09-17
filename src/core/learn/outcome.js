@@ -1,11 +1,30 @@
 'use strict'
 
 /**
- * Dokunus etiketleme (A4).
+ * Olay etiketleme (A4).
  *
- * Bir bolgeye yapilan ILK dokunusun, bolgeye saygi gosterilip gosterilmedigini
- * ileri barlara bakarak etiketler. Destek dokunusu BUY, direnc dokunusu SELL
- * yonundedir. Giris fiyati dokunus barinin kapanisidir.
+ * Bir bolge olayinin, bolgeye saygi gosterilip gosterilmedigini ileri barlara
+ * bakarak etiketler. Destek olayi BUY, direnc olayi SELL yonundedir.
+ *
+ * ----------------------------------------------------------------------------
+ * IKI OLAY TURU
+ * ----------------------------------------------------------------------------
+ * proZones indikatoru iki tur olay uretir ve girisleri farklidir:
+ *
+ *   kind = 'touch'  Fiyat bolgeye geri donup dokundu. Giris, bolgenin YAKIN
+ *                   kenarina limit emirdir (entryMode = 'zoneEdge'): dokunus
+ *                   tanimi geregi fiyat o kenari gecmistir, yani emir dolar.
+ *
+ *   kind = 'form'   Kutu yeni dogdu, fiyat kutunun icinde DEGIL. Kenara limit
+ *                   emir konamaz (fiyat oraya donmeyebilir), bu yuzden giris
+ *                   onay barinin KAPANISIDIR. Gecersizlik yine bolgenin UZAK
+ *                   kenaridir: kutu kirilirsa fikir olmustur. Hedef girise
+ *                   targetAtr kadar uzaktir.
+ *
+ * Form olayinda risk, kapanis ile uzak kenar arasindaki mesafedir; bu mesafe
+ * dokunus olayindakinden buyuktur ve kurulumdan kuruluma degisir. Bu kasitlidir:
+ * fiyat pivottan ne kadar kactiysa risk o kadar buyuktur ve sinyal katmanindaki
+ * beklenen deger filtresi (minExpectancy) bunu dogrudan cezalandirir.
  *
  * ----------------------------------------------------------------------------
  * IKI ETIKETLEME MODU
@@ -68,6 +87,32 @@ const DEFAULT_OUTCOME_CFG = {
   // %25'e dusuruyordu. Kenardan giris ile risk ve odul yalnizca bolge
   // geometrisine baglidir, sabittir ve ters secim ortadan kalkar.
   entryMode: 'zoneEdge',
+  // KUTU OLUSUM (kind = 'form') OLAYLARINDA HEDEF
+  // ---------------------------------------------------------------------
+  // Dokunus olayinda risk sabittir: giris bolgenin kenari, gecersizlik uzak
+  // kenar, yani risk her zaman bolge yuksekligi + tampon kadardir. Form
+  // olayinda oyle degil: giris onay barinin kapanisidir ve fiyat pivottan ne
+  // kadar kactiysa risk o kadar buyuktur. Hedef sabit bir ATR mesafesi olarak
+  // birakilirsa risk/odul kurulumdan kuruluma 0.3 ile 2.0 arasinda savrulur ve
+  // "gecmiste bu yapi %70 tuttu" cumlesi karsilastirilamaz seylerin ortalamasi
+  // olur.
+  //
+  // Bu yuzden form olayinda hedef RISKIN KATI olarak konur: formTargetRr = 1.0,
+  // hedef tam olarak bir risk birimi uzaktadir. Boylece tum form olaylari tek
+  // eksende (isabet orani) karsilastirilabilir hale gelir, tipki dokunus
+  // olaylarindaki sabit geometri gibi. Riski buyuk olan kurulumun hedefi de
+  // uzaktir, yani vurulmasi zordur; ceza otomatik ve olculebilirdir.
+  //
+  // 0 yapilirsa form olayinda da sabit targetAtr mesafesi kullanilir.
+  formTargetRr: 1.0,
+  // Form olayinda kabul edilen azami risk, ATR biriminde. Pivot onaylanana
+  // kadar fiyat cok uzaga kacmissa (sivri bir fitil dibi gibi) giris ile
+  // gecersizlik arasi onlarca ATR olabilir. Boyle bir kurulum gercekte
+  // islenmez; hafizaya girerse hem kendi istatistigini bozar hem de plan
+  // hedeflerini sisirir. Bu esigi asan form olaylari ETIKETLENMEZ, yani
+  // hafizaya hic girmez (istatistikte `noLabel` olarak sayilir).
+  // 0 veya negatif verilirse sinir uygulanmaz.
+  maxFormRiskAtr: 3.0,
   // 'atr' modu
   tpAtr: 1.0,
   slAtr: 1.0,
@@ -78,7 +123,7 @@ const DEFAULT_OUTCOME_CFG = {
  * Sinyal modulu de ayni seviyeleri kullanir, boylece etiket ile islem plani
  * birbirinden ayrismaz.
  *
- * @param {Object} touch  Touch (zoneTop, zoneBottom, price, isSupport/direction)
+ * @param {Object} touch  Olay (kind, zoneTop, zoneBottom, price, isSupport/direction)
  * @param {number} atr    Dokunus barindaki ATR
  * @param {Object} [cfg]
  * @returns {{entry:number, target:number, invalid:number, sign:number,
@@ -100,7 +145,11 @@ function zoneLevels (touch, atr, cfg) {
   const targetAtr = sayi(c.targetAtr, DEFAULT_OUTCOME_CFG.targetAtr)
   const bufferAtr = sayi(c.breakBufferAtr, DEFAULT_OUTCOME_CFG.breakBufferAtr)
   const minTargetAtr = sayi(c.minTargetAtr, DEFAULT_OUTCOME_CFG.minTargetAtr)
-  const entryMode = c.entryMode === 'close' ? 'close' : 'zoneEdge'
+
+  // Kutu olusum olayinda fiyat bolgenin icinde degildir, o yuzden kenara limit
+  // emir konamaz: giris her zaman onay barinin kapanisidir.
+  const form = touch.kind === 'form'
+  const entryMode = form ? 'close' : (c.entryMode === 'close' ? 'close' : 'zoneEdge')
 
   // Bolgenin YAKIN kenari: destekte ust, dirençte alt.
   const edge = yukari ? zt : zb
@@ -118,13 +167,37 @@ function zoneLevels (touch, atr, cfg) {
   // Gecersizlik: bolgenin UZAK kenarindan disari tasma.
   const invalid = yukari ? zb - bufferAtr * a : zt + bufferAtr * a
 
-  // Hedef: bolgenin YAKIN kenarindan targetAtr kadar uzakta. Giris kenarda
-  // oldugunda odul tam olarak targetAtr'dir. Giris kapanistan alindiginda ve
-  // kapanis hedefin otesinde kaldiginda dejenere "aninda basarili" durumu
-  // olusmasin diye taban konur.
-  let target = yukari ? edge + targetAtr * a : edge - targetAtr * a
+  // Giris zaten gecersizlik tarafindaysa ortada islem yoktur. Form olayinda
+  // olabilir: pivot onaylanana kadar fiyat kutunun ta obur tarafina gecmis
+  // olabilir. Boyle olaylar etiketlenmez, hafizaya girmez.
+  if (!(sign * (entry - invalid) > 0)) return null
+
+  // Hedef.
+  //   dokunus : bolgenin YAKIN kenarindan targetAtr kadar uzakta (giris zaten
+  //             kenarda oldugu icin odul tam targetAtr olur)
+  //   form    : formTargetRr > 0 ise riskin kati kadar uzakta, degilse
+  //             giristen targetAtr kadar uzakta
+  // Taban, kapanis hedefin otesinde kaldiginda dejenere "aninda basarili"
+  // durumunu engeller.
+  const formRr = sayi(c.formTargetRr, DEFAULT_OUTCOME_CFG.formTargetRr)
+  let target
+  if (form) {
+    target = formRr > 0
+      ? entry + sign * formRr * Math.abs(entry - invalid)
+      : entry + sign * targetAtr * a
+  } else {
+    target = yukari ? edge + targetAtr * a : edge - targetAtr * a
+  }
   const taban = entry + sign * minTargetAtr * a
   target = yukari ? Math.max(target, taban) : Math.min(target, taban)
+
+  const riskAtr = Math.abs(entry - invalid) / a
+
+  // Fiyat pivottan cok kactiysa form kurulumu gercekte islenemez.
+  if (form) {
+    const maxRisk = sayi(c.maxFormRiskAtr, DEFAULT_OUTCOME_CFG.maxFormRiskAtr)
+    if (maxRisk > 0 && riskAtr > maxRisk) return null
+  }
 
   return {
     entry,
@@ -132,7 +205,7 @@ function zoneLevels (touch, atr, cfg) {
     invalid,
     sign,
     entryMode,
-    riskAtr: Math.abs(entry - invalid) / a,
+    riskAtr,
     rewardAtr: Math.abs(target - entry) / a,
   }
 }

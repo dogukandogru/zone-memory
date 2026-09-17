@@ -12,6 +12,11 @@
  * Referans: ../indicator2/backend/app/services/features.py
  * Fark: sekil vektoru artik ham 32 getiri yerine yumusatilmis 16 kovadir,
  * baglam ise bolge ve skor bilesenleriyle genisletilmistir.
+ *
+ * Baglam vektoru proZones indikatorune baglidir: skor bilesenleri (pFlow,
+ * pTrend, pSession, pRejection, pVolume) onun urettigi `parts` anahtarlarinin
+ * birebir karsiligidir. CTX_NAMES degisirse eski hafiza dosyalari uyumsuz
+ * kalir; motor bunu yakalayip yeniden tarama ister (engine.worker.js).
  */
 
 const SHAPE_LEN = 16
@@ -25,8 +30,8 @@ const CTX_NAMES = [
   'rsi', 'atrPct', 'distSma20Atr', 'distSma50Atr',
   'hourSin', 'hourCos', 'dowSin', 'dowCos',
   'zoneWidthAtr', 'zoneAge', 'zoneFlow', 'penetration',
-  'scoreRatio', 'pFlow', 'pTrend', 'pVolatility', 'pSession',
-  'pSweep', 'pRejection', 'pMss', 'isSupport', 'trendState',
+  'scoreRatio', 'pFlow', 'pTrend', 'pSession', 'pRejection', 'pVolume',
+  'isSupport', 'trendState', 'isForm', 'bbDistAtr', 'volRatio', 'entryDistAtr',
 ]
 
 const CTX_LEN = CTX_NAMES.length
@@ -176,6 +181,12 @@ function baglamVektoru (s, touch, ctxArr, bar) {
   const bull = dizi(c.bullTrend, bar)
   const bear = dizi(c.bearTrend, bar)
 
+  // Olay turu: kutunun DOGDUGU an mi, geri donup DOKUNDUGU an mi. Benzerlik
+  // motoru zaten turleri birbirine karsi eslestirmiyor (bkz. similarity.knn
+  // `kind` filtresi), bu boyut yine de kume ve prototip katmaninda iki grubu
+  // ayirt edilebilir tutuyor.
+  const form = touch.kind === 'form' ? 1 : 0
+
   out[0] = rsi / 100
   out[1] = price > 0 && atrVar ? Math.min((atr / price) * 100, 1) : 0
   out[2] = atrVar ? kirp((price - sma20) / atr, -5, 5) / 5 : 0
@@ -186,18 +197,25 @@ function baglamVektoru (s, touch, ctxArr, bar) {
   out[7] = Math.cos((IKI_PI * gun) / 7)
   out[8] = atrVar ? kirp((zoneTop - zoneBottom) / atr, 0, 5) / 5 : 0
   out[9] = Math.min(Math.max(+touch.zoneAgeBars, 0) / 120, 1)
-  out[10] = kirp(+touch.zoneFlow, 0, 5) / 5
+  // Flow skoru Pine'da 1..10 arasindadir, olcek tam bu araliktan gelir.
+  out[10] = kirp(+touch.zoneFlow, 0, 10) / 10
   out[11] = kirp(+touch.penetration, 0, 1)
   out[12] = maxScore > 0 ? +touch.score / maxScore : 0
   out[13] = parts.flow ? 1 : 0
   out[14] = parts.trend ? 1 : 0
-  out[15] = parts.volatility ? 1 : 0
-  out[16] = parts.session ? 1 : 0
-  out[17] = parts.sweep ? 1 : 0
-  out[18] = parts.rejection ? 1 : 0
-  out[19] = parts.mss ? 1 : 0
-  out[20] = touch.isSupport ? 1 : 0
-  out[21] = bull ? 1 : (bear ? -1 : 0)
+  out[15] = parts.session ? 1 : 0
+  out[16] = parts.rejection ? 1 : 0
+  out[17] = parts.volume ? 1 : 0
+  out[18] = touch.isSupport ? 1 : 0
+  out[19] = bull ? 1 : (bear ? -1 : 0)
+  out[20] = form
+  // Pivotun Bollinger bandindan ne kadar disari tastigi: asiriligin derinligi.
+  out[21] = kirp(+touch.bbDistAtr, 0, 3) / 3
+  // Olay barinin hacim gucu (hacim / hacim ortalamasi), 3 kati tavan sayilir.
+  out[22] = kirp(+touch.volRatio, 0, 3) / 3
+  // Kapanisin bolgenin yakin kenarindan uzakligi. Form olayinda fiyatin
+  // pivottan ne kadar kactigini olcer, temas olayinda sifira yakindir.
+  out[23] = kirp(+touch.entryDistAtr, 0, 5) / 5
 
   // Sozlesme geregi tum baglam degerleri sonlu olmali.
   for (let i = 0; i < CTX_LEN; i++) {

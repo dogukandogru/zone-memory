@@ -1,10 +1,25 @@
 'use strict'
 
 /**
- * Zaman dilimine gore olculmus hazir ayarlar.
+ * Zaman dilimine gore hazir ayarlar.
  *
+ * ============================================================================
+ * DIKKAT: BU DEGERLER ESKI INDIKATORLE OLCULDU
+ * ============================================================================
+ * Asagidaki sayilar MASTER 1 TOUCH indikatoruyle (kaldirilan masterTouch.js)
+ * yapilan taramadan gelir. Uygulama artik "proje son versiyon 3" indikatoruyle
+ * (indicator/proZones.js) calisiyor: kutu olusum kurallari, sinyal turleri ve
+ * ozellik vektoru tamamen degisti.
+ *
+ * Bu yuzden buradaki degerler YENI INDIKATOR ICIN DOGRULANMIS DEGILDIR. Makul
+ * bir baslangic noktasi olarak duruyorlar. Yeniden aramak icin Test sekmesinde
+ * yuruyen ileri testi farkli esiklerle calistirin ve ozetteki `byKind`
+ * tablosuna (iki sinyal turunun ayri kirilimi) bakin.
+ *
+ * Yontemin kendisi gecerlidir ve aynen tekrarlanabilir; asagidaki aciklama
+ * bu yuzden korundu.
  * ----------------------------------------------------------------------------
- * BU DEGERLER TAHMIN DEGIL, OLCUM
+ * ESKI INDIKATORUN OLCUMU
  * ----------------------------------------------------------------------------
  * Yontem: 6.086.450 adet 1 dakikalik XAUUSD mumu (2009-03 .. 2026-07) uzerinde
  * yuruyen ileri test. Gecmis ikiye bolundu:
@@ -87,7 +102,10 @@ const PRESETS = {
   },
 }
 
-/** Önerilen varsayılan zaman dilimi. */
+/**
+ * Onerilen varsayilan zaman dilimi. Bu secim de eski indikatorun olcumune
+ * dayanir; yeni indikatorde hangi zaman diliminin en dengeli oldugu olculmedi.
+ */
 const DEFAULT_TF = '5m'
 
 /**
