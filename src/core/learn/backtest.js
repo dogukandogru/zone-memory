@@ -16,15 +16,27 @@
  *   arayuz tarafinin dikkat etmesi gerekir.
  * - Sozlesmede yalnizca `runBacktest` listelenmisti; `DEFAULT_BACKTEST_CFG`
  *   yalnizca EK olarak disa aciliyor, mevcut imzalarin hicbiri degismedi.
+ *
+ * IKI KOSU YOLU (A2)
+ * ---------------------------------------------------------------------------
+ *   runBacktest           REFERANS YOL: her olayda kNN'i bastan hesaplar.
+ *   runBacktestFromCache  AYNI testi, komsulari learn/candcache.js'ten okur.
+ * Ikisi de ayni ic cekirdegi (`yuruyenIleriTest`) kullanir; aralarindaki TEK
+ * fark komsularin nereden geldigidir. Muhasebe, taban orani, istatistik ve
+ * ozet uretimi bir kez yazilmistir: iki kopya tutulsa biri gunun birinde
+ * degisir ve onbellekli sonuc sessizce referanstan sapardi.
  */
 
-const { DEFAULT_SIGNAL_CFG, evaluateTouch } = require('./signal')
+const { DEFAULT_SIGNAL_CFG, evaluateTouch, decideFromCandidates } = require('./signal')
+const candcache = require('./candcache')
 const stats = require('./stats')
 
 /** Varsayilan test ayarlari. */
 const DEFAULT_BACKTEST_CFG = {
   warmupEvents: 500, // Ilk bu kadar olay yalnizca hafiza olarak kullanilir
-  embargoSec: 86400, // Olay zamanindan bu kadar once biten kayitlar aday olabilir
+  // Olay zamanindan bu kadar once biten kayitlar aday olabilir. Deger
+  // candcache.js'ten gelir: aday havuzu kurali iki modulde ortak.
+  embargoSec: candcache.DEFAULT_EMBARGO_SEC,
   signalCfg: null, // null ise DEFAULT_SIGNAL_CFG kullanilir
   // ISLEM MALIYETI (gidis-donus), FIYAT BIRIMINDE, yani XAUUSD icin dolar.
   //
@@ -157,16 +169,23 @@ function yearOf(timeSec) {
 }
 
 /**
- * Yuruyen ileri test. Her olay yalnizca KENDINDEN ONCEKI hafizayla
- * degerlendirilir; ileriye bakma kesinlikle yasaktir.
+ * Yuruyen ileri testin IC CEKIRDEGI. Her olay yalnizca KENDINDEN ONCEKI
+ * hafizayla degerlendirilir; ileriye bakma kesinlikle yasaktir.
+ *
+ * Disa acilan iki yol (`runBacktest` ve `runBacktestFromCache`) bu fonksiyonu
+ * cagirir; tek fark `sinyalUret` argumaninda, yani komsularin nereden
+ * geldigindedir.
  *
  * @param {{events:Array, tf?:string, ctxNames?:string[]}} memory
  * @param {Array} prototypes
  * @param {{signalCfg:object, warmupEvents:number, embargoSec:number}} cfg
  * @param {(pct:number, msg:string)=>void} [onProgress]
+ * @param {null|((ev:Object, i:number, events:Array, poolMemory:Object,
+ *          beforeTime:number)=>Object)} [sinyalUret] null ise referans yol
+ *        (her olayda kNN) kullanilir.
  * @returns {{trades:Trade[], summary:Summary, byYear:Array, equity:Array<{time:number,value:number}>}}
  */
-function runBacktest(memory, prototypes, cfg, onProgress) {
+function yuruyenIleriTest(memory, prototypes, cfg, onProgress, sinyalUret) {
   const conf = Object.assign({}, DEFAULT_BACKTEST_CFG, cfg || {})
   const signalCfg = Object.assign({}, DEFAULT_SIGNAL_CFG, conf.signalCfg || {})
   const protos = Array.isArray(prototypes) ? prototypes : []
@@ -192,11 +211,12 @@ function runBacktest(memory, prototypes, cfg, onProgress) {
   const rawEvents = memory && Array.isArray(memory.events) ? memory.events : []
   if (rawEvents.length === 0) return emptyResult(0, 0, warmup, embargoSec)
 
-  // Zamana gore artan sirala. Cagiranin dizisini bozmamak icin kopya alinir.
-  const sorted = rawEvents.slice()
-  sorted.sort(function (a, b) {
-    return a.time - b.time
-  })
+  // Zamana gore artan sirala ve ozellik vektoru olanlari ayir. Bu iki adim
+  // candcache.js'te TEK BIR yerde tanimli: onbellekteki aday indeksleri de
+  // ayni `events` dizisine gore verildigi icin siralama iki modulde birebir
+  // ayni olmak zorundadir.
+  const hazir = candcache.prepareEvents(memory)
+  const sorted = hazir.sorted
 
   // Ham sayim (bilgi amacli): tum etiketlenmis olaylarin basari orani.
   // DIKKAT: bu sayi taban olarak KULLANILMAZ. Iki olay turunun taban orani
@@ -215,10 +235,7 @@ function runBacktest(memory, prototypes, cfg, onProgress) {
   const rawWinRate = labeled > 0 ? labeledWins / labeled : 0
 
   // Yalnizca ozellik vektoru olan olaylar hem sorgu hem aday olabilir.
-  const events = []
-  for (let i = 0; i < sorted.length; i++) {
-    if (sorted[i].features) events.push(sorted[i])
-  }
+  const events = hazir.events
   const n = events.length
   if (n === 0) return emptyResult(rawWinRate, labeled, warmup, embargoSec)
 
@@ -293,22 +310,10 @@ function runBacktest(memory, prototypes, cfg, onProgress) {
   }
 
   // Bir olayin sonucunun belli oldugu zaman. Eski hafizada alan yoksa ufuk
-  // sonu (olay zamani + ufuk * bar suresi) ile tahmin edilir.
-  const tfSecTest = (function () {
-    try {
-      return require('../tf').tfSeconds(memory && memory.tf ? memory.tf : '15m')
-    } catch (err) {
-      return 900
-    }
-  })()
-  const ufukBar = Math.max(1, Math.floor(Number(
-    (signalCfg && signalCfg.outcomeCfg && signalCfg.outcomeCfg.horizonBars) || 48
-  )))
-  function cozumZamani (e) {
-    const r = Number(e && e.resolvedTime)
-    if (Number.isFinite(r) && r > 0) return r
-    return Number(e.time) + ufukBar * tfSecTest
-  }
+  // sonu (olay zamani + ufuk * bar suresi) ile tahmin edilir. Kural
+  // candcache.js'te tek bir yerde tanimlidir; onbellek ayni havuzu kurmak
+  // zorunda oldugu icin iki yerde yazilamaz.
+  const cozumZamani = candcache.cozumZamaniFabrikasi(memory, signalCfg)
 
   const step = Math.max(1, Math.floor(n / 100))
   if (typeof onProgress === 'function') onProgress(0, 'Yürüyen ileri test başlıyor')
@@ -355,7 +360,11 @@ function runBacktest(memory, prototypes, cfg, onProgress) {
 
     kb.total++
     total++
-    const sig = evaluateTouch(ev, ev.features, poolMemory, protos, signalCfg, beforeTime)
+    // Komsular ya burada kNN ile hesaplanir (referans yol) ya da onbellekten
+    // okunur. Karar mantigi her iki durumda ayni fonksiyondan gelir.
+    const sig = typeof sinyalUret === 'function'
+      ? sinyalUret(ev, i, events, poolMemory, beforeTime)
+      : evaluateTouch(ev, ev.features, poolMemory, protos, signalCfg, beforeTime)
 
     // TABAN: ayni olay, ayni maliyet, kendi etiket seviyeleriyle "secim
     // yapmadan al" senaryosu. Isinma sonrasi donemde ve TUR BAZINDA birikir.
@@ -798,6 +807,91 @@ function runBacktest(memory, prototypes, cfg, onProgress) {
   }
 }
 
+/**
+ * REFERANS YOL. Her olayda kNN'i bastan hesaplar; sonuc, sistemin dogruluk
+ * olcusudur. Onbellekli yol bununla karsilastirilarak dogrulanir
+ * (test/backtest.test.js esdegerlik testi).
+ *
+ * @param {{events:Array, tf?:string, ctxNames?:string[]}} memory
+ * @param {Array} prototypes
+ * @param {{signalCfg:object, warmupEvents:number, embargoSec:number}} cfg
+ * @param {(pct:number, msg:string)=>void} [onProgress]
+ * @returns {{trades:Trade[], summary:Summary, byYear:Array, equity:Array<{time:number,value:number}>}}
+ */
+function runBacktest(memory, prototypes, cfg, onProgress) {
+  return yuruyenIleriTest(memory, prototypes, cfg, onProgress, null)
+}
+
+/**
+ * ONBELLEKLI YOL. `runBacktest` ile BIREBIR ayni trades/summary ciktisini
+ * uretir ama komsulari hesaplamak yerine `candcache.buildCandidates` ciktisindan
+ * okur. Parametre taramasi (onlarca esik denemesi) icindir: esik degistiginde
+ * komsular degismedigi icin onbellek bir kez kurulur.
+ *
+ * Benzerlik esigi (minSimilarity) BURADA UYGULANMAZ, onbellekten gelen adaylar
+ * oldugu gibi `decideFromCandidates`e verilir: esik suzgeci o fonksiyonun
+ * icinde TEK BIR yerde tanimlidir. Burada bir kez daha suzmek yalnizca
+ * "en yuksek benzerlik" gerekcesini bozar, karari degistirmez.
+ *
+ * @param {{events:Array, tf?:string, ctxNames?:string[]}} memory
+ * @param {{n:number, k:number, idx:Int32Array, sim:Float32Array}} cache
+ * @param {Array} protos
+ * @param {{signalCfg:object, warmupEvents:number, embargoSec:number}} cfg
+ * @param {(pct:number, msg:string)=>void} [onProgress]
+ * @returns {{trades:Trade[], summary:Summary, byYear:Array, equity:Array<{time:number,value:number}>}}
+ */
+function runBacktestFromCache(memory, cache, protos, cfg, onProgress) {
+  if (!cache || !cache.idx || !cache.sim) {
+    throw new Error('runBacktestFromCache: gecerli bir komsu onbellegi gerekli')
+  }
+  const k = Math.max(0, Math.floor(Number(cache.k)))
+  const n = Math.max(0, Math.floor(Number(cache.n)))
+  if (!(k > 0)) throw new Error('runBacktestFromCache: onbellekte k degeri yok')
+
+  // Onbellegin hangi hafiza icin kuruldugu burada dogrulanir. Yanlis onbellek
+  // sessizce bos aday listesi uretip "hicbir sinyal olusmadi" gibi gorunurdu.
+  // Yalnizca sayilir, siralanmaz: bu dogrulama esik taramasinda her kosuda
+  // yapiliyor ve siralama maliyeti bosa giderdi.
+  const hamOlaylar = memory && Array.isArray(memory.events) ? memory.events : []
+  let beklenenN = 0
+  for (let i = 0; i < hamOlaylar.length; i++) {
+    if (hamOlaylar[i] && hamOlaylar[i].features) beklenenN++
+  }
+  if (n !== beklenenN) {
+    throw new Error('runBacktestFromCache: onbellek ' + n + ' olay icin kurulmus, hafizada ' +
+      beklenenN + ' uygun olay var')
+  }
+
+  const conf = Object.assign({}, DEFAULT_BACKTEST_CFG, cfg || {})
+  const signalCfg = Object.assign({}, DEFAULT_SIGNAL_CFG, conf.signalCfg || {})
+  const protolar = Array.isArray(protos) ? protos : []
+  const idx = cache.idx
+  const sim = cache.sim
+
+  function onbellektenSinyal (ev, i, events, poolMemory, beforeTime) {
+    const adaylar = []
+    const off = i * k
+    for (let j = 0; j < k; j++) {
+      const g = idx[off + j]
+      // -1 yuvasi "bu satirda daha fazla aday yok" demektir.
+      if (g < 0) break
+      const olay = events[g]
+      if (olay === undefined) continue
+      adaylar.push({ event: olay, similarity: sim[off + j] })
+    }
+    return decideFromCandidates(ev, adaylar, undefined, signalCfg, {
+      features: ev.features || null,
+      prototypes: protolar,
+      // Gerekce cumlesindeki "hafizada N kayit tarandi" sayisi referans yolla
+      // ayni kalsin diye o andaki aday havuzunun boyu gecilir.
+      scanned: poolMemory.events.length,
+      beforeTime: beforeTime,
+    })
+  }
+
+  return yuruyenIleriTest(memory, protolar, cfg, onProgress, onbellektenSinyal)
+}
+
 /** Degeri [lo, hi] araligina kirpar. */
 function kirp (x, lo, hi) {
   if (!Number.isFinite(x)) return 0
@@ -899,6 +993,7 @@ function baseResult (ev, costCfg) {
 module.exports = {
   DEFAULT_BACKTEST_CFG,
   runBacktest,
+  runBacktestFromCache,
   tradeResult,
   baseResult,
 }

@@ -12,7 +12,8 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
 
-const { runBacktest, DEFAULT_BACKTEST_CFG } = require('../src/core/learn/backtest')
+const { runBacktest, runBacktestFromCache, DEFAULT_BACKTEST_CFG } = require('../src/core/learn/backtest')
+const candcache = require('../src/core/learn/candcache')
 const fixtures = require('./helpers/fixtures')
 
 const GUN = fixtures.GUN
@@ -566,4 +567,178 @@ test('istatistik: bilinen girdilerde Wilson ve binom degerleri', () => {
   // Permutasyon: havuzun tamami 1 ise rastgele secim de her zaman 1 verir.
   assert.equal(stats.permutationP([1, 1, 1, 1], 2, 1, { reps: 50 }), 1)
   assert.equal(stats.permutationP([0, 0, 0, 0], 2, 0.5, { reps: 50 }), 0)
+})
+
+// ---------------------------------------------------------------------------
+// A2 - KOMSU ONBELLEGI (src/core/learn/candcache.js)
+// ---------------------------------------------------------------------------
+// Onbellegin tek iddiasi var: AYNI sonucu daha hizli uretmek. Bu yuzden asil
+// test hiz degil ESDEGERLIKTIR. Esik degistiginde komsular degismedigi icin
+// onbellek BIR KEZ kurulur ve butun esik denemeleri ondan kosar; asagidaki
+// test tam olarak bunu yapar ve her denemede referans yolla (runBacktest)
+// birebir ayni cikti bekler.
+
+/** Onbellek testleri icin taban ayarlar. */
+const ONBELLEK_CFG = { warmupEvents: 5, warmupPerBucket: 0, embargoSec: 0 }
+
+/**
+ * Karisik (form/dokunus, BUY/SELL) ve RASTGELE ozellik vektorlu hafiza.
+ * Sabit vektorle benzerlik hep 1.0 cikar ve esik taramasi hicbir seyi
+ * ayirt edemezdi; rastgele vektor benzerlikleri esige yayar.
+ */
+function onbellekHafizasi (tohum) {
+  const rnd = fixtures.prng(tohum === undefined ? 4242 : tohum)
+  return fixtures.hafizaKur({
+    adet: 200,
+    basarili: 120,
+    tf: '15m',
+    aralik: 5 * GUN,
+    kind: (i) => (i % 3 === 0 ? 'form' : 'touch'),
+    yon: (i) => (i % 2 === 0 ? 'BUY' : 'SELL'),
+    ozellik: () => fixtures.rastgeleOzellik(rnd),
+  })
+}
+
+/** Esik uclusunu tam test ayarina cevirir. */
+function esikCfg (esik) {
+  return Object.assign({}, ONBELLEK_CFG, {
+    signalCfg: Object.assign({ minExpectancy: -Infinity, minRr: 0 }, esik),
+  })
+}
+
+// Esikler bilerek genis secildi: bir kismi bol islem uretir, sonuncusu hic
+// islem uretmez. Onbellek "hicbir sey olusmadi" durumunda da ayni davranmali.
+const ESIKLER = [
+  { minSimilarity: 0.50, minMatches: 3, minWinRate: 0.40 },
+  { minSimilarity: 0.60, minMatches: 5, minWinRate: 0.50 },
+  { minSimilarity: 0.55, minMatches: 1, minWinRate: 0.00 },
+  { minSimilarity: 0.70, minMatches: 2, minWinRate: 0.30 },
+  { minSimilarity: 0.00, minMatches: 10, minWinRate: 0.60 },
+  { minSimilarity: 0.95, minMatches: 20, minWinRate: 0.90 },
+]
+
+test('ESDEGERLIK: onbellekli test her esik kombinasyonunda referans yolla ayni sonucu verir', () => {
+  const mem = onbellekHafizasi()
+  // Onbellek BIR KEZ kurulur; butun esikler ayni komsulari kullanir.
+  const cache = candcache.buildCandidates(mem, Object.assign({}, ONBELLEK_CFG, { signalCfg: {} }))
+  assert.equal(cache.version, candcache.CANDCACHE_VERSION)
+  assert.equal(cache.n, mem.events.length)
+  assert.ok(cache.k > 0)
+
+  let islemliDeneme = 0
+  for (const esik of ESIKLER) {
+    const cfg = esikCfg(esik)
+    const etiket = JSON.stringify(esik)
+    const referans = runBacktest(mem, [], cfg)
+    const onbellekli = runBacktestFromCache(mem, cache, [], cfg)
+
+    assert.equal(onbellekli.trades.length, referans.trades.length,
+      'islem sayisi ayni olmali, esik ' + etiket)
+    for (let i = 0; i < referans.trades.length; i++) {
+      const a = referans.trades[i]
+      const b = onbellekli.trades[i]
+      assert.equal(b.eventId, a.eventId, i + '. islemin olayi ayni olmali, esik ' + etiket)
+      assert.equal(b.win, a.win, i + '. islemin sonucu ayni olmali, esik ' + etiket)
+      assert.equal(b.pnlAtr, a.pnlAtr, i + '. islemin kazanci ayni olmali, esik ' + etiket)
+    }
+
+    for (const alan of ['fired', 'wins', 'winRate', 'expectancyAtr', 'baselineWinRate']) {
+      assert.equal(onbellekli.summary[alan], referans.summary[alan],
+        'summary.' + alan + ' ayni olmali, esik ' + etiket)
+    }
+    if (referans.trades.length > 0) islemliDeneme++
+  }
+  // Hicbir esik islem uretmeseydi test bosluga bakiyor olurdu.
+  assert.ok(islemliDeneme >= 4, 'esiklerin cogu islem uretmeliydi: ' + islemliDeneme)
+})
+
+test('onbellek diske yazilip geri okundugunda ayni sonucu verir', () => {
+  const mem = onbellekHafizasi()
+  const cfg = esikCfg(ESIKLER[1])
+  const cache = candcache.buildCandidates(mem, Object.assign({}, ONBELLEK_CFG, { signalCfg: {} }))
+
+  const buf = candcache.serialize(cache)
+  assert.ok(Buffer.isBuffer(buf))
+  const geri = candcache.deserialize(buf)
+  assert.equal(geri.n, cache.n)
+  assert.equal(geri.k, cache.k)
+  assert.equal(geri.key, cache.key)
+  assert.deepEqual(Array.from(geri.idx), Array.from(cache.idx), 'aday indeksleri bozulmamali')
+  assert.deepEqual(Array.from(geri.sim), Array.from(cache.sim), 'benzerlikler bozulmamali')
+
+  const referans = runBacktest(mem, [], cfg)
+  const diskten = runBacktestFromCache(mem, geri, [], cfg)
+  assert.equal(diskten.trades.length, referans.trades.length)
+  assert.equal(diskten.summary.fired, referans.summary.fired)
+  assert.equal(diskten.summary.expectancyAtr, referans.summary.expectancyAtr)
+})
+
+test('bozuk veya yanlis onbellek SESSIZCE yok sayilmaz, hata firlatir', () => {
+  const mem = onbellekHafizasi()
+  const cache = candcache.buildCandidates(mem, Object.assign({}, ONBELLEK_CFG, { signalCfg: {} }))
+
+  // Sihirli sayisi bozuk dosya.
+  const buf = candcache.serialize(cache)
+  buf.writeUInt32LE(0, 0)
+  assert.throws(() => candcache.deserialize(buf), /sihirli sayi/)
+
+  // Baska boyutta bir hafiza icin kurulmus onbellek.
+  const kucuk = fixtures.hafizaKur({ adet: 20, tf: '15m' })
+  assert.throws(() => runBacktestFromCache(kucuk, cache, [], esikCfg(ESIKLER[0])), /olay/)
+  assert.throws(() => runBacktestFromCache(mem, null, [], esikCfg(ESIKLER[0])), /onbellegi/)
+})
+
+test('onbellek anahtari yalnizca komsulari etkileyen ayarlarla degisir', () => {
+  const mem = onbellekHafizasi()
+  const taban = candcache.cacheKey(mem, { signalCfg: {} })
+  // Esikler komsulari degistirmez, anahtar ayni kalmalidir.
+  assert.equal(candcache.cacheKey(mem, { signalCfg: { minSimilarity: 0.1, minMatches: 1 } }), taban)
+  // k, agirliklar ve komsu dislama komsulari degistirir.
+  assert.notEqual(candcache.cacheKey(mem, { signalCfg: { k: 10 } }), taban)
+  assert.notEqual(candcache.cacheKey(mem, { signalCfg: { weights: { shape: 0.9 } } }), taban)
+  assert.notEqual(candcache.cacheKey(mem, { signalCfg: { excludeWithinSec: 1 } }), taban)
+  // Hafizanin kendisi buyuyunce de anahtar degisir.
+  const buyuk = { tf: mem.tf, ctxNames: mem.ctxNames, events: mem.events.concat(mem.events[0]) }
+  assert.notEqual(candcache.cacheKey(buyuk, { signalCfg: {} }), taban)
+})
+
+test('bos hafizada onbellek kurulabilir ve testle uyumludur', () => {
+  const bos = { tf: '15m', ctxNames: [], events: [] }
+  const cache = candcache.buildCandidates(bos, ONBELLEK_CFG)
+  assert.equal(cache.n, 0)
+  assert.equal(cache.idx.length, 0)
+  const geri = candcache.deserialize(candcache.serialize(cache))
+  assert.equal(geri.n, 0)
+  const r = runBacktestFromCache(bos, cache, [], esikCfg(ESIKLER[0]))
+  assert.deepEqual(r.trades, [])
+  assert.equal(r.summary.fired, 0)
+})
+
+test('yonu yalnizca isSupport ile belli olan olaylarda da onbellek ayni sonucu verir', () => {
+  // TUZAK: aday havuzlari tur + yon bazinda bolunuyor. Yon kurali onbellekte
+  // yeniden yazilsaydi, `direction` alani olmayip yalnizca `isSupport` tasiyan
+  // bir sorgu YANLIS kovaya bakar ve hicbir komsu bulamazdi.
+  const rnd = fixtures.prng(99)
+  const mem = fixtures.hafizaKur({
+    adet: 120, basarili: 80, tf: '15m', aralik: 5 * GUN,
+    yon: (i) => (i % 2 === 0 ? 'BUY' : 'SELL'),
+    ozellik: () => fixtures.rastgeleOzellik(rnd),
+  })
+  for (let i = 40; i < 60; i++) {
+    mem.events[i].isSupport = mem.events[i].direction === 'BUY'
+    delete mem.events[i].direction
+  }
+
+  const cfg = esikCfg({ minSimilarity: 0.5, minMatches: 2, minWinRate: 0.3 })
+  const cache = candcache.buildCandidates(mem, cfg)
+  const referans = runBacktest(mem, [], cfg)
+  const onbellekli = runBacktestFromCache(mem, cache, [], cfg)
+
+  assert.ok(referans.trades.length > 0, 'test bosluga bakmamali')
+  assert.equal(onbellekli.trades.length, referans.trades.length)
+  for (let i = 0; i < referans.trades.length; i++) {
+    assert.equal(onbellekli.trades[i].eventId, referans.trades[i].eventId)
+    assert.equal(onbellekli.trades[i].matchCount, referans.trades[i].matchCount)
+    assert.equal(onbellekli.trades[i].pnlAtr, referans.trades[i].pnlAtr)
+  }
 })

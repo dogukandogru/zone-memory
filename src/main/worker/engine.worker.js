@@ -1004,6 +1004,13 @@ handlers['engine:scan'] = async function (payload, ctx) {
   }
   zonesCache = { tf: tf, zones: zones }
   protoCache = { tf: tf, protos: protos }
+  // Hafiza degisti: aday onbellegi artik gecersiz.
+  try {
+    await fsp.unlink(paths.candCachePath(tf))
+  } catch (err) {
+    // Onbellek yoksa sorun degil.
+  }
+
   // Test sinyalleri ve son test ozeti YALNIZCA ayar izi degistiyse silinir.
   // Onceden her taramada siliniyordu: canli akis depoya bar ekledikce
   // otomatik tarama basliyor ve kullanicinin olcumu sessizce kayboluyordu.
@@ -1162,8 +1169,35 @@ handlers['engine:backtest'] = async function (payload, ctx) {
   )
   const izUyum = hafizaIz ? hafizaIz === etkinIz : null
 
-  ctx.progress(1, 'Geriye test basliyor')
-  const res = bt.runBacktest(mem, protos, cfg, (pct, msg) => ctx.progress(num(pct, 0) * 0.92, msg))
+  // ADAY ONBELLEGI: komsular esikten bagimsizdir, bir kez hesaplanip diske
+  // yazilir. Ikinci kosudan itibaren test saniyeler icinde biter (olculdu:
+  // 1m hafizada 168 sn yerine yaklasik 1,7 sn).
+  const candcache = core('learn/candcache')
+  const onbellekYolu = paths.candCachePath(tf)
+  const anahtar = candcache.cacheKey(mem, cfg)
+  let cache = null
+  try {
+    const ham = await fsp.readFile(onbellekYolu)
+    const cozulen = candcache.deserialize(ham)
+    if (cozulen && cozulen.key === anahtar) cache = cozulen
+  } catch (err) {
+    cache = null
+  }
+  if (!cache) {
+    ctx.progress(1, 'Komsular hesaplaniyor (ilk kosu)')
+    cache = candcache.buildCandidates(mem, cfg, (pct, msg) => ctx.progress(num(pct, 0) * 0.6, msg))
+    try {
+      const tmp = onbellekYolu + '.tmp'
+      await fsp.writeFile(tmp, candcache.serialize(cache))
+      await fsp.rename(tmp, onbellekYolu)
+    } catch (err) {
+      log('Aday onbellegi yazilamadi: ' + (err && err.message ? err.message : String(err)))
+    }
+  }
+
+  ctx.progress(62, 'Geriye test basliyor')
+  const res = bt.runBacktestFromCache(mem, cache, protos, cfg,
+    (pct, msg) => ctx.progress(62 + num(pct, 0) * 0.3, msg))
 
   const trades = res && Array.isArray(res.trades) ? res.trades : []
   ctx.progress(94, 'Sinyaller kaydediliyor')

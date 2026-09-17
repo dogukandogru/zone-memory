@@ -22,6 +22,19 @@
  * - `beforeTime` verilmezse (undefined/null) sozlesmedeki knn tanimina uygun
  *   sekilde zaman filtresi UYGULANMAZ. Yuruyen ileri testte ve canli akista
  *   cagiran taraf bu degeri MUTLAKA gecmelidir, aksi halde ileriye bakma olur.
+ *
+ * MODULUN IKI ASAMASI (A2)
+ * ---------------------------------------------------------------------------
+ * `evaluateTouch` iki adimdir ve adimlar AYRI fonksiyonlardir:
+ *   1. findCandidates       hafizadan komsulari bulur (PAHALI: knn)
+ *   2. decideFromCandidates komsulardan karari ve plani uretir (UCUZ, saf)
+ * Bunu ayirmanin tek nedeni parametre taramasidir: esik degistiginde
+ * (minSimilarity / minMatches / minWinRate) KOMSULAR degismez, yalnizca karar
+ * degisir. Komsular bir kez hesaplanip onbellege alinirsa (learn/candcache.js)
+ * onlarca esik denemesi saniyeler icinde kosar.
+ * `evaluateTouch` iki adimin BILESIMIDIR; karar mantigi baska hicbir yerde
+ * tekrar yazilmaz, aksi halde onbellekli yol ile referans yol sessizce
+ * ayrisirdi.
  */
 
 const { knn, DEFAULT_WEIGHTS } = require('./similarity')
@@ -144,35 +157,128 @@ function dateText (t) {
 }
 
 /**
- * Bir dokunusu hafizayla karsilastirip sinyal uretir.
- * Esikleri gecemezse yine bir nesne doner ama `fired: false` olur; boylece
- * arayuz "neden sinyal olmadi" bilgisini gosterebilir.
- *
- * @param {Object} touch Touch
- * @param {Object|null} features Features
- * @param {{events:Object[]}} memory
- * @param {Object[]} prototypes
- * @param {Object} [cfg]
- * @param {number|null} [beforeTime]
- * @returns {Object} Signal
+ * Olayin yonu. Acik alan yoksa destek/direnc bilgisinden turetilir.
+ * @param {Object} t
+ * @returns {'BUY'|'SELL'}
  */
-function evaluateTouch (touch, features, memory, prototypes, cfg, beforeTime) {
-  const t = touch || {}
+function yonBelirle (t) {
+  if (!t) return 'BUY'
+  if (t.direction === 'SELL') return 'SELL'
+  if (t.direction === 'BUY') return 'BUY'
+  return t.isSupport === false ? 'SELL' : 'BUY'
+}
+
+/**
+ * Olayin turu. Eski hafiza dosyalarinda `kind` yoktur, o kayitlar dokunus
+ * sayilir.
+ * @param {Object} t
+ * @returns {'form'|'touch'}
+ */
+function turBelirle (t) {
+  return (t && t.kind === 'form') ? 'form' : 'touch'
+}
+
+/**
+ * Ayarlari varsayilanlarla birlestirir. Agirliklar ayri birlestirilir, cunku
+ * kullanici yalnizca bir bileseni verdiginde digerleri varsayilanda kalmali.
+ * @param {Object} [cfg]
+ * @returns {Object}
+ */
+function ayarCoz (cfg) {
   const conf = Object.assign({}, DEFAULT_SIGNAL_CFG, cfg || {})
   conf.weights = Object.assign({}, DEFAULT_WEIGHTS || DEFAULT_SIGNAL_CFG.weights, (cfg && cfg.weights) || {})
+  return conf
+}
+
+/**
+ * ADIM 1: hafizadan komsulari bulur (PAHALI kisim).
+ *
+ * Donen liste esiklerden BAGIMSIZDIR: yalnizca k, agirliklar, yon, tur, zaman
+ * filtresi ve komsu dislama belirler. Bu yuzden onbellege alinabilir; esik
+ * taramasi ayni listeyi tekrar tekrar kullanir (learn/candcache.js).
+ *
+ * @param {Object} touch Touch (sorgu olayi)
+ * @param {Object|null} features Features (sorgunun ozellik vektoru)
+ * @param {{events:Object[]}} memory
+ * @param {Object} [cfg]
+ * @param {number|null} [beforeTime]
+ * @returns {Array<{event:Object, similarity:number}>} Benzerlige gore azalan
+ */
+function findCandidates (touch, features, memory, cfg, beforeTime) {
+  const t = touch || {}
+  const conf = ayarCoz(cfg)
+  const excludeWithinSec = Math.max(0, num(conf.excludeWithinSec, 0))
+  const bt = (beforeTime === undefined || beforeTime === null) ? null : num(beforeTime, null)
+  const direction = yonBelirle(t)
+  const kind = turBelirle(t)
+  const time = num(t.time, 0)
+  const events = (memory && Array.isArray(memory.events)) ? memory.events : []
+
+  const candidates = []
+  if (!(features && features.shape && events.length > 0)) return candidates
+
+  const opts = {
+    k: Math.max(1, Math.round(num(conf.k, 25))),
+    direction: direction,
+    kind: kind,
+    excludeWithinSec: excludeWithinSec,
+    beforeTime: bt,
+    weights: conf.weights,
+    // Sozlesmede yok ama komsu dislama icin gerekli: sorgunun zamani.
+    time: time,
+    queryTime: time,
+  }
+  const raw = knn(features, memory, opts) || []
+  // Komsu dislama ve zaman filtresi burada bir kez daha uygulanir.
+  for (let i = 0; i < raw.length; i++) {
+    const r = raw[i]
+    if (!r || !r.event) continue
+    const ev = r.event
+    if (ev.direction && ev.direction !== direction) continue
+    if ((ev.kind || 'touch') !== kind) continue
+    if (bt !== null && !(num(ev.time, Infinity) < bt)) continue
+    if (excludeWithinSec > 0 && Math.abs(num(ev.time, 0) - time) < excludeWithinSec) continue
+    candidates.push(r)
+  }
+  return candidates
+}
+
+/**
+ * ADIM 2: komsulardan karari ve islem planini uretir (UCUZ, saf fonksiyon).
+ *
+ * Hafizaya ERISMEZ; yalnizca verilen aday listesine bakar. Esikleri gecemezse
+ * yine bir nesne doner ama `fired: false` olur; boylece arayuz "neden sinyal
+ * olmadi" bilgisini gosterebilir.
+ *
+ * @param {Object} ev Touch (sorgu olayi)
+ * @param {Array<{event:Object, similarity:number}>} candidates Adaylar
+ * @param {Object|null|undefined} [levels] Bolge seviyeleri. `undefined` ise
+ *        burada hesaplanir; `null` ACIKCA "seviye yok" demektir.
+ * @param {Object} [cfg]
+ * @param {{features?:Object|null, prototypes?:Object[], scanned?:number,
+ *          beforeTime?:number|null}} [ek] Gerekce metinleri ve prototip
+ *        eslesmesi icin ek baglam. `scanned` taranan hafiza kaydi sayisidir
+ *        (gerekce cumlesinde gecer), verilmezse aday sayisi kullanilir.
+ * @returns {Object} Signal
+ */
+function decideFromCandidates (ev, candidates, levels, cfg, ek) {
+  const t = ev || {}
+  const conf = ayarCoz(cfg)
+  const baglam = ek || {}
 
   const minSimilarity = clamp(num(conf.minSimilarity, 0.8), 0, 0.999999)
   const minMatches = Math.max(0, Math.round(num(conf.minMatches, 5)))
   const minWinRate = clamp(num(conf.minWinRate, 0.6), 0, 1)
-  const excludeWithinSec = Math.max(0, num(conf.excludeWithinSec, 0))
-  const bt = (beforeTime === undefined || beforeTime === null) ? null : num(beforeTime, null)
+  const btHam = baglam.beforeTime
+  const bt = (btHam === undefined || btHam === null) ? null : num(btHam, null)
 
-  const direction = t.direction === 'SELL' ? 'SELL' : (t.direction === 'BUY' ? 'BUY' : (t.isSupport === false ? 'SELL' : 'BUY'))
+  const features = baglam.features === undefined ? t.features : baglam.features
+  const prototypes = baglam.prototypes
+  const direction = yonBelirle(t)
   const sign = direction === 'BUY' ? 1 : -1
   const entry = num(t.price, 0)
   const time = num(t.time, 0)
-  // Eski hafiza dosyalarinda `kind` yoktur, o kayitlar dokunus sayilir.
-  const kind = t.kind === 'form' ? 'form' : 'touch'
+  const kind = turBelirle(t)
   const form = kind === 'form'
   const reasons = []
 
@@ -203,40 +309,23 @@ function evaluateTouch (touch, features, memory, prototypes, cfg, beforeTime) {
     reasons.push('Dokunuş barında geçerli ATR yok, plan bölge genişliğinden tahmin edildi')
   }
 
-  const events = (memory && Array.isArray(memory.events)) ? memory.events : []
+  // Taranan hafiza kaydi sayisi: yalnizca gerekce cumlesinde kullanilir.
+  // Onbellekli yolda cagiran taraf o andaki aday havuzunun boyunu gecer,
+  // boylece gerekceler referans yolla birebir ayni kalir.
+  const scannedCount = Math.max(0, Math.round(num(
+    baglam.scanned, Array.isArray(candidates) ? candidates.length : 0
+  )))
 
-  let candidates = []
-  if (features && features.shape && events.length > 0) {
-    const opts = {
-      k: Math.max(1, Math.round(num(conf.k, 25))),
-      direction: direction,
-      kind: kind,
-      excludeWithinSec: excludeWithinSec,
-      beforeTime: bt,
-      weights: conf.weights,
-      // Sozlesmede yok ama komsu dislama icin gerekli: sorgunun zamani.
-      time: time,
-      queryTime: time,
-    }
-    const raw = knn(features, memory, opts) || []
-    // Komsu dislama ve zaman filtresi burada bir kez daha uygulanir.
-    for (let i = 0; i < raw.length; i++) {
-      const r = raw[i]
-      if (!r || !r.event) continue
-      const ev = r.event
-      if (ev.direction && ev.direction !== direction) continue
-      if ((ev.kind || 'touch') !== kind) continue
-      if (bt !== null && !(num(ev.time, Infinity) < bt)) continue
-      if (excludeWithinSec > 0 && Math.abs(num(ev.time, 0) - time) < excludeWithinSec) continue
-      candidates.push(r)
-    }
-    candidates.sort(function (a, b) { return num(b.similarity, 0) - num(a.similarity, 0) })
-  }
+  // Cagiranin dizisini bozmamak icin kopya uzerinde siralanir. knn zaten
+  // azalan sirada doner, bu yuzden siralama pratikte bir seyi degistirmez;
+  // yine de onbellekten gelen liste icin garanti olarak durur.
+  const adaylar = (Array.isArray(candidates) ? candidates : []).slice()
+  adaylar.sort(function (a, b) { return num(b.similarity, 0) - num(a.similarity, 0) })
 
   // Yalnizca benzerlik esigini gecen kayitlar plana ve orana girer.
   const matches = []
-  for (let i = 0; i < candidates.length; i++) {
-    const aday = candidates[i]
+  for (let i = 0; i < adaylar.length; i++) {
+    const aday = adaylar[i]
     // Dolmamis limit emirler (nofill) islem uretmedigi icin oran hesabina
     // girmez; knn zaten filtreliyor, bu ek koruma eski hafizalar icin.
     if (aday && aday.event && aday.event.outcome === 'nofill') continue
@@ -270,7 +359,7 @@ function evaluateTouch (touch, features, memory, prototypes, cfg, beforeTime) {
   const avgSimilarity = matchCount > 0 ? sumSim / matchCount : 0
   const bestSimilarity = matchCount > 0
     ? num(matches[0].similarity, 0)
-    : (candidates.length > 0 ? num(candidates[0].similarity, 0) : 0)
+    : (adaylar.length > 0 ? num(adaylar[0].similarity, 0) : 0)
   const winRate = matchCount > 0 ? wins / matchCount : 0
   const expectedMfeAtr = matchCount > 0 ? sumMfe / matchCount : 0
   const expectedMaeAtr = matchCount > 0 ? sumMae / matchCount : 0
@@ -304,23 +393,29 @@ function evaluateTouch (touch, features, memory, prototypes, cfg, beforeTime) {
   //
   // TP2 yine benzer kayitlarin dagilimindan gelir ve yalnizca "uzatma hedefi"
   // olarak bilgilendirme amaclidir.
-  const levels = conf.useZoneStop === false
-    ? null
-    : zoneLevels(
-      { price: entry, zoneTop: t.zoneTop, zoneBottom: t.zoneBottom, direction: direction, kind: kind },
-      atr,
-      Object.assign({}, DEFAULT_OUTCOME_CFG, conf.outcomeCfg || {})
-    )
+  //
+  // Seviyeler cagiran taraftan HAZIR gelebilir (`levels` argumani). `undefined`
+  // ise burada hesaplanir; `null` acikca "seviye yok" demektir ve oldugu gibi
+  // kullanilir (useZoneStop kapaliyken bu olur).
+  const seviyeler = levels !== undefined
+    ? levels
+    : (conf.useZoneStop === false
+      ? null
+      : zoneLevels(
+        { price: entry, zoneTop: t.zoneTop, zoneBottom: t.zoneBottom, direction: direction, kind: kind },
+        atr,
+        Object.assign({}, DEFAULT_OUTCOME_CFG, conf.outcomeCfg || {})
+      ))
   // Form olayinda seviyeler kurulamadiysa (fiyat pivottan cok kacti, risk
   // maxFormRiskAtr esigini asti) ortada islenebilir bir kurulum yoktur.
   // Hafiza da bu olayi etiketlemedi, yani boyle bir olay ogrenilmedi bile.
-  const formRiskBlocked = form && conf.useZoneStop !== false && !levels
+  const formRiskBlocked = form && conf.useZoneStop !== false && !seviyeler
 
   let zoneStopUsed = false
-  if (levels && isFinite(levels.invalid) && isFinite(levels.target) &&
-      levels.riskAtr > 0 && levels.rewardAtr > 0) {
-    slAtr = levels.riskAtr
-    tp1Atr = levels.rewardAtr
+  if (seviyeler && isFinite(seviyeler.invalid) && isFinite(seviyeler.target) &&
+      seviyeler.riskAtr > 0 && seviyeler.rewardAtr > 0) {
+    slAtr = seviyeler.riskAtr
+    tp1Atr = seviyeler.rewardAtr
     zoneStopUsed = true
   } else if (matchCount > 0) {
     // Yedek yol: benzer kayitlarin sonuca kadarki aleyhte hareketinin yuzdeligi.
@@ -338,11 +433,11 @@ function evaluateTouch (touch, features, memory, prototypes, cfg, beforeTime) {
   // (destekte zoneTop, dirençte zoneBottom). Dokunus tanimi geregi fiyat o
   // kenari gectigi icin emir dolar. Dokunus barinin kapanisi giris olarak
   // kullanilmaz, cunku kapanisin bolge icindeki konumu risk/odulu carpitir.
-  const planEntry = zoneStopUsed ? levels.entry : entry
+  const planEntry = zoneStopUsed ? seviyeler.entry : entry
 
-  const tp1 = zoneStopUsed ? levels.target : planEntry + sign * tp1Atr * atr
+  const tp1 = zoneStopUsed ? seviyeler.target : planEntry + sign * tp1Atr * atr
   const tp2 = planEntry + sign * tp2Atr * atr
-  const sl = zoneStopUsed ? levels.invalid : planEntry - sign * slAtr * atr
+  const sl = zoneStopUsed ? seviyeler.invalid : planEntry - sign * slAtr * atr
   const risk = Math.abs(planEntry - sl)
   const rr = risk > 0 ? Math.abs(tp1 - planEntry) / risk : 0
 
@@ -411,14 +506,14 @@ function evaluateTouch (touch, features, memory, prototypes, cfg, beforeTime) {
   // Gerekceler: sinyalin neden olustugu veya neden olusmadigi.
   if (!features || !features.shape) {
     reasons.push('Özellik vektörü çıkarılamadı (yeterli geçmiş bar yok), sinyal üretilmedi')
-  } else if (events.length === 0) {
+  } else if (scannedCount === 0) {
     reasons.push('Hafızada karşılaştırılacak kayıt yok, sinyal üretilmedi')
   } else {
     if (bt !== null) {
       reasons.push('Yalnızca ' + dateText(bt) + ' öncesindeki kayıtlar kullanıldı, ileriye bakma yok')
     }
-    if (candidates.length === 0) {
-      reasons.push('Hafızada ' + events.length + ' kayıt tarandı, aynı yönde ve aynı türde (' +
+    if (adaylar.length === 0) {
+      reasons.push('Hafızada ' + scannedCount + ' kayıt tarandı, aynı yönde ve aynı türde (' +
         (form ? 'kutu oluşumu' : 'bölge dokunuşu') + ') uygun aday bulunamadı')
     } else if (matchCount === 0) {
       reasons.push('Benzerlik eşiğini (' + minSimilarity.toFixed(2) + ') geçen kayıt yok, en yüksek benzerlik ' +
@@ -528,7 +623,41 @@ function evaluateTouch (touch, features, memory, prototypes, cfg, beforeTime) {
   }
 }
 
+/**
+ * Bir dokunusu hafizayla karsilastirip sinyal uretir.
+ *
+ * Iki adimin BILESIMIDIR: komsulari bul, sonra karar ver. Karar mantigi burada
+ * TEKRAR YAZILMAZ; onbellekli yol (learn/backtest.js runBacktestFromCache) ayni
+ * `decideFromCandidates` fonksiyonunu cagirir, boylece iki yol ayrisamaz.
+ *
+ * @param {Object} touch Touch
+ * @param {Object|null} features Features
+ * @param {{events:Object[]}} memory
+ * @param {Object[]} prototypes
+ * @param {Object} [cfg]
+ * @param {number|null} [beforeTime]
+ * @returns {Object} Signal
+ */
+function evaluateTouch (touch, features, memory, prototypes, cfg, beforeTime) {
+  const events = (memory && Array.isArray(memory.events)) ? memory.events : []
+  const candidates = findCandidates(touch, features, memory, cfg, beforeTime)
+  return decideFromCandidates(touch, candidates, undefined, cfg, {
+    // `|| null`: arguman hic verilmediyse `undefined` gelir ve o durumda
+    // "olayin kendi vektorune duse" davranisi ISTENMEZ, ozellik yok sayilir.
+    features: features || null,
+    prototypes: prototypes,
+    scanned: events.length,
+    beforeTime: beforeTime,
+  })
+}
+
 module.exports = {
   DEFAULT_SIGNAL_CFG,
   evaluateTouch,
+  findCandidates,
+  decideFromCandidates,
+  // Yon ve tur tanimlari: onbellek (learn/candcache.js) aday havuzlarini
+  // bunlara gore boldugu icin kural iki modulde ayri yazilamaz.
+  yonBelirle,
+  turBelirle,
 }

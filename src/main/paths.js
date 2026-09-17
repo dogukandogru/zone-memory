@@ -129,6 +129,16 @@ function liveLogPath(tf, symbol) {
   return memoryPath(tf, symbol) + '.live.jsonl'
 }
 
+/**
+ * Aday komsu onbellegi. Yuruyen ileri test her olay icin kNN'i bastan
+ * hesapliyordu (1m hafizada tam kosu dakikalar suruyor). Esik degistiginde
+ * komsular DEGISMEZ, yalnizca karar degisir; bu yuzden komsular bir kez
+ * hesaplanip buraya yazilir ve sonraki kosular oradan okur.
+ */
+function candCachePath(tf, symbol) {
+  return memoryPath(tf, symbol) + '.cands.bin'
+}
+
 /** Gerekli klasorleri olusturur, olusan yollari dondurur. */
 function ensureDirs() {
   const user = core.ensureDir(userDataDir())
@@ -149,5 +159,6 @@ module.exports = {
   signalsPath,
   backtestPath,
   liveLogPath,
+  candCachePath,
   ensureDirs,
 }

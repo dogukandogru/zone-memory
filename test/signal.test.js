@@ -5,7 +5,9 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
 
-const { evaluateTouch, DEFAULT_SIGNAL_CFG } = require('../src/core/learn/signal')
+const {
+  evaluateTouch, findCandidates, decideFromCandidates, DEFAULT_SIGNAL_CFG,
+} = require('../src/core/learn/signal')
 const fixtures = require('./helpers/fixtures')
 
 // Em-dash karakteri kodda yazilmaz, kod noktasindan uretilir.
@@ -390,4 +392,68 @@ test('zaman asimi TAM ZARAR sayilmaz: beklenti eski formulden yuksek cikar', () 
   // Eski formul: winRate * rr - (1 - winRate) = -1
   assert.ok(Math.abs(s.expectancy - 0.1) < 1e-9, 'beklenti zaman asimi R ortalamasi olmali: ' + s.expectancy)
   assert.ok(s.expectancy > -1, 'zaman asimi tam zarar yazilmamali')
+})
+
+// ---------------------------------------------------------------------------
+// A2 - IKI ADIMA AYRILMA: findCandidates + decideFromCandidates
+// ---------------------------------------------------------------------------
+// Ayrimin tek amaci esik taramasini hizlandirmaktir; bu yuzden ayrimin
+// KARARI DEGISTIRMEDIGI kanitlanmali. Asagidaki testler bilesimin
+// `evaluateTouch` ile birebir ayni nesneyi urettigini ve komsularin esikten
+// bagimsiz oldugunu gosterir.
+
+test('evaluateTouch, iki adimin BILESIMINDEN farkli bir sonuc uretmez', () => {
+  const mem = hafizaKur(30, 20, 'BUY')
+  const t = dokunus('BUY')
+  const f = ozellik()
+  const ayar = { minMatches: 5, minWinRate: 0.5, minExpectancy: -Infinity }
+  const bt = T_SORGU
+
+  const butun = evaluateTouch(t, f, mem, [], ayar, bt)
+  const adaylar = findCandidates(t, f, mem, ayar, bt)
+  const parcali = decideFromCandidates(t, adaylar, undefined, ayar, {
+    features: f, prototypes: [], scanned: mem.events.length, beforeTime: bt,
+  })
+  assert.deepEqual(parcali, butun, 'iki yol ayni Signal nesnesini vermeli')
+  assert.ok(butun.matchCount > 0, 'test bosluga bakmamali')
+})
+
+test('KOMSULAR esikten bagimsizdir: esik degisince aday listesi degismez', () => {
+  const mem = hafizaKur(30, 20, 'BUY')
+  const t = dokunus('BUY')
+  const f = ozellik()
+
+  const gevsek = findCandidates(t, f, mem, { minSimilarity: 0.1, minMatches: 1, minWinRate: 0 }, T_SORGU)
+  const siki = findCandidates(t, f, mem, { minSimilarity: 0.99, minMatches: 30, minWinRate: 0.99 }, T_SORGU)
+  assert.equal(siki.length, gevsek.length, 'esik komsu sayisini degistirmemeli')
+  for (let i = 0; i < gevsek.length; i++) {
+    assert.equal(siki[i].event, gevsek[i].event, i + '. aday ayni olay olmali')
+    assert.equal(siki[i].similarity, gevsek[i].similarity, i + '. adayin benzerligi ayni olmali')
+  }
+
+  // Ayni aday listesi, farkli esiklerle farkli KARAR verir.
+  const a = decideFromCandidates(t, gevsek, undefined, { minMatches: 5, minWinRate: 0.5, minExpectancy: -Infinity }, { features: f })
+  const b = decideFromCandidates(t, gevsek, undefined, { minMatches: 500, minWinRate: 0.5 }, { features: f })
+  assert.equal(a.fired, true)
+  assert.equal(b.fired, false)
+})
+
+test('decideFromCandidates hafizaya erismez: bos aday listesinde sinyal uretmez', () => {
+  const t = dokunus('BUY')
+  const s = decideFromCandidates(t, [], undefined, { minMatches: 1 }, { features: ozellik(), scanned: 100 })
+  assert.equal(s.fired, false)
+  assert.equal(s.matchCount, 0)
+  assert.ok(s.reasons.some((r) => r.includes('uygun aday bulunamadı')),
+    'gerekce aday bulunamadigini soylemeli: ' + JSON.stringify(s.reasons))
+  for (const r of s.reasons) assert.ok(!r.includes(EM_DASH), 'gerekcede em-dash olmamali')
+})
+
+test('decideFromCandidates cagiranin aday dizisini BOZMAZ', () => {
+  const mem = hafizaKur(30, 20, 'BUY')
+  const t = dokunus('BUY')
+  const f = ozellik()
+  const adaylar = findCandidates(t, f, mem, { minMatches: 5 }, T_SORGU)
+  const kopya = adaylar.slice()
+  decideFromCandidates(t, adaylar, undefined, { minMatches: 5 }, { features: f })
+  assert.deepEqual(adaylar, kopya, 'aday dizisi yerinde siralanmamali')
 })
