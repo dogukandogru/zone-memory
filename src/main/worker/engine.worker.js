@@ -585,7 +585,7 @@ function signalOzeti(sig) {
  * @param {string[]} [logs]
  * @returns {Promise<number>} Yazilan sonuc satiri sayisi
  */
-async function liveLogEtiketle(tf, s, tfSec, outcomeCfg, logs) {
+async function liveLogEtiketle(tf, s, tfSec, outcomeCfg, logs, maliyetAyari) {
   if (!s || s.length === 0) return 0
   const okunan = await liveLogOku(tf)
   const records = okunan.records
@@ -597,9 +597,15 @@ async function liveLogEtiketle(tf, s, tfSec, outcomeCfg, logs) {
   const cfg = Object.assign({}, outcomeMod.DEFAULT_OUTCOME_CFG, outcomeCfg || {})
   const horizon = clampInt(cfg.horizonBars, 1, 100000, outcomeMod.DEFAULT_OUTCOME_CFG.horizonBars)
   const sonBar = s.time[s.length - 1]
+  // Maliyet, kullanicinin ayarindan gelir; boylece canli gunluk ile Test
+  // sekmesi AYNI maliyetle olculur ve iki rakam karsilastirilabilir kalir.
   const costCfg = {
-    costPct: num(bt.DEFAULT_BACKTEST_CFG.costPct, 0),
-    costUsd: num(bt.DEFAULT_BACKTEST_CFG.costUsd, 0),
+    costPct: Number.isFinite(maliyetAyari && maliyetAyari.costPct)
+      ? maliyetAyari.costPct
+      : num(bt.DEFAULT_BACKTEST_CFG.costPct, 0),
+    costUsd: Number.isFinite(maliyetAyari && maliyetAyari.costUsd)
+      ? maliyetAyari.costUsd
+      : num(bt.DEFAULT_BACKTEST_CFG.costUsd, 0),
   }
 
   let yazilan = 0
@@ -1130,10 +1136,16 @@ handlers['engine:backtest'] = async function (payload, ctx) {
   const gelen = payload.cfg || {}
   const memMeta = mem.meta || null
   const uygulanan = core('learn/presets').resolveCfg(tf, gelen.cfgPatch || cfgPatchGeriUyum(gelen), memMeta)
+  // Maliyet ve isinma ayari kullanicinin backtestCfg yamasindan gelir; tek
+  // kaynak budur (Ayarlar > Islem maliyeti ve olcum).
+  const bcfg = (gelen.cfgPatch && gelen.cfgPatch.backtestCfg) || {}
   const cfg = Object.assign({}, gelen, {
     signalCfg: uygulanan.signalCfg,
     outcomeCfg: uygulanan.planOutcomeCfg,
   })
+  if (Number.isFinite(bcfg.costPct)) cfg.costPct = bcfg.costPct
+  if (Number.isFinite(bcfg.costUsd)) cfg.costUsd = bcfg.costUsd
+  if (Number.isFinite(bcfg.warmupPerBucket)) cfg.warmupPerBucket = bcfg.warmupPerBucket
   delete cfg.cfgPatch
 
   // Etkin ayar ile hafizanin izi uyusuyor mu? Uyusmuyorsa olcum eski
@@ -1606,7 +1618,8 @@ handlers['engine:live-tick'] = async function (payload) {
       // Ufku dolmus kayitlarin sonucu her yeni barda hesaplanir. Sonuclar
       // ancak yeni bar geldikce olgunlastigi icin bar gelmeyen tikte
       // yapilacak is yoktur.
-      labeled = await liveLogEtiketle(tf, s, tfSec, canliCfg.planOutcomeCfg, logs)
+      labeled = await liveLogEtiketle(tf, s, tfSec, canliCfg.planOutcomeCfg, logs,
+        (payload.cfgPatch && payload.cfgPatch.backtestCfg) || null)
     } catch (err) {
       logs.push('Canli kontrol hatasi: ' + (err && err.message ? err.message : String(err)))
     }

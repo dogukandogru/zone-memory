@@ -1104,10 +1104,12 @@ function ayarGruplari(saglayiciSecenekleri) {
         { yol: 'indicatorParams.signalOnTouch', ad: 'Bölgeye dokunuşta sinyal üret' },
       ],
       alanlar: [
-        { yol: 'indicatorParams.minScoreForSignal', ad: 'En az skor', tip: 'sayi', adim: 1, min: 0, max: 5,
-          not: 'Beş bileşenden kaçı doğru olursa olay "nitelikli" sayılır (akış, trend, seans, fitil reddi, hacim).' },
-        { yol: 'indicatorParams.strongScoreLevel', ad: 'Güçlü sinyal skoru', tip: 'sayi', adim: 1, min: 0, max: 5,
-          not: 'Bu skorun üstündeki olaylar güçlü olarak işaretlenir.' },
+        { yol: 'indicatorParams.minScoreForSignal', ad: 'En az skor (yalnızca etiket)', tip: 'sayi', adim: 1, min: 0, max: 5,
+          not: 'Beş bileşenden kaçı doğru olursa olay "nitelikli" sayılır (akış, trend, seans, fitil reddi, hacim). ' +
+            'DİKKAT: bu eşik sinyalin üretilip üretilmeyeceğini BELİRLEMEZ, yalnızca olayı etiketler. ' +
+            'Sinyali belirleyen eşikler aşağıdaki "Sinyal kararı" bölümündedir.' },
+        { yol: 'indicatorParams.strongScoreLevel', ad: 'Güçlü sinyal skoru (yalnızca etiket)', tip: 'sayi', adim: 1, min: 0, max: 5,
+          not: 'Bu skorun üstündeki olaylar güçlü olarak işaretlenir. Sinyal kararına girmez.' },
         { yol: 'indicatorParams.strongFlowLevel', ad: 'Güçlü akış eşiği', tip: 'sayi', adim: 0.5, min: 1, max: 10,
           not: 'Akış skoru bunun üstündeyse skorun akış bileşeni sayılır.' },
         { yol: 'indicatorParams.wickMinRatio', ad: 'Fitil reddi oranı', tip: 'sayi', adim: 0.05, min: 0, max: 1,
@@ -1149,17 +1151,53 @@ function ayarGruplari(saglayiciSecenekleri) {
       ],
     },
     {
-      baslik: 'Sinyal motoru',
+      // SINYALI FIILEN BELIRLEYEN ESIKLER BURADADIR. Yukaridaki skor ayarlari
+      // yalnizca olayi etiketler; sinyal karari bu dort esik ve asagidaki
+      // beklenen deger kapisiyla verilir.
+      baslik: 'Sinyal kararı (sinyalin üretilmesini bunlar belirler)',
       bozar: false,
+      not: 'Bir sinyal ancak şu dördü birden sağlanınca üretilir: yeterli sayıda ' +
+        'benzer kayıt, o kayıtlarda yeterli tutma oranı, yeterli risk/ödül ve ' +
+        'pozitif beklenen değer. Bu eşikleri değiştirmek yeniden tarama gerektirmez, ' +
+        'ama Test sekmesini yeniden çalıştırmadan etkisini bilemezsiniz.',
       alanlar: [
-        { yol: 'signalCfg.k', ad: 'Komşu sayısı (k)', tip: 'sayi', adim: 1, min: 1,
+        { yol: 'signalCfg.k', ad: 'Komşu sayısı (k)', tip: 'sayi', adim: 1, min: 1, max: 200,
           not: 'Hafızadan alınan en benzer kayıt sayısı.' },
-        { yol: 'signalCfg.minSimilarity', ad: 'En az benzerlik', tip: 'sayi', adim: 0.01, min: 0, max: 1,
-          not: 'Bu eşiğin altındaki eşleşmeler sayılmaz, 0 ile 1 arası.' },
-        { yol: 'signalCfg.minMatches', ad: 'En az eşleşme', tip: 'sayi', adim: 1, min: 1,
-          not: 'Sinyal üretmek için gereken eşik üstü kayıt sayısı.' },
+        { yol: 'signalCfg.minSimilarity', ad: 'En az benzerlik', tip: 'sayi', adim: 0.01, min: 0, max: 0.999,
+          not: 'Bu eşiğin altındaki eşleşmeler sayılmaz. Ölçüldü: 0,80 eşiği rastgele ' +
+            'çiftlerin yaklaşık %41\'ini geçiriyor, yani tek başına seçici değildir.' },
+        { yol: 'signalCfg.minMatches', ad: 'En az eşleşme', tip: 'sayi', adim: 1, min: 1, max: 1000,
+          not: 'Sinyal üretmek için gereken eşik üstü kayıt sayısı. Küçük değerlerde ' +
+            'oran gürültüden ibaret olur (5 kayıtta %60, 3 kayıt demektir).' },
         { yol: 'signalCfg.minWinRate', ad: 'En az başarı oranı', tip: 'sayi', adim: 0.01, min: 0, max: 1,
-          not: 'Benzer kayıtlarda aranan asgari başarı oranı, 0,60 yüzde 60 demektir.' },
+          not: 'Benzer kayıtlarda aranan asgari tutma oranı. Türlerin taban oranları ' +
+            'çok farklıdır (ölçüldü: oluşum %39-50, dokunuş %23-28), bu yüzden mutlak ' +
+            'bir eşik bir türü tamamen kapatabilir.' },
+        { yol: 'signalCfg.minRr', ad: 'En az risk/ödül', tip: 'sayi', adim: 0.1, min: 0, max: 10,
+          not: 'Planın ödül/risk oranı bunun altındaysa sinyal üretilmez. 0 kapatır.' },
+        { yol: 'signalCfg.minExpectancy', ad: 'En az beklenen değer (R)', tip: 'sayi', adim: 0.05, min: -1, max: 5,
+          not: 'Beklenen değer = tutma oranı x R/R - kırılma oranı + zaman aşımı katkısı. ' +
+            'Yüksek isabet tek başına yetmez, matematiğin de olumlu olması gerekir.' },
+      ],
+    },
+    {
+      // Olcumun en belirleyici girdisi: maliyet. 1 dakikalikta brut edimin
+      // tamamini yiyor. Bir donem yalnizca kodda sabitti.
+      baslik: 'İşlem maliyeti ve ölçüm',
+      bozar: false,
+      not: 'Bu değerler hem Test sekmesinde hem de sinyalin beklenen değer ' +
+        'hesabında kullanılır. Kendi spreadinizi girin: ölçülen sonuç buna çok duyarlıdır.',
+      alanlar: [
+        { yol: 'backtestCfg.costPct', ad: 'Maliyet (fiyata oran)', tip: 'sayi', adim: 0.00001, min: 0, max: 0.01,
+          not: '0,000068 = 4400 dolarlık altında yaklaşık 0,30 dolar gidiş dönüş. ' +
+            '17 yıllık testte doğru ölçü budur, çünkü altın 900 dolardan 4400 dolara çıktı.' },
+        { yol: 'backtestCfg.costUsd', ad: 'Maliyet (sabit dolar)', tip: 'sayi', adim: 0.01, min: 0, max: 100,
+          not: 'Yalnızca oran 0 ise kullanılır.' },
+        { yol: 'backtestCfg.slippageAtr', ad: 'Kayma (ATR)', tip: 'sayi', adim: 0.01, min: 0, max: 2,
+          not: 'Limit emrin beklenenden kötü dolması payı. Girişin aleyhine eklenir.' },
+        { yol: 'backtestCfg.warmupPerBucket', ad: 'Isınma: tür ve yön başına asgari aday', tip: 'sayi', adim: 10, min: 0, max: 5000,
+          not: 'Bir olay ancak hafızada aynı türden ve aynı yönden bu kadar aday varsa ' +
+            'değerlendirilir. Sabit olay sayısı yüksek zaman dilimlerinde testi anlamsız kılıyordu.' },
       ],
     },
     {
