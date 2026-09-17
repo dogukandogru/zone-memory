@@ -210,3 +210,44 @@ test('toBars: chart icin nesne dizisi uretir', () => {
   assert.ok('open' in bars[0] && 'high' in bars[0] && 'low' in bars[0])
   assert.ok('close' in bars[0] && 'volume' in bars[0])
 })
+
+// V8 - growF64 disa acildi: aktarim betigi de ayni yardimciyi kullaniyor.
+test('growF64: kapasiteyi iki katina cikarir, icerigi korur', () => {
+  const a = Float64Array.from([1, 2, 3, 4])
+  const b = series.growF64(a, 5)
+  assert.equal(b.length, 8)
+  assert.deepEqual(Array.from(b.subarray(0, 4)), [1, 2, 3, 4])
+  assert.equal(b[4], 0)
+})
+
+test('growF64: iki kat yetmiyorsa dogrudan gereken kapasiteye ceker', () => {
+  const a = Float64Array.from([1, 2])
+  assert.equal(series.growF64(a, 100).length, 100)
+})
+
+test('growF64: bos diziden buyume gereken kapasiteyi verir', () => {
+  assert.equal(series.growF64(new Float64Array(0), 3).length, 3)
+})
+
+// C2 - kapanmis bar olcutu CEKIM anina gore. Isci mesgulken mesaj gec
+// islenirse, cekim aninda acik olan bar kapanmis sayilip yarim OHLCV ile
+// depoya yaziliyordu ve bu kalici oluyordu.
+test('closedEndIndex: cekim aninda acik olan bar disarida kalir', () => {
+  const tfSec = 60
+  const acilis = 1788000000 // dakika sinirina hizali
+  const times = Float64Array.from([acilis - 120, acilis - 60, acilis])
+  // Cekim, son barin acilisindan 30 sn sonra: o bar HENUZ acik.
+  const cekim = acilis + 30
+  assert.equal(series.closedEndIndex(times, tfSec, cekim), 2)
+  // Ayni veri 90 sn sonra islense bile sonuc degismez.
+  assert.equal(series.closedEndIndex(times, tfSec, cekim), 2)
+  // Cekim bar kapandiktan sonra yapilmissa son bar da dahildir.
+  assert.equal(series.closedEndIndex(times, tfSec, acilis + 60), 3)
+})
+
+test('closedEndIndex: gecersiz olcutlerde tum uzunluk doner', () => {
+  const times = Float64Array.from([100, 160, 220])
+  assert.equal(series.closedEndIndex(times, 0, 500), 3)
+  assert.equal(series.closedEndIndex(times, 60, NaN), 3)
+  assert.equal(series.closedEndIndex(times, 60, 0), 0)
+})

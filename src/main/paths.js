@@ -3,9 +3,14 @@
 /**
  * Uygulama dosya yollari.
  *
- * Electron icinde `app.getPath('userData')` kullanilir. Electron disinda
- * (scriptler, isci ipligi, testler) once `ZONE_MEMORY_DATA_DIR` ortam
- * degiskenine, o da yoksa isletim sistemine gore varsayilan yola bakilir.
+ * Yol birlestirme, ortam degiskeni onceligi ve klasor olusturma mantigi
+ * `src/core/paths-core.js` icindedir; betikler de ayni modulu kullanir.
+ * Bu dosyanin tek ek isi Electron icinde `app.getPath('userData')` degerini
+ * varsayilan kok olarak vermektir.
+ *
+ * Electron disinda (scriptler, isci ipligi, testler) once
+ * `ZONE_MEMORY_USER_DIR` / `ZONE_MEMORY_DATA_DIR` ortam degiskenlerine, o da
+ * yoksa isletim sistemine gore varsayilan yola bakilir.
  *
  * Yerlesim:
  *   <userData>/settings.json
@@ -17,12 +22,10 @@
  *   <userData>/data/XAUUSD_<tf>_memory.signals.json
  */
 
-const fs = require('fs')
-const os = require('os')
-const path = require('path')
+const core = require('../core/paths-core')
 
-const APP_DIR_NAME = 'Zone Memory'
-const DEFAULT_SYMBOL = 'XAUUSD'
+const APP_DIR_NAME = core.APP_DIR_NAME
+const DEFAULT_SYMBOL = core.DEFAULT_SYMBOL
 
 /**
  * Electron `app` nesnesini guvenli sekilde bulur.
@@ -42,36 +45,29 @@ function electronApp() {
   return null
 }
 
-/** Isletim sistemine gore varsayilan kullanici veri koku. */
-function defaultUserDataDir() {
-  if (process.platform === 'darwin') {
-    return path.join(os.homedir(), 'Library', 'Application Support', APP_DIR_NAME)
-  }
-  if (process.platform === 'win32') {
-    const appData = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming')
-    return path.join(appData, APP_DIR_NAME)
-  }
-  const configHome = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config')
-  return path.join(configHome, APP_DIR_NAME)
+/**
+ * Electron'un kullanici veri koku. Ortam degiskeni varsa paths-core bunu hic
+ * cagirmaz, bu yuzden fonksiyon olarak gecilir.
+ * @returns {string}
+ */
+function electronKok() {
+  const app = electronApp()
+  return app ? app.getPath('userData') : ''
 }
 
 /** Kullanici veri koku (settings.json burada durur). */
 function userDataDir() {
-  if (process.env.ZONE_MEMORY_USER_DIR) return process.env.ZONE_MEMORY_USER_DIR
-  const app = electronApp()
-  if (app) return app.getPath('userData')
-  return defaultUserDataDir()
+  return core.userDir(electronKok)
 }
 
 /** Mum ve hafiza dosyalarinin bulundugu klasor. */
 function dataDir() {
-  if (process.env.ZONE_MEMORY_DATA_DIR) return process.env.ZONE_MEMORY_DATA_DIR
-  return path.join(userDataDir(), 'data')
+  return core.dataDir(electronKok)
 }
 
 /** Ayar dosyasi yolu. */
 function settingsPath() {
-  return path.join(userDataDir(), 'settings.json')
+  return core.settingsPath(electronKok)
 }
 
 /**
@@ -80,7 +76,7 @@ function settingsPath() {
  * @param {string} [symbol]
  */
 function candlePath(tf, symbol) {
-  return path.join(dataDir(), (symbol || DEFAULT_SYMBOL) + '_' + tf + '.bin')
+  return core.candlePath(tf, symbol, dataDir())
 }
 
 /**
@@ -91,7 +87,7 @@ function candlePath(tf, symbol) {
  * @param {string} [symbol]
  */
 function memoryPath(tf, symbol) {
-  return path.join(dataDir(), (symbol || DEFAULT_SYMBOL) + '_' + tf + '_memory')
+  return core.memoryPath(tf, symbol, dataDir())
 }
 
 /** Kayitli bolge listesi yolu. */
@@ -111,10 +107,8 @@ function signalsPath(tf, symbol) {
 
 /** Gerekli klasorleri olusturur, olusan yollari dondurur. */
 function ensureDirs() {
-  const user = userDataDir()
-  const data = dataDir()
-  fs.mkdirSync(user, { recursive: true })
-  fs.mkdirSync(data, { recursive: true })
+  const user = core.ensureDir(userDataDir())
+  const data = core.ensureDir(dataDir())
   return { userDataDir: user, dataDir: data }
 }
 

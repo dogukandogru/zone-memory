@@ -1872,6 +1872,25 @@ function olaylariBagla() {
     canliSinyalEkle(s)
   })
 
+  // Canli akista bosluk olustu ya da vekil duzeltmesi hesaplanamadi: bar
+  // YAZILMADI. Eksik donemi kapatmadan devam etmek seride kalici delik
+  // birakacagi icin hemen veri tamamlama calistirilir.
+  window.api.on('live:gap', async (veri) => {
+    if (!veri) return
+    if (veri.tf && veri.tf !== durum.tf) return
+    if (durum.bosluKapatiliyor) return
+    durum.bosluKapatiliyor = true
+    try {
+      bildir('Canlı akışta boşluk var, eksik dönem indiriliyor.')
+      await tfHazirla(durum.tf)
+      await hepsiniYukle()
+    } catch (err) {
+      hataGoster('Eksik dönem kapatılamadı: ' + (err && err.message ? err.message : String(err)))
+    } finally {
+      durum.bosluKapatiliyor = false
+    }
+  })
+
   window.api.on('log', (veri) => {
     const mesaj = typeof veri === 'string' ? veri : (veri && (veri.message || veri.msg))
     if (mesaj) bildir(String(mesaj))

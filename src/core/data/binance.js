@@ -91,6 +91,9 @@ async function fetchCandles(opts) {
       if (acilisMs > sonAcilis) sonAcilis = acilisMs
       const sn = Math.floor(acilisMs / 1000)
       if (sn < from || sn > to) continue
+      // Acik (kapanmamis) bar atlanir: depoya yarim OHLCV yazilirsa kalici
+      // olur, cunku sonraki cekimler ayni zaman damgasini atlar.
+      if (sn + kaynakSec > Math.floor(Date.now() / 1000)) continue
       t.push(sn)
       ac.push(+satir[1])
       yuk.push(+satir[2])

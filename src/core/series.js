@@ -280,7 +280,14 @@ function firstIndexAtOrAfter(s, t) {
   return res
 }
 
-/** Buyuyen kova tamponlari icin kapasite artirimi. */
+/**
+ * Buyuyen tamponlar icin kapasite artirimi: kapasiteyi iki katina cikarir,
+ * yetmezse dogrudan `need` degerine ceker. Yeniden ornekleme kovalari ve
+ * aktarim betikleri ayni yardimciyi kullanir.
+ * @param {Float64Array} arr
+ * @param {number} need En az bu kadar yer olmali
+ * @returns {Float64Array}
+ */
 function growF64(arr, need) {
   let cap = arr.length * 2
   if (cap < need) cap = need
@@ -472,9 +479,34 @@ function sanitize(s) {
   return trimSeries(out, m)
 }
 
+/**
+ * Kapanmis barlarin bitis indeksini dondurur: [0, sonuc) araligindaki barlar
+ * `refTime` anina gore KAPANMISTIR.
+ *
+ * Neden ayri fonksiyon: canli dongu bu kontrolu isciye mesaj islendigi ana
+ * gore yapiyordu. Isci uzun bir isle mesgulken (1m geriye test 53-60 sn)
+ * cekim aninda acik olan bar kapanmis sayilip yarim OHLCV ile depoya
+ * yaziliyordu ve sonraki cekimler ayni zaman damgasini atladigi icin bu
+ * kalici oluyordu. Olcut her zaman cekim anidir.
+ *
+ * @param {Float64Array|number[]} times Bar acilis zamanlari (UNIX saniye)
+ * @param {number} tfSec Bar suresi (saniye)
+ * @param {number} refTime Cekim ani (UNIX saniye)
+ * @param {number} [length] Bakilacak uzunluk (varsayilan times.length)
+ * @returns {number} 0 ile length arasinda
+ */
+function closedEndIndex(times, tfSec, refTime, length) {
+  const n = Number.isFinite(length) ? Math.min(length, times.length) : times.length
+  if (!(tfSec > 0) || !Number.isFinite(refTime)) return n
+  let son = n
+  while (son > 0 && times[son - 1] + tfSec > refTime) son--
+  return son
+}
+
 module.exports = {
   createSeries,
   emptySeries,
+  closedEndIndex,
   sliceSeries,
   concatSeries,
   fromArrays,
@@ -482,6 +514,7 @@ module.exports = {
   indexAtTime,
   lastIndexAtOrBefore,
   firstIndexAtOrAfter,
+  growF64,
   resample,
   sanitize,
 }

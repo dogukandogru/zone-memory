@@ -139,6 +139,8 @@ Her satirin sahibi TEK bir ajandir. Baska bir ajanin dosyasina yazma.
 ```
 src/core/tf.js                    A1
 src/core/series.js                A1
+src/core/paths-core.js            A1
+src/core/util/cli.js              A1
 src/core/store/binstore.js        A1
 src/core/store/memstore.js        A1
 src/core/ta.js                    A2
@@ -187,6 +189,7 @@ const TF_SECONDS = { '1m':60, '5m':300, '15m':900, '30m':1800, '1h':3600, '4h':1
 module.exports = {
   TF_SECONDS,
   TF_LIST,            // ['1m','5m','15m','30m','1h','4h','1d']
+  TURETILEN_TF,       // ['5m','15m','1h','4h'] tabandan DOSYAYA turetilenler
   tfSeconds(tf),      // number, bilinmeyen tf icin throw
   tfLabel(tf),        // '15m' -> '15 dakika'
   tfFromSeconds(sec), // 900 -> '15m', eslesme yoksa null
@@ -206,6 +209,7 @@ module.exports = {
   indexAtTime(s, t),               // ikili arama, tam eslesme yoksa -1
   lastIndexAtOrBefore(s, t),       // <= t olan en buyuk indeks, yoksa -1
   firstIndexAtOrAfter(s, t),
+  growF64(arr, need),              // Float64Array kapasitesini iki katina cikarir
   resample(s, toTfSec),            // Series, epoch katlarina hizali kovalar
   sanitize(s),                     // zaman sirali, tekrarsiz, NaN'siz Series dondur
 }
@@ -837,7 +841,10 @@ module.exports = {
 ## 18. `src/main/*` (A9)
 
 - `paths.js`: `dataDir()` = `app.getPath('userData')/data`, `candlePath(tf)`,
-  `memoryPath(tf)`, `settingsPath()`. Klasorleri olusturur.
+  `memoryPath(tf)`, `settingsPath()`. Klasorleri olusturur. Yol birlestirme,
+  ortam degiskeni onceligi ve klasor olusturma `src/core/paths-core.js`
+  icindedir; `paths.js` yalnizca Electron'un `userData` degerini varsayilan
+  kok olarak verir, betikler (`scripts/*.mjs`) ayni cekirdegi kullanir.
 - `settings.js`: `load()`, `save(patch)`, `replace(tam)`, `get(key)`,
   `set(key, val)`, `applySetPayload(p)`, `varsayilanlaraDon()`, `DEFAULTS`,
   `SINIRLAR`. DEFAULTS icinde: `symbol:'XAUUSD'`, `timeframe:'5m'`,
@@ -934,8 +941,18 @@ yukselen mum `#26a69a`, dusen mum `#ef5350`, metin `#d1d4dc`.
   tumunu string olarak tutma, satir satir isle ve buyuyen tampon kullan.
   Hedef: `~/Library/Application Support/Zone Memory/data/XAUUSD_1m.bin` (macOS),
   Windows'ta `%APPDATA%/Zone Memory/data`. Yol hesabi Electron olmadan
-  yapilacagi icin `scripts/userdata-path.mjs` benzeri kucuk bir yardimci yaz
-  veya `--out` parametresi al.
+  yapilacagi icin `scripts/userdata-path.mjs` kullanilir (govdesi
+  `src/core/paths-core.js` icindedir) veya `--out` parametresi alinir.
+
+  **Uzerine yazma korumasi (zorunlu).** Hedef `.bin` dosyalarindan biri zaten
+  varsa betik veritabanina HIC dokunmadan durur ve cikis kodu 1 verir.
+  `--force` verilirse her hedef once `<ad>.bak-YYYYMMDD-HHMMSS` olarak
+  kopyalanir. `--limit` verilip `--out` verilmezse hedef
+  `os.tmpdir()/zone-memory-deneme/` olur: deneme aktarimi gercek depoyu asla
+  ezmez. Gercek veri klasorune aktarim bitince mevcut
+  `<sembol>_<tf>_memory*` dosyalari `<dataDir>/_eski_hafiza_yedek/<damga>/`
+  altina TASINIR ve hafizalarin yeniden taranmasi gerektigi bildirilir
+  (aktarilan mumlarla eski hafizanin bar indeksleri uyusmaz).
 - `scripts/fetch-history.mjs`: saglayici uzerinden gecmis indirir (Electron'suz).
 - `README.md`: Turkce. Kurulum (macOS ve Windows), calistirma, ilk veri kurulumu,
   saglayici secimi ve anahtarlar, sistemin nasil calistigi, bilinen sinirlar.

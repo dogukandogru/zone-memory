@@ -125,6 +125,52 @@ function createOffsetLookup (tz) {
 }
 
 /**
+ * SPOT ALTIN PIYASA TAKVIMI
+ * ---------------------------------------------------------------------------
+ * Vekil kaynaklar (PAXG, XAUT) kripto borsalarinda 7/24 islem gorur, spot
+ * XAUUSD gormez. Kapali saatlerde uretilen barlar depoya girerse indikatorun
+ * pivot, ATR ve hacim pencereleri kayar ve gecmisle tutarsiz olay uretir.
+ *
+ * Takvim ONCEDEN deponun son 8 haftasindan cikariliyordu; depoya bir kez kirli
+ * (hafta sonu) bar girince o saatler "acik" sayiliyor ve suzgec kendi kendini
+ * bozuyordu. Bu yuzden kural tabanli: New York yerel saatiyle piyasa Pazar
+ * 18:00'de acilir, Cuma 17:00'de kapanir, her gun 17:00-18:00 arasi aradir.
+ * Noel ve yilbasi tam gun kapalidir.
+ */
+const PIYASA_TZ = 'America/New_York'
+
+/**
+ * Piyasa acik mi diye soran, gun bazinda onbellekli bir fonksiyon uretir.
+ * @param {string} [tz] varsayilan America/New_York
+ * @returns {(tSec:number)=>boolean}
+ */
+function createMarketCalendar (tz) {
+  const offsetAt = createOffsetLookup(tz || PIYASA_TZ)
+  return function piyasaAcikMi (tSec) {
+    if (!Number.isFinite(tSec)) return false
+    const local = tSec + offsetAt(tSec)
+    const days = Math.floor(local / DAY)
+    // 1 Ocak 1970 Persembe idi, +4 kaydirma Pazar'i 0 yapar.
+    const dow = (((days + 4) % 7) + 7) % 7
+    let sod = local % DAY
+    if (sod < 0) sod += DAY
+    const hour = (sod / 3600) | 0
+
+    if (dow === 6) return false                 // Cumartesi tam kapali
+    if (dow === 5 && hour >= 17) return false   // Cuma 17:00 kapanis
+    if (dow === 0 && hour < 18) return false    // Pazar 18:00 acilis
+    if (hour === 17) return false               // gunluk ara
+
+    const d = new Date(local * 1000)
+    const ay = d.getUTCMonth() + 1
+    const gun = d.getUTCDate()
+    if (ay === 12 && gun === 25) return false   // Noel
+    if (ay === 1 && gun === 1) return false      // Yilbasi
+    return true
+  }
+}
+
+/**
  * Saatten seans adi. Python portundaki _session_name ile birebir aynidir.
  * @param {number} hour 0..23
  * @returns {string} 'Asia' | 'London' | 'New York' | 'Other'
@@ -221,8 +267,11 @@ function sessionIndexArray (timeArr, tz) {
 
 module.exports = {
   SESSIONS,
+  PIYASA_TZ,
   sessionIndexArray,
   localHourArray,
   localDowArray,
   sessionName,
+  createOffsetLookup,
+  createMarketCalendar,
 }

@@ -21,6 +21,7 @@ const require = createRequire(import.meta.url)
 const binstore = require('../src/core/store/binstore.js')
 const { tfSeconds, tfLabel, TF_LIST } = require('../src/core/tf.js')
 const saglayicilar = require('../src/core/data/provider.js')
+const { argumanlariAyristir, sayiBicim, zamanBicim, bildir } = require('../src/core/util/cli.js')
 
 /** Saglayici basina anahtar okunabilecek ortam degiskenleri. */
 const ANAHTAR_ORTAM = {
@@ -31,54 +32,7 @@ const ANAHTAR_ORTAM = {
 /* ------------------------------------------------------------------ */
 /* Kucuk yardimcilar                                                    */
 /* ------------------------------------------------------------------ */
-
-/** Basit argüman ayristirici: --ad deger, --ad=deger ve --bayrak destekler. */
-function argumanlariAyristir(argv) {
-  const out = { _: [] }
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i]
-    if (!arg.startsWith('--')) {
-      out._.push(arg)
-      continue
-    }
-    const govde = arg.slice(2)
-    const esit = govde.indexOf('=')
-    if (esit >= 0) {
-      out[govde.slice(0, esit)] = govde.slice(esit + 1)
-      continue
-    }
-    const sonraki = argv[i + 1]
-    if (sonraki !== undefined && !sonraki.startsWith('--')) {
-      out[govde] = sonraki
-      i++
-    } else {
-      out[govde] = true
-    }
-  }
-  return out
-}
-
-/** 1234567 -> '1.234.567' */
-function sayiBicim(n) {
-  const s = String(Math.trunc(n))
-  let out = ''
-  for (let i = 0; i < s.length; i++) {
-    if (i > 0 && (s.length - i) % 3 === 0) out += '.'
-    out += s[i]
-  }
-  return out
-}
-
-/** UNIX saniyeyi '2009-03-15 22:00' seklinde yazar. */
-function zamanBicim(sn) {
-  if (!Number.isFinite(sn)) return '-'
-  return new Date(sn * 1000).toISOString().replace('T', ' ').slice(0, 16)
-}
-
-/** stderr'e tek satir yazar. */
-function bildir(metin) {
-  process.stderr.write(metin + '\n')
-}
+/* Arguman ayristirma ve bicimleme src/core/util/cli.js icindedir.      */
 
 /**
  * Tarih metnini UNIX saniyeye cevirir.

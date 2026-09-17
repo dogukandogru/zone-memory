@@ -6,7 +6,8 @@
  *   api.on(type, handler)                     olay abonesi
  *   api.off(type, handler)                    abonelik iptali
  *
- * Olay tipleri: 'progress', 'live:candle', 'live:signal', 'live:status', 'log'.
+ * Olay tipleri: 'progress', 'live:candle', 'live:signal', 'live:status',
+ * 'live:gap' (akista bosluk, bar yazilmadi), 'log'.
  * '*' ile tum olaylar dinlenebilir.
  */
 

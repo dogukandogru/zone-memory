@@ -109,6 +109,8 @@ async function fetchCandles(opts) {
       if (ms < enEski) enEski = ms
       const sn = Math.floor(ms / 1000)
       if (sn < from || sn > to) continue
+      // Acik (kapanmamis) bar atlanir, yarim bar depoda kalici olur.
+      if (sn + kaynakSec > Math.floor(Date.now() / 1000)) continue
       t.push(sn)
       ac.push(+satir[1])
       yuk.push(+satir[2])

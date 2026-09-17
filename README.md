@@ -198,13 +198,27 @@ node scripts/import-legacy.mjs --help
   --limit <n>           Yalnızca ilk n satırı aktar (deneme için)
   --tfs 5m,15m,1h,4h    Türetilecek zaman dilimleri
   --no-resample         Üst zaman dilimlerini üretme
+  --force               Mevcut dosyaların üzerine yaz (önce yedeklenir)
 ```
 
-Örnek deneme aktarımı:
+**Üzerine yazma koruması.** Hedef `.bin` dosyalarından biri zaten varsa betik
+veritabanına hiç dokunmadan durur ve çıkış kodu 1 verir. Üzerine yazmak için
+`--force` gerekir; o zaman her hedef dosya önce
+`<ad>.bak-YYYYMMDD-HHMMSS` adıyla yedeklenir.
+
+Gerçek veri klasörüne aktarım bittiğinde mevcut `XAUUSD_<tf>_memory*` dosyaları
+`data/_eski_hafiza_yedek/<damga>/` altına **taşınır**: aktarılan mumlarla eski
+hafızanın bar indeksleri uyuşmaz, hafızaların yeniden taranması gerekir.
+
+Örnek deneme aktarımı (geçici klasöre yazar, gerçek depoya dokunmaz):
 
 ```bash
-node scripts/import-legacy.mjs --limit 200000
+node scripts/import-legacy.mjs --limit 200000 --out /tmp/zone-memory-deneme/XAUUSD_1m.bin
 ```
+
+`--limit` verilip `--out` verilmezse hedef zaten işletim sisteminin geçici
+klasörüdür (`$TMPDIR/zone-memory-deneme/`); deneme aktarımı gerçek depoyu
+hiçbir koşulda ezmez.
 
 ### 3.2 İnternetten indirme (Docker yoksa)
 

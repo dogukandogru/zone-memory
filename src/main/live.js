@@ -43,6 +43,9 @@ const state = {
   ticks: 0,
   signals: 0,
   addedBars: 0,
+  // Duzeltme hesaplanamadi veya akista bosluk var: bar yazilmiyor, once
+  // Veri Cek ile eksik donem kapatilmali.
+  needsSync: false,
 }
 
 let timer = null
@@ -97,6 +100,7 @@ function status() {
     ticks: state.ticks,
     signals: state.signals,
     addedBars: state.addedBars,
+    needsSync: state.needsSync,
   }
 }
 
@@ -181,6 +185,9 @@ async function tick() {
     const tfmod = require('../core/tf')
     const tfSec = tfmod.tfSeconds(state.tf)
 
+    // Kapanmis bar olcutu bu an uzerinden hesaplanir. Istegin GONDERILDIGI
+    // ani kullaniriz: isci uzun bir isle mesgulse mesaj dakikalar sonra
+    // islenebilir ve o sirada acik olan bar kapanmis sayilirdi.
     const now = Math.floor(Date.now() / 1000)
     const from = now - tfSec * (FETCH_BARS + 5)
 
@@ -215,6 +222,7 @@ async function tick() {
       basis: state.basis,
       volScale: state.volScale,
       basisWarned: basisWarned,
+      fetchedAt: now,
       sinceTime: state.sinceTime,
       params: cfg.indicatorParams || {},
       outcomeCfg: cfg.outcomeCfg || {},
@@ -245,6 +253,19 @@ async function tick() {
     }
     if (res && res.added > 0) {
       state.addedBars += res.added
+    }
+    // Duzeltme hesaplanamadi ya da akista bosluk olustu: bar YAZILMADI.
+    // Arayuz bunu gorunce eksik donemi Veri Cek ile kapatir, yoksa canli
+    // akis sessizce durur.
+    if (res && res.needsSync) {
+      state.needsSync = true
+      emitEvent('live:gap', {
+        tf: state.tf,
+        providerId: state.providerId,
+        lastBarTime: state.lastBarTime,
+      })
+    } else if (res && res.added > 0) {
+      state.needsSync = false
     }
     if (res && res.touch && typeof res.touch.time === 'number') {
       // Ayni olayin tekrar degerlendirilmesini onle.

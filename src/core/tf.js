@@ -17,6 +17,14 @@ const TF_SECONDS = {
 /** Arayuzde gosterilecek sira. */
 const TF_LIST = ['1m', '5m', '15m', '30m', '1h', '4h', '1d']
 
+/**
+ * Taban seriden (1m) DOSYAYA yazilarak turetilen zaman dilimleri.
+ * 30m ve 1d icin ayri dosya tutulmaz, istendiginde anlik uretilir.
+ * Aktarim betigi ve motor iscisi ayni listeyi kullanir; biri digerini geride
+ * birakirsa zaman dilimleri birbirini tutmaz hale gelir.
+ */
+const TURETILEN_TF = ['5m', '15m', '1h', '4h']
+
 /** Turkce etiketler. */
 const TF_LABELS = {
   '1m': '1 dakika',
@@ -69,6 +77,7 @@ function tfFromSeconds(sec) {
 module.exports = {
   TF_SECONDS,
   TF_LIST,
+  TURETILEN_TF,
   tfSeconds,
   tfLabel,
   tfFromSeconds,

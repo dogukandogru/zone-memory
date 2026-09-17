@@ -442,8 +442,11 @@ handlers['data:candles'] = async function (payload) {
 }
 
 /** Saglayicidan gecmis indirip depoya ekler. */
-/** Turetilen zaman dilimleri: 1m guncellendikten sonra yeniden uretilir. */
-const TURETILEN_TF = ['5m', '15m', '1h', '4h']
+/**
+ * Turetilen zaman dilimleri: 1m guncellendikten sonra yeniden uretilir.
+ * Liste core/tf.js icinde tutulur, aktarim betigi de ayni listeyi kullanir.
+ */
+const { TURETILEN_TF } = core('tf')
 
 handlers['data:sync'] = async function (payload, ctx) {
   const tf = requireTf(payload.tf)
@@ -474,8 +477,11 @@ handlers['data:sync'] = async function (payload, ctx) {
     tf: hedefTf,
     providerId: payload.providerId,
     apiKey: payload.apiKey || '',
-    from: num(payload.from, 0),
-    to: num(payload.to, Math.floor(Date.now() / 1000)),
+    // `from` YALNIZCA acikca verilirse gecer. Onceden 0 gonderiliyordu ve
+    // syncHistory bunu "1970'ten depo basina kadar indir" diye anliyordu:
+    // tek tiklamada 471 bos HistData istegi olculdu.
+    from: Number.isFinite(payload.from) ? Math.floor(payload.from) : undefined,
+    to: Number.isFinite(payload.to) ? Math.floor(payload.to) : undefined,
     storedSeries: onbellek,
     onProgress: (pct, msg) => ctx.progress(num(pct, 0) * 0.75, msg),
   })
@@ -837,69 +843,72 @@ handlers['engine:live-tick'] = async function (payload) {
   }
   inc = seriesMod.sanitize(inc)
 
-  // Vekil kaynak fiyat kaydirmasi. computeBasis ortak zaman yoksa 0 doner,
-  // bu yuzden 0 degerini "hesaplanamadi" sayip sonraki cekimde tekrar deneriz.
+  // VEKIL KAYNAK DUZELTMESI
+  // Fiyat kaydirmasi (basis), hacim olcegi ve piyasa saati suzgeci tek
+  // fonksiyonda uygulanir (loader.normalizeProxy). Onceden bunlar ayri ayri
+  // yapiliyordu ve hicbiri hesaplanamadiginda HAM barlar depoya yaziliyordu:
+  // gercek depoda 1m'ye 1613 ham PAXG bari girdi (hacim ~226 kat kucuk,
+  // 160'i piyasanin kapali oldugu saatte). Ham bar bir kez girince basis 0
+  // cikip duzeltme kalici olarak kapaniyor. Artik duzeltme hesaplanamazsa
+  // HICBIR SEY yazilmaz ve senkron istenir.
   let basis = typeof payload.basis === 'number' && isFinite(payload.basis) ? payload.basis : null
   let basisComputed = false
   let basisWarned = !!payload.basisWarned
-  if (payload.isProxy && basis === null) {
-    try {
-      const loader = core('data/loader')
-      const stored = await getSeries(tf, false)
-      if (stored && stored.length > 0) {
-        const b = loader.computeBasis(stored, inc, 200)
-        if (typeof b === 'number' && isFinite(b) && b !== 0) {
-          basis = b
-          basisComputed = true
-        } else if (!basisWarned) {
-          basisWarned = true
-          logs.push('Vekil kaynak ile depodaki spot seri arasinda ortak zaman bulunamadi, fiyat kaydirmasi henuz uygulanmiyor.')
-        }
-      } else if (!basisWarned) {
-        basisWarned = true
-        logs.push('Depoda spot seri yok, vekil kaynak fiyati oldugu gibi kullaniliyor.')
-      }
-    } catch (err) {
-      logs.push('Fiyat kaydirmasi hesaplanamadi: ' + (err && err.message ? err.message : String(err)))
-    }
-  }
-  if (payload.isProxy && basis !== null && basis !== 0) {
-    try {
-      inc = core('data/loader').applyBasis(inc, basis)
-    } catch (err) {
-      logs.push('Fiyat kaydirmasi uygulanamadi: ' + (err && err.message ? err.message : String(err)))
-    }
-  }
-
-  // Hacim olcegi: kaynaklarin hacim birimi farklidir (HistData tick sayisi,
-  // Binance PAXG miktari). Indikatorun flow bileseni hacme bagli oldugu icin
-  // canli barlar da depodaki olcege tasinir, aksi halde flow yapay olarak
-  // sifira yakin cikar ve bolge olusmaz.
   let volScale = typeof payload.volScale === 'number' && isFinite(payload.volScale) && payload.volScale > 0
     ? payload.volScale
     : null
-  if (payload.isProxy && volScale === null) {
-    try {
-      const stored2 = await getSeries(tf, false)
-      if (stored2 && stored2.length > 0) {
-        const k = core('data/loader').hacimOlcegi(stored2, inc)
-        if (typeof k === 'number' && isFinite(k) && k > 0 && k !== 1) volScale = k
+  let needsSync = false
+
+  if (payload.isProxy) {
+    const loader = core('data/loader')
+    if (basis === null || volScale === null) {
+      // Bilinmeyen varsa ikisini birlikte yeniden hesaplariz.
+      try {
+        const stored = await getSeries(tf, false)
+        const duzeltme = loader.normalizeProxy(stored, inc)
+        if (duzeltme.ok) {
+          basis = duzeltme.basis
+          volScale = duzeltme.volScale
+          basisComputed = true
+          inc = duzeltme.series
+        } else {
+          needsSync = true
+          if (!basisWarned) {
+            basisWarned = true
+            logs.push('Vekil kaynak duzeltilemedi (' + duzeltme.reason + '), bar yazilmadi. Veri Cek ile bosluk kapatilmali.')
+          }
+        }
+      } catch (err) {
+        needsSync = true
+        logs.push('Vekil duzeltme hesaplanamadi: ' + (err && err.message ? err.message : String(err)))
       }
-    } catch (err) {
-      logs.push('Hacim olcegi hesaplanamadi: ' + (err && err.message ? err.message : String(err)))
+    } else {
+      // Onceki turdan bilinen katsayilar: ayni sirayla uygulanir.
+      inc = loader.applyBasis(inc, basis)
+      if (volScale !== 1) {
+        for (let i = 0; i < inc.length; i++) inc.volume[i] *= volScale
+      }
+      inc = loader.piyasaSaatleriyleSuz(inc)
     }
   }
-  if (payload.isProxy && volScale !== null && volScale !== 1) {
-    for (let i = 0; i < inc.length; i++) inc.volume[i] *= volScale
+
+  if (!inc || inc.length === 0) {
+    return {
+      tf: tf, added: 0, basis: basis, volScale: volScale, basisWarned: basisWarned,
+      needsSync: needsSync, lastBar: null, signal: null, touch: null,
+      logs: logs.length ? logs : ['Duzeltmeden sonra yazilacak bar kalmadi.'],
+    }
   }
 
   const lastBars = seriesMod.toBars(inc, inc.length - 1, inc.length)
   const lastBar = lastBars.length > 0 ? lastBars[0] : null
 
-  // Kapanmis barlari ayikla (acik bar depoya yazilmaz).
-  const nowSec = Math.floor(Date.now() / 1000)
-  let closedEnd = inc.length
-  while (closedEnd > 0 && inc.time[closedEnd - 1] + tfSec > nowSec) closedEnd--
+  // Kapanmis barlari ayikla (acik bar depoya yazilmaz). Olcut, isciye mesajin
+  // ISLENDIGI an degil, saglayiciya istegin GONDERILDIGI andir: isci uzun bir
+  // testle mesgulken (1m testi 53-60 sn) cekim aninda acik olan bar aksi
+  // halde kapanmis sayilip yarim OHLCV ile kalici yaziliyordu.
+  const fetchedAt = num(payload.fetchedAt, Math.floor(Date.now() / 1000))
+  const closedEnd = seriesMod.closedEndIndex(inc.time, tfSec, fetchedAt, inc.length)
 
   let added = 0
   let stored = false
@@ -933,13 +942,35 @@ handlers['engine:live-tick'] = async function (payload) {
 
     let startIdx = 0
     while (startIdx < closedEnd && inc.time[startIdx] <= lastKnown) startIdx++
+
+    // BOSLUK DENETIMI: iki cekim arasinda piyasanin ACIK oldugu barlar
+    // kacirildiysa bar eklemeyiz. Eksik barla devam etmek seride kalici bir
+    // delik birakir; pivot, ATR ve hacim ortalamalari o delikten sonra
+    // gecmisle tutarsiz hesaplanir. Bunun yerine senkron istenir.
+    if (startIdx < closedEnd && lastKnown > 0 && inc.time[startIdx] - lastKnown > tfSec) {
+      const piyasaAcikMi = core('session').createMarketCalendar()
+      let acikBosluk = 0
+      for (let t = lastKnown + tfSec; t < inc.time[startIdx]; t += tfSec) {
+        if (piyasaAcikMi(t)) acikBosluk++
+        if (acikBosluk > 0) break
+      }
+      if (acikBosluk > 0) {
+        needsSync = true
+        logs.push('Canli akista bosluk var (' + new Date(lastKnown * 1000).toISOString() +
+          ' sonrasi), bar eklenmedi. Eksik donem Veri Cek ile kapatilmali.')
+        startIdx = closedEnd
+      }
+    }
+
     if (startIdx < closedEnd) {
       const fresh = seriesMod.sliceSeries(inc, startIdx, closedEnd)
       if (canStore) {
         const res = await binstore.appendSeries(paths.candlePath(tf), fresh)
-        added = res && res.added ? res.added : fresh.length
+        added = num(res && res.added, 0)
         stored = true
       } else {
+        // Ayri dosya yoksa bar yalnizca bellekteki seriye eklenir; bu barlar
+        // "eklendi" sayilmaz ki sonraki turda yeniden denensin.
         added = fresh.length
         if (!liveStoreWarned) {
           liveStoreWarned = true
@@ -985,7 +1016,7 @@ handlers['engine:live-tick'] = async function (payload) {
           logs.push('Yeni bolge olayi bulundu ama hafiza bos. Once "Geçmişi Tara" calistirin.')
         } else {
           const protos = await getProtos(tf, false)
-          signal = core('learn/signal').evaluateTouch(cand, feats, mem, protos, payload.signalCfg || {}, num(cand.time, nowSec))
+          signal = core('learn/signal').evaluateTouch(cand, feats, mem, protos, payload.signalCfg || {}, num(cand.time, fetchedAt))
           if (signal && basis !== null && basis !== 0 && Array.isArray(signal.reasons)) {
             signal.reasons.push('Vekil kaynak fiyati ' + basis.toFixed(2) + ' birim kaydirildi.')
           }
@@ -1004,6 +1035,9 @@ handlers['engine:live-tick'] = async function (payload) {
     volScale: volScale,
     basisComputed: basisComputed,
     basisWarned: basisWarned,
+    // Duzeltme hesaplanamadi ya da akista bosluk olustu: arayuz bunu gorunce
+    // eksik donemi Veri Cek ile kapatmali, yoksa canli bar hic yazilmaz.
+    needsSync: needsSync,
     lastBar: lastBar,
     signal: signal,
     touch: touch,

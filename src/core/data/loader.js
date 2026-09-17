@@ -7,13 +7,25 @@
 // CONTRACTS.md bolum 17 ile uyumludur.
 
 const path = require('node:path')
+const fsp = require('node:fs/promises')
 const { tfSeconds } = require('../tf')
 const series = require('../series')
 const binstore = require('../store/binstore')
 const { getProvider, bildir } = require('./provider')
+const { createMarketCalendar } = require('../session')
 
 const VARSAYILAN_SEMBOL = 'XAUUSD'
 const VARSAYILAN_ORTUSME = 200
+
+// Basis ve hacim olcegi icin gereken en az ortak bar sayisi. Bunun altinda
+// hesap guvenilmez; duzeltmesiz bar yazmaktansa hic yazmamak dogrudur.
+// (Bu esikler gecicidir, V3 maddesi medyan mutlak sapmayla sikilastiracak.)
+const MIN_ORTAK_BAR = 30
+const MIN_HACIM_ORANI = 10
+
+// HistData 2009-03'ten once XAUUSD yayinlamiyor; daha eskisini istemek
+// bos indirme turlarindan baska bir sey uretmez.
+const HISTDATA_BASLANGIC = Date.UTC(2009, 2, 1) / 1000
 
 /**
  * Depodaki mum dosyasinin adi. CONTRACTS.md bolum 20'deki
@@ -29,6 +41,59 @@ function candleFileName(tf, symbol) {
 /** Tam dosya yolu. */
 function mumYolu(dataDir, tf, symbol) {
   return path.join(dataDir, candleFileName(tf, symbol))
+}
+
+/** Vekil kaynakla doldurulan araliklarin kaydi (XAUUSD_1m.proxy.json). */
+function vekilKayitYolu(dataDir, tf, symbol) {
+  return path.join(dataDir, (symbol || VARSAYILAN_SEMBOL) + '_' + tf + '.proxy.json')
+}
+
+/**
+ * Vekil kaynakla yazilan araligi kaydeder. Amac: HistData o ayi yayinladiginda
+ * hangi bolgenin spot veriyle DEGISTIRILMESI gerektigi bilinsin. Kayit
+ * olmadan vekil donem kalici hale geliyor ve testin en guncel dilimi giderek
+ * vekil veriden olusuyordu.
+ * @param {string} dataDir
+ * @param {string} tf
+ * @param {string} symbol
+ * @param {{from:number, to:number, provider:string, basis:number,
+ *          volScale:number, bars:number}} kayit
+ */
+async function vekilAraligiKaydet(dataDir, tf, symbol, kayit) {
+  const dosya = vekilKayitYolu(dataDir, tf, symbol)
+  let govde = { version: 1, ranges: [] }
+  try {
+    const ham = await fsp.readFile(dosya, 'utf8')
+    const cozulen = JSON.parse(ham)
+    if (cozulen && Array.isArray(cozulen.ranges)) govde = cozulen
+  } catch (err) {
+    // Dosya yok veya bozuk: sifirdan yazariz.
+  }
+  const son = govde.ranges[govde.ranges.length - 1]
+  // Kesintisiz devam eden yazimlar tek aralikta birlestirilir.
+  if (son && son.provider === kayit.provider && kayit.from - son.to <= 7 * 86400) {
+    son.to = Math.max(son.to, kayit.to)
+    son.bars += kayit.bars
+    son.basis = kayit.basis
+    son.volScale = kayit.volScale
+    son.writtenAt = Math.floor(Date.now() / 1000)
+  } else {
+    govde.ranges.push(Object.assign({ writtenAt: Math.floor(Date.now() / 1000) }, kayit))
+  }
+  const tmp = dosya + '.tmp'
+  await fsp.writeFile(tmp, JSON.stringify(govde, null, 2), 'utf8')
+  await fsp.rename(tmp, dosya)
+}
+
+/** Vekil aralik kaydini okur (yoksa bos liste). */
+async function vekilAraliklariOku(dataDir, tf, symbol) {
+  try {
+    const ham = await fsp.readFile(vekilKayitYolu(dataDir, tf, symbol), 'utf8')
+    const govde = JSON.parse(ham)
+    return govde && Array.isArray(govde.ranges) ? govde.ranges : []
+  } catch (err) {
+    return []
+  }
 }
 
 /**
@@ -88,8 +153,11 @@ async function syncHistory(opts) {
 
   const dosya = mumYolu(o.dataDir, tf, o.symbol)
   const simdi = Math.floor(Date.now() / 1000)
-  let to = Number.isFinite(o.to) ? Math.floor(o.to) : simdi
-  if (to > simdi) to = simdi
+  // Acik (kapanmamis) bar depoya YAZILMAZ: yarim OHLCV kalici olur, cunku
+  // sonraki cekimler ayni zaman damgasini atlar. Ust sinir son KAPANMIS bar.
+  const sonKapanmis = Math.floor(simdi / tfSec) * tfSec - 1
+  let to = Number.isFinite(o.to) ? Math.floor(o.to) : sonKapanmis
+  if (to > sonKapanmis) to = sonKapanmis
 
   const durum = await binstore.statSeries(dosya)
   const varOlan = durum && durum.count > 0 ? durum : null
@@ -99,12 +167,23 @@ async function syncHistory(opts) {
       ? varOlan.lastTime
       : to - 30 * 86400
 
+  const vekil = !!saglayici.isProxy
+  // Gecmise dogru indirme YALNIZCA kullanici acikca `from` verdiyse yapilir.
+  // Aksi halde her senkron 1970'ten depo basina kadar bos tur atiyordu (bir
+  // tiklamada 471 bos HistData istegi olculdu). Vekil kaynakta gecmise dogru
+  // indirme hic yapilmaz: eski bolge icin ortak bar yoktur, yani duzeltme
+  // hesaplanamaz.
+  const fromVerildi = Number.isFinite(o.from)
+  if (fromVerildi && saglayici.id === 'histdata' && from < HISTDATA_BASLANGIC) {
+    from = HISTDATA_BASLANGIC
+  }
+
   /** @type {Array<{from:number,to:number,label:string,bars:number}>} */
   const araliklar = []
   if (!varOlan) {
     if (from < to) araliklar.push({ from: from, to: to, label: 'tum aralik', bars: 0 })
   } else {
-    if (from < varOlan.firstTime) {
+    if (fromVerildi && !vekil && from < varOlan.firstTime) {
       araliklar.push({ from: from, to: varOlan.firstTime, label: 'gecmise dogru', bars: 0 })
     }
     if (varOlan.lastTime < to) {
@@ -131,18 +210,17 @@ async function syncHistory(opts) {
   let toplamCekilen = 0
   let toplamEklenen = 0
   let uygulananBasis = null
+  let sonVolScale = 1
 
   // Vekil kaynak (GC=F, PAXG, XAUT) spot XAUUSD DEGILDIR; seviye farki
   // yuzlerce dolar olabilir. Duzeltmeden eklemek seride sahte bir sicrama
   // yaratir ve indikatoru bozar. Bu yuzden vekil kaynakta:
   //   1. Depodaki son barin BIRAZ ONCESINDEN baslayarak cekeriz, boylece
   //      ortak zaman damgasi olusur.
-  //   2. Ortak bolgeden medyan fark (basis) hesaplanir.
-  //   3. Fark tum yeni seriye uygulanir.
-  //   4. Depoda zaten olan barlar atilir, yalnizca yeni kisim eklenir.
-  // Ortak bolge bulunamazsa EKLEME YAPILMAZ: sessizce bozuk veri yazmaktansa
-  // acik bir hata vermek dogrudur.
-  const vekil = !!saglayici.isProxy
+  //   2. normalizeProxy basis ve hacim olcegini uygular, piyasanin kapali
+  //      oldugu saatlerdeki barlari eler.
+  //   3. Duzeltme hesaplanamazsa EKLEME YAPILMAZ: sessizce bozuk veri
+  //      yazmaktansa acik bir hata vermek dogrudur.
   const ortakSaniye = Math.max(tfSec * 400, 3 * 86400)
 
   for (let i = 0; i < araliklar.length; i++) {
@@ -177,44 +255,32 @@ async function syncHistory(opts) {
           saglayici.name + ' vekil bir kaynak oldugu icin duzeltme olmadan eklenemez.'
         )
       }
-      const fark = computeBasis(spot, yeni, 400)
-      if (!Number.isFinite(fark) || fark === 0) {
+      const duzeltme = normalizeProxy(spot, yeni)
+      if (!duzeltme.ok) {
         throw new Error(
-          saglayici.name + ' ile depodaki seri arasinda ortak zaman bulunamadi, ' +
-          'fiyat kaydirmasi hesaplanamadi. Bu vekil kaynak spot XAUUSD degildir ve ' +
-          'duzeltmesiz eklenirse seride sahte bir sicrama olusur. ' +
-          'Once bosluğu gercek spot kaynakla (HistData, Polygon, Twelve Data) kapatin.'
+          saglayici.name + ' verisi duzeltilemedi: ' + duzeltme.reason + '. ' +
+          'Bu vekil kaynak spot XAUUSD degildir ve duzeltmesiz eklenirse seride ' +
+          'sahte bir sicrama olusur. Once bosluğu gercek spot kaynakla ' +
+          '(HistData, Polygon, Twelve Data) kapatin.'
         )
       }
-      uygulananBasis = fark
-      yeni = applyBasis(yeni, fark)
-
-      // Hacim olcegini de esitleriz. Kaynaklarin hacim birimi farklidir:
-      // HistData dakikadaki TICK SAYISINI verir (~95), Binance ise PAXG
-      // cinsinden islem hacmini (~7). Indikatorun flow bileseni hacme bagli
-      // oldugu icin, olcek degisiminin oldugu yerde yaklasik 10 barlik bir
-      // bozulma olusur (hareketli ortalama hala eski buyuk degerleri tasir).
-      // Ortak bolgedeki medyan orana gore olcekleyip bunu ortadan kaldiririz.
-      const hacimOran = hacimOlcegi(spot, yeni)
-      if (Number.isFinite(hacimOran) && hacimOran > 0 && hacimOran !== 1) {
-        for (let k = 0; k < yeni.length; k++) yeni.volume[k] *= hacimOran
-        bildir(o.onProgress, taban + pay * 0.92,
-          'Hacim olcegi ' + hacimOran.toFixed(2) + ' katsayisiyla esitlendi')
-      }
+      uygulananBasis = duzeltme.basis
+      sonVolScale = duzeltme.volScale
+      yeni = duzeltme.series
       bildir(o.onProgress, taban + pay * 0.9,
-        'Vekil fiyat spot seviyesine ' + fark.toFixed(2) + ' birim kaydirildi')
+        'Vekil fiyat spot seviyesine ' + duzeltme.basis.toFixed(2) + ' birim kaydirildi')
+      if (duzeltme.volScale !== 1) {
+        bildir(o.onProgress, taban + pay * 0.92,
+          'Hacim olcegi ' + duzeltme.volScale.toFixed(2) + ' katsayisiyla esitlendi')
+      }
+      if (duzeltme.dropped > 0) {
+        bildir(o.onProgress, taban + pay * 0.95,
+          'Piyasanin kapali oldugu ' + duzeltme.dropped + ' bar elendi')
+      }
 
       // Depoda zaten olan barlari atarak yalnizca yeni kismi birakiriz.
-      yeni = series.sliceSeries(yeni, series.firstIndexAtOrAfter(yeni, varOlan.lastTime + 1), yeni.length)
-
-      // Spot piyasanin kapali oldugu saatlerdeki barlari (hafta sonu, gunluk
-      // ara) eleriz; kripto vekilleri 7/24 islem gorur, spot altin gormez.
-      const oncekiAdet = yeni.length
-      yeni = piyasaSaatleriyleSuz(spot, yeni, 8)
-      if (yeni.length < oncekiAdet) {
-        bildir(o.onProgress, taban + pay * 0.95,
-          'Piyasanin kapali oldugu ' + (oncekiAdet - yeni.length) + ' bar elendi')
-      }
+      const ilkYeni = series.firstIndexAtOrAfter(yeni, varOlan.lastTime + 1)
+      yeni = ilkYeni < 0 ? series.emptySeries() : series.sliceSeries(yeni, ilkYeni, yeni.length)
     }
 
     r.bars = yeni ? yeni.length : 0
@@ -222,6 +288,16 @@ async function syncHistory(opts) {
     if (r.bars > 0) {
       const sonuc = await binstore.appendSeries(dosya, yeni)
       toplamEklenen += sonuc.added
+      if (vekil && sonuc.added > 0) {
+        await vekilAraligiKaydet(o.dataDir, tf, o.symbol, {
+          from: yeni.time[0],
+          to: yeni.time[yeni.length - 1],
+          provider: saglayici.id,
+          basis: uygulananBasis,
+          volScale: sonVolScale,
+          bars: sonuc.added,
+        })
+      }
     }
   }
 
@@ -248,19 +324,66 @@ async function syncHistory(opts) {
 }
 
 /**
+ * Vekil seriyi depodaki spot seriyle AYNI olcege getirir: fiyat kaydirmasi
+ * (basis), hacim olcegi ve piyasa saati suzgeci tek yerde uygulanir.
+ *
+ * Neden tek fonksiyon: canli dongu ile Veri Cek yolu bu adimlari ayri ayri
+ * uyguluyordu ve canli yol basis hesaplanamadiginda HAM barlari depoya
+ * yaziyordu. Bir kez ham bar girince basis 0 cikip duzeltme kalici olarak
+ * kapaniyordu. Artik duzeltme hesaplanamazsa {ok:false} doner ve cagiran
+ * taraf hicbir sey yazmaz.
+ *
+ * @param {import('../series').Series} spot Depodaki gercek seri
+ * @param {import('../series').Series} proxy Vekil kaynaktan gelen ham seri
+ * @param {{overlapBars?:number}} [opts]
+ * @returns {{ok:boolean, reason?:string, series?:import('../series').Series,
+ *            basis?:number, volScale?:number, dropped?:number}}
+ */
+function normalizeProxy(spot, proxy, opts) {
+  const o = opts || {}
+  if (!proxy || proxy.length === 0) return { ok: false, reason: 'vekil kaynaktan bar gelmedi' }
+  if (!spot || spot.length === 0) return { ok: false, reason: 'depoda karsilastirilacak seri yok' }
+
+  const basis = computeBasis(spot, proxy, o.overlapBars || 400)
+  if (basis === null) {
+    return { ok: false, reason: 'ortak zaman damgasi yok, fiyat kaydirmasi hesaplanamadi' }
+  }
+  let out = applyBasis(proxy, basis)
+
+  const olcek = hacimOlcegi(spot, out)
+  if (olcek === null) {
+    return { ok: false, reason: 'ortak barlarda hacim yok, hacim olcegi hesaplanamadi' }
+  }
+  if (olcek !== 1) {
+    for (let k = 0; k < out.length; k++) out.volume[k] *= olcek
+  }
+
+  const oncekiAdet = out.length
+  out = piyasaSaatleriyleSuz(out)
+  return {
+    ok: true,
+    series: out,
+    basis: basis,
+    volScale: olcek,
+    dropped: oncekiAdet - out.length,
+  }
+}
+
+/**
  * Iki serinin ORTAK zaman damgalarindaki hacim oranlarinin medyanini dondurur
  * (spot hacmi / vekil hacmi). Vekil kaynagin hacmini depodaki olcege tasimak
  * icin kullanilir.
  *
  * Medyan kullanilir cunku tek tek barlardaki uc degerler ortalamayi bozar.
- * Ortak nokta yoksa veya hacimler sifirsa 1 doner (olcekleme yapilmaz).
+ * Yeterli ortak bar yoksa NULL doner: "olcek 1" ile "olcek bilinmiyor" ayni
+ * sey degildir, ikincisinde bar yazilmamalidir.
  *
  * @param {import('../series').Series} spot
  * @param {import('../series').Series} proxy
- * @returns {number}
+ * @returns {number|null}
  */
 function hacimOlcegi(spot, proxy) {
-  if (!spot || spot.length === 0 || !proxy || proxy.length === 0) return 1
+  if (!spot || spot.length === 0 || !proxy || proxy.length === 0) return null
   const oranlar = []
   let i = 0
   let j = 0
@@ -276,10 +399,10 @@ function hacimOlcegi(spot, proxy) {
     } else if (a < b) i++
     else j++
   }
-  if (oranlar.length < 10) return 1
+  if (oranlar.length < MIN_HACIM_ORANI) return null
   oranlar.sort((x, y) => x - y)
   const m = oranlar[Math.floor(oranlar.length / 2)]
-  return Number.isFinite(m) && m > 0 ? m : 1
+  return Number.isFinite(m) && m > 0 ? m : null
 }
 
 /**
@@ -290,40 +413,23 @@ function hacimOlcegi(spot, proxy) {
  * gecmiste hic olmayan barlar girer; bu, indikatorun pivot ve ATR pencerelerini
  * kaydirdigi icin hafizadaki gecmisle tutarsiz sonuc uretir.
  *
- * Takvim sabit kodlanmaz, VERIDEN cikarilir: depodaki serinin son haftalarinda
- * hangi (haftanin gunu, UTC saati) kovalarinda bar VARSA yalnizca o kovalar
- * kabul edilir. Boylece yaz saati kaymalari ve tatil duzenleri kendiliginden
- * dogru ele alinir.
+ * Takvim ONCEDEN depodaki son 8 haftadan cikariliyordu. Depoya bir kez kirli
+ * (Cumartesi) bar girdiginde o saat "acik" sayiliyor ve suzgec kendi kendini
+ * bozuyordu; olculdu: 7/24 vekil haftasinda veriden cikarilan takvim kapali
+ * saatten 480 bar tutup acik saatten 180 bar atiyordu. Artik kural tabanli
+ * New York takvimi kullanilir (session.js createMarketCalendar).
  *
- * @param {import('../series').Series} spot Depodaki gercek seri
  * @param {import('../series').Series} proxy Vekil kaynaktan gelen seri
- * @param {number} [haftaSayisi] Takvimi cikarmak icin bakilacak hafta (varsayilan 8)
  * @returns {import('../series').Series}
  */
-function piyasaSaatleriyleSuz(spot, proxy, haftaSayisi) {
-  if (!spot || spot.length === 0 || !proxy || proxy.length === 0) return proxy
-  const hafta = Number.isFinite(haftaSayisi) && haftaSayisi > 0 ? haftaSayisi : 8
-
-  // Son N haftanin (gun, saat) kovalari.
-  const sonZaman = spot.time[spot.length - 1]
-  const baslangic = sonZaman - hafta * 7 * 86400
-  const kovalar = new Uint8Array(7 * 24)
-  let bakilan = 0
-  for (let i = spot.length - 1; i >= 0; i--) {
-    const t = spot.time[i]
-    if (t < baslangic) break
-    const d = new Date(t * 1000)
-    kovalar[d.getUTCDay() * 24 + d.getUTCHours()] = 1
-    bakilan++
-  }
-  // Yeterli ornek yoksa suzme yapma (yanlislikla her seyi elemeyelim).
-  if (bakilan < 200) return proxy
+function piyasaSaatleriyleSuz(proxy) {
+  if (!proxy || proxy.length === 0) return proxy
+  const piyasaAcikMi = createMarketCalendar()
 
   const tut = new Uint8Array(proxy.length)
   let kalan = 0
   for (let i = 0; i < proxy.length; i++) {
-    const d = new Date(proxy.time[i] * 1000)
-    if (kovalar[d.getUTCDay() * 24 + d.getUTCHours()] === 1) {
+    if (piyasaAcikMi(proxy.time[i])) {
       tut[i] = 1
       kalan++
     }
@@ -348,7 +454,12 @@ function piyasaSaatleriyleSuz(spot, proxy, haftaSayisi) {
 /**
  * Vekil kaynak fiyatini spot seviyesine tasimak icin medyan fark hesaplar.
  * Iki serinin ORTAK zaman damgalarindaki kapanis farklarinin (spot - vekil)
- * medyani dondurulur. Ortak nokta yoksa 0 doner.
+ * medyani dondurulur. Yeterli ortak bar yoksa NULL doner.
+ *
+ * NOT: Depoya bir kez HAM vekil bar yazildiysa ortak bolgedeki fark gercekten
+ * 0 cikar ve bu durum "ortak yok" ile ayirt edilemez. Tek korunma, ham barin
+ * hic yazilmamasidir (normalizeProxy) ve kirlenmis depo icin tek seferlik
+ * onarimdir (scripts/repair-proxy.mjs).
  *
  * Medyan kullanilir cunku tek tek barlarda olusan gecici sapmalar ortalamayi
  * bozar; medyan bunlara dayaniklidir.
@@ -356,12 +467,12 @@ function piyasaSaatleriyleSuz(spot, proxy, haftaSayisi) {
  * @param {import('../series').Series} spotSeries
  * @param {import('../series').Series} proxySeries
  * @param {number} [overlapBars] Son kac ortak bar kullanilsin (varsayilan 200)
- * @returns {number}
+ * @returns {number|null}
  */
 function computeBasis(spotSeries, proxySeries, overlapBars) {
   const a = spotSeries
   const b = proxySeries
-  if (!a || !b || a.length === 0 || b.length === 0) return 0
+  if (!a || !b || a.length === 0 || b.length === 0) return null
 
   let pencere = Number.isFinite(overlapBars) ? Math.floor(overlapBars) : VARSAYILAN_ORTUSME
   if (pencere <= 0) pencere = VARSAYILAN_ORTUSME
@@ -395,7 +506,7 @@ function computeBasis(spotSeries, proxySeries, overlapBars) {
       j++
     }
   }
-  if (sayac === 0) return 0
+  if (sayac < MIN_ORTAK_BAR) return null
 
   const m = sayac < pencere ? sayac : pencere
   const dizi = halka.slice(0, m)
@@ -480,10 +591,15 @@ async function loadSeries(opts) {
 module.exports = {
   syncHistory: syncHistory,
   computeBasis: computeBasis,
+  normalizeProxy: normalizeProxy,
   piyasaSaatleriyleSuz: piyasaSaatleriyleSuz,
   hacimOlcegi: hacimOlcegi,
   applyBasis: applyBasis,
   loadSeries: loadSeries,
+  MIN_ORTAK_BAR: MIN_ORTAK_BAR,
+  vekilAraligiKaydet: vekilAraligiKaydet,
+  vekilAraliklariOku: vekilAraliklariOku,
+  vekilKayitYolu: vekilKayitYolu,
   // Betikler ve ana surec icin ek yardimci (sozlesme disinda, eklemedir):
   candleFileName: candleFileName,
 }

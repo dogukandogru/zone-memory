@@ -15,7 +15,14 @@
 // Varsayilan hedef:
 //   macOS   ~/Library/Application Support/Zone Memory/data/XAUUSD_1m.bin
 //   Windows %APPDATA%/Zone Memory/data/XAUUSD_1m.bin
+//
+// UZERINE YAZMA KORUMASI: hedef dosyalardan biri zaten varsa betik hic is
+// yapmadan durur. --force verilirse her hedef once '<ad>.bak-<damga>' olarak
+// yedeklenir. --limit verilip --out verilmezse (deneme aktarimi) hedef gecici
+// klasordur, yani gercek depoya asla dokunulmaz.
 
+import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
@@ -25,10 +32,19 @@ import { dataDir, ensureDataDir, DEFAULT_SYMBOL } from './userdata-path.mjs'
 const require = createRequire(import.meta.url)
 const binstore = require('../src/core/store/binstore.js')
 const seriler = require('../src/core/series.js')
-const { tfSeconds, tfLabel } = require('../src/core/tf.js')
+const { tfSeconds, tfLabel, TURETILEN_TF } = require('../src/core/tf.js')
+const yollar = require('../src/core/paths-core.js')
+const {
+  argumanlariAyristir,
+  sayiBicim,
+  zamanBicim,
+  sureBicim,
+  damga,
+  bildir,
+} = require('../src/core/util/cli.js')
 
-/** Kaynak zaman diliminden turetilecek varsayilan zaman dilimleri. */
-const VARSAYILAN_TURETILEN = ['5m', '15m', '1h', '4h']
+/** Deneme aktariminin yazildigi gecici klasorun adi. */
+const DENEME_KLASORU = 'zone-memory-deneme'
 
 /** Ilerleme kac satirda bir bildirilsin. */
 const ILERLEME_ADIMI = 250000
@@ -39,68 +55,10 @@ const BASLANGIC_KAPASITE = 1 << 20
 /* ------------------------------------------------------------------ */
 /* Kucuk yardimcilar                                                    */
 /* ------------------------------------------------------------------ */
+/* Arguman ayristirma ve bicimleme src/core/util/cli.js icindedir.      */
 
-/** Basit argüman ayristirici: --ad deger, --ad=deger ve --bayrak destekler. */
-function argumanlariAyristir(argv) {
-  const out = { _: [] }
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i]
-    if (!arg.startsWith('--')) {
-      out._.push(arg)
-      continue
-    }
-    const govde = arg.slice(2)
-    const esit = govde.indexOf('=')
-    if (esit >= 0) {
-      out[govde.slice(0, esit)] = govde.slice(esit + 1)
-      continue
-    }
-    const sonraki = argv[i + 1]
-    if (sonraki !== undefined && !sonraki.startsWith('--')) {
-      out[govde] = sonraki
-      i++
-    } else {
-      out[govde] = true
-    }
-  }
-  return out
-}
-
-/** 6086450 -> '6.086.450' */
-function sayiBicim(n) {
-  const s = String(Math.trunc(n))
-  let out = ''
-  for (let i = 0; i < s.length; i++) {
-    if (i > 0 && (s.length - i) % 3 === 0) out += '.'
-    out += s[i]
-  }
-  return out
-}
-
-/** UNIX saniyeyi '2009-03-15 22:00' seklinde yazar. */
-function zamanBicim(sn) {
-  if (!Number.isFinite(sn)) return '-'
-  return new Date(sn * 1000).toISOString().replace('T', ' ').slice(0, 16)
-}
-
-/** Saniyeyi '12,3 sn' seklinde yazar. */
-function sureBicim(ms) {
-  return (ms / 1000).toFixed(1).replace('.', ',') + ' sn'
-}
-
-/** stderr'e tek satir yazar (stdout yalnizca ozet icindir). */
-function bildir(metin) {
-  process.stderr.write(metin + '\n')
-}
-
-/** Float64Array kapasitesini en az `gerekli` olacak sekilde iki katina cikarir. */
-function buyut(dizi, gerekli) {
-  let kapasite = dizi.length * 2
-  if (kapasite < gerekli) kapasite = gerekli
-  const yeni = new Float64Array(kapasite)
-  yeni.set(dizi)
-  return yeni
-}
+/** Float64Array kapasitesini en az `gerekli` olacak sekilde buyutur. */
+const buyut = seriler.growF64
 
 /* ------------------------------------------------------------------ */
 /* Docker / psql                                                        */
@@ -426,6 +384,76 @@ function turetilmisYol(kaynakYol, tf) {
   return path.join(klasor, onek + '_' + tf + '.bin')
 }
 
+/**
+ * Deneme aktariminin (yalnizca --limit, --out yok) yazilacagi gecici hedef.
+ * Gercek depo hicbir kosulda deneme ile ezilmemeli.
+ * @param {string} sembol
+ * @param {string} tf
+ * @returns {string}
+ */
+function denemeYolu(sembol, tf) {
+  return path.join(os.tmpdir(), DENEME_KLASORU, sembol + '_' + tf + '.bin')
+}
+
+/** Dosya var mi (klasorler sayilmaz). */
+function dosyaVar(yol) {
+  try {
+    return fs.statSync(yol).isFile()
+  } catch (err) {
+    return false
+  }
+}
+
+/**
+ * Uzerine yazilacak dosyalari '<ad>.bak-<damga>' olarak kopyalar.
+ * @param {string[]} yollarListesi
+ * @param {string} damgaMetni
+ * @returns {string[]} Olusturulan yedek yollari
+ */
+function yedekAl(yollarListesi, damgaMetni) {
+  const yedekler = []
+  for (let i = 0; i < yollarListesi.length; i++) {
+    const kaynak = yollarListesi[i]
+    const yedek = yollar.yedekYolu(kaynak, damgaMetni)
+    bildir('Yedekleniyor: ' + path.basename(kaynak) + ' -> ' + path.basename(yedek))
+    fs.copyFileSync(kaynak, yedek)
+    yedekler.push(yedek)
+  }
+  return yedekler
+}
+
+/**
+ * Aktarim sonrasi eski hafiza dosyalarini yedek klasorune TASIR.
+ *
+ * Aktarilan mumlar eskisiyle birebir ayni olmayabilir; hafizadaki bolgeler
+ * bar INDEKSI ile saklandigi icin eski kayitlar artik olmayan barlara isaret
+ * eder. Silmek yerine tasinir, kullanici isterse geri koyabilir.
+ *
+ * @param {string} klasor Veri klasoru
+ * @param {string} sembol
+ * @param {string} damgaMetni
+ * @returns {{klasor:string, dosyalar:string[]}}
+ */
+function eskiHafizalariTasi(klasor, sembol, damgaMetni) {
+  let girdiler = []
+  try {
+    girdiler = fs.readdirSync(klasor, { withFileTypes: true })
+  } catch (err) {
+    return { klasor: '', dosyalar: [] }
+  }
+  const hedefKlasor = yollar.eskiHafizaKlasoru(klasor, damgaMetni)
+  const tasinan = []
+  for (let i = 0; i < girdiler.length; i++) {
+    const girdi = girdiler[i]
+    if (!girdi.isFile()) continue
+    if (!yollar.isMemoryFile(girdi.name, sembol)) continue
+    if (tasinan.length === 0) fs.mkdirSync(hedefKlasor, { recursive: true })
+    fs.renameSync(path.join(klasor, girdi.name), path.join(hedefKlasor, girdi.name))
+    tasinan.push(girdi.name)
+  }
+  return { klasor: tasinan.length > 0 ? hedefKlasor : '', dosyalar: tasinan }
+}
+
 /* ------------------------------------------------------------------ */
 /* Ana akis                                                             */
 /* ------------------------------------------------------------------ */
@@ -444,7 +472,25 @@ const YARDIM =
   '  --limit <n>           Yalnizca ilk n satiri aktar (deneme icin)\n' +
   '  --tfs 5m,15m,1h,4h    Turetilecek zaman dilimleri\n' +
   '  --no-resample         Ust zaman dilimlerini uretme\n' +
-  '  --help                Bu yardimi goster\n'
+  '  --force               Mevcut dosyalarin uzerine yaz (once yedeklenir)\n' +
+  '  --help                Bu yardimi goster\n' +
+  '\n' +
+  'Uzerine yazma korumasi:\n' +
+  '  Hedef .bin dosyalarindan biri zaten varsa betik HICBIR IS YAPMADAN durur.\n' +
+  '  Uzerine yazmak icin --force ekleyin; o zaman her hedef once\n' +
+  '  "<ad>.bak-YYYYMMDD-HHMMSS" adiyla yedeklenir.\n' +
+  '\n' +
+  'Deneme aktarimi:\n' +
+  '  --limit verilip --out verilmezse hedef gecici klasordur\n' +
+  '  (' + path.join(os.tmpdir(), DENEME_KLASORU) + '),\n' +
+  '  yani gercek depo deneme yuzunden asla ezilmez. Gercek depoya yazmak icin\n' +
+  '  --out ile hedefi acikca verin.\n' +
+  '\n' +
+  'Hafiza dosyalari:\n' +
+  '  Gercek veri klasorune aktarim bitince mevcut "<sembol>_<tf>_memory*"\n' +
+  '  dosyalari "_eski_hafiza_yedek/<damga>/" altina TASINIR: aktarilan\n' +
+  '  mumlarla eski hafizanin bar indeksleri uyusmaz, hafizalar yeniden\n' +
+  '  taranmalidir.\n'
 
 async function main() {
   const args = argumanlariAyristir(process.argv.slice(2))
@@ -460,7 +506,12 @@ async function main() {
   const sembol = typeof args.symbol === 'string' ? args.symbol : DEFAULT_SYMBOL
   const limit = typeof args.limit === 'string' ? Math.trunc(Number(args.limit)) : 0
   const yenidenOrnekle = args.resample !== 'false' && args['no-resample'] !== true
+  const zorla = args.force === true || args.force === 'true'
 
+  if (args.limit === true) {
+    // Degersiz --limit "deneme yapiyorum" sanisi yaratir ama TAM aktarim olur.
+    throw new Error('--limit bir sayi ister. Ornek: --limit 200000')
+  }
   if (!Number.isFinite(limit) || limit < 0) {
     throw new Error('--limit degeri pozitif bir tam sayi olmali.')
   }
@@ -468,12 +519,20 @@ async function main() {
   // Kaynak zaman dilimi taninmali; turetme adimlari buna gore secilir.
   const kaynakSaniye = tfSeconds(tf)
 
-  const hedefYol =
-    typeof args.out === 'string'
-      ? path.resolve(args.out)
-      : path.join(dataDir(), sembol + '_' + tf + '.bin')
+  // Hedef secimi: --out her seyin onunde. --out yoksa ve --limit varsa bu bir
+  // DENEME aktarimidir; gecici klasore yazilir, gercek depoya dokunulmaz.
+  const denemeModu = typeof args.out !== 'string' && limit > 0
+  let hedefYol
+  if (typeof args.out === 'string') {
+    hedefYol = path.resolve(args.out)
+  } else if (denemeModu) {
+    hedefYol = denemeYolu(sembol, tf)
+  } else {
+    hedefYol = path.join(dataDir(), sembol + '_' + tf + '.bin')
+  }
+  const hedefKlasor = path.dirname(hedefYol)
 
-  let turetilecek = VARSAYILAN_TURETILEN
+  let turetilecek = TURETILEN_TF
   if (typeof args.tfs === 'string') {
     turetilecek = args.tfs
       .split(',')
@@ -488,6 +547,46 @@ async function main() {
   turetilecek = turetilecek.filter(function (x) {
     return tfSeconds(x) > kaynakSaniye
   })
+
+  if (denemeModu) {
+    bildir('--limit verildi: DENEME aktarimi, gecici klasore yazilacak.')
+    bildir('  Hedef : ' + hedefKlasor)
+    bildir('  Gercek depoya yazmak icin --out ile hedefi acikca verin.')
+  }
+
+  // Yazilacak butun dosyalar. Uzerine yazma kontrolu veritabanina hic
+  // dokunmadan, en basta yapilir: saatlerce suren bir aktarimdan sonra
+  // "dosya zaten var" demek anlamsiz olurdu.
+  const hedefler = [hedefYol]
+  if (yenidenOrnekle) {
+    for (let i = 0; i < turetilecek.length; i++) {
+      hedefler.push(turetilmisYol(hedefYol, turetilecek[i]))
+    }
+  }
+  const mevcutHedefler = hedefler.filter(dosyaVar)
+
+  if (mevcutHedefler.length > 0 && !zorla) {
+    const liste = mevcutHedefler
+      .map(function (y) {
+        return '  ' + y
+      })
+      .join('\n')
+    throw new Error(
+      'Hedef dosyalar zaten var, aktarim DURDURULDU:\n' + liste + '\n' +
+        'Bu dosyalarin uzerine yazmak depodaki mumlari kalici olarak degistirir; ' +
+        'aktarimdan sonra eklenen barlar kaybolur ve mevcut hafizalar artik ' +
+        'olmayan barlara isaret eder.\n' +
+        'Yine de devam etmek icin --force ekleyin (her dosya once ' +
+        '"<ad>.bak-YYYYMMDD-HHMMSS" olarak yedeklenir), ya da --out ile bos bir ' +
+        'klasor secin.'
+    )
+  }
+  if (mevcutHedefler.length > 0) {
+    bildir(
+      '--force verildi: ' + mevcutHedefler.length +
+        ' mevcut dosyanin uzerine yazilacak, once yedekleri alinacak.'
+    )
+  }
 
   bildir('Kaynak konteyner: ' + konteyner + ' (veritabani ' + veritabani + ')')
   await konteyneriDogrula(konteyner)
@@ -527,7 +626,12 @@ async function main() {
     bildir(sayiBicim(sonuc.atlanan) + ' satir bozuk veya tekrarli oldugu icin atlandi.')
   }
 
-  ensureDataDir(path.dirname(hedefYol))
+  ensureDataDir(hedefKlasor)
+
+  // Tum yedekler ve tasima klasoru ayni damgayi paylasir; boylece tek bir
+  // aktarimin biraktigi dosyalar bir arada durur.
+  const damgaMetni = damga()
+  if (mevcutHedefler.length > 0) yedekAl(mevcutHedefler, damgaMetni)
 
   const ozet = []
   bildir('Yaziliyor: ' + hedefYol)
@@ -558,6 +662,18 @@ async function main() {
     }
   }
 
+  // Gercek veri klasorune yazildiysa eski hafizalar gecersizdir: bolgeler bar
+  // INDEKSI ile saklanir, aktarilan mumlarla indeksler uyusmaz. Silinmez,
+  // tarihli bir yedek klasorune tasinir.
+  const gercekDepo = path.resolve(hedefKlasor) === path.resolve(dataDir())
+  const tasima = gercekDepo
+    ? eskiHafizalariTasi(hedefKlasor, sembol, damgaMetni)
+    : { klasor: '', dosyalar: [] }
+  if (tasima.dosyalar.length > 0) {
+    bildir('')
+    bildir(tasima.dosyalar.length + ' eski hafiza dosyasi tasindi: ' + tasima.klasor)
+  }
+
   const gecen = Date.now() - baslangic
   let cikti = '\nAktarim tamamlandi (' + sureBicim(gecen) + ')\n\n'
   cikti += 'Zaman'.padEnd(8) + 'Mum'.padStart(12) + '  ' + 'Ilk'.padEnd(18) + 'Son\n'
@@ -572,7 +688,21 @@ async function main() {
       zamanBicim(o.son) +
       '\n'
   }
-  cikti += '\nDosyalar: ' + path.dirname(hedefYol) + '\n'
+  cikti += '\nDosyalar: ' + hedefKlasor + '\n'
+  if (mevcutHedefler.length > 0) {
+    cikti +=
+      'Yedekler: ' + mevcutHedefler.length + ' dosya ".bak-' + damgaMetni +
+      '" olarak saklandi.\n'
+  }
+  if (tasima.dosyalar.length > 0) {
+    cikti += 'Eski hafizalar: ' + tasima.klasor + '\n'
+    cikti +=
+      'Aktarilan mumlarla eski hafizanin bar indeksleri uyusmaz. ' +
+      'Uygulamayi acip HAFIZALARI YENIDEN TARAYIN.\n'
+  }
+  if (denemeModu) {
+    cikti += 'Bu bir deneme aktarimidir, gercek depo degismedi.\n'
+  }
   process.stdout.write(cikti)
 }
 
