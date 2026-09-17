@@ -114,6 +114,8 @@ function buildMemory (s, cfg, onProgress) {
   let timeout = 0
   let noFeatures = 0
   let noLabel = 0
+  let noLabelHorizon = 0
+  let formRiskBlocked = 0
   let lowCoverage = 0
   let sumMfe = 0
   let sumMae = 0
@@ -180,7 +182,15 @@ function buildMemory (s, cfg, onProgress) {
     const features = ctx ? buildFeatures(s, t, ctx) : null
     const outcome = labelTouch(s, t, atrAt, outcomeCfg)
 
-    if (!outcome) noLabel++
+    if (!outcome) {
+      noLabel++
+      // Neden etiketlenemedi: ufuk serinin sonuna sigmadi mi, yoksa kurulum
+      // gercekte islenemez mi (form olayinda risk esigi, dokunusta kapanisin
+      // gecersizlik tarafinda olmasi)? Ikisi ayni sayacta toplaniyordu ve
+      // "olaylarin %40'i nereye gitti" sorusu cevapsiz kaliyordu.
+      if (t.bar + num(outcomeCfg.horizonBars, 48) >= s.length) noLabelHorizon++
+      else formRiskBlocked++
+    }
     if (!features) noFeatures++
 
     if (outcome) {
@@ -237,6 +247,11 @@ function buildMemory (s, cfg, onProgress) {
     stored: events.length,
     noFeatures: noFeatures,
     noLabel: noLabel,
+    // Etiketlenemeyenlerin ayrimi: ufuk serinin sonuna sigmadi (zamanla
+    // kendiliginden cozulur) veya kurulum gercekte islenemez (risk esigi,
+    // kapanisin gecersizlik tarafinda olmasi).
+    noLabelHorizon: noLabelHorizon,
+    formRiskBlocked: formRiskBlocked,
     // Veri boslugu yuzunden hafiza disinda birakilan olay sayisi.
     lowCoverage: lowCoverage,
     avgMfeAtr: labeled > 0 ? sumMfe / labeled : 0,

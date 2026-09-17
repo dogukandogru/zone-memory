@@ -19,6 +19,7 @@
  */
 
 const { DEFAULT_SIGNAL_CFG, evaluateTouch } = require('./signal')
+const stats = require('./stats')
 
 /** Varsayilan test ayarlari. */
 const DEFAULT_BACKTEST_CFG = {
@@ -262,6 +263,13 @@ function runBacktest(memory, prototypes, cfg, onProgress) {
   ])
   const kindOf = (e) => (e && e.kind === 'form' ? 'form' : 'touch')
   const costCfg = { costPct: costPct, costUsd: costUsd }
+  // Istatistik icin ham kayitlar (Wilson, bootstrap, permutasyon, kalibrasyon).
+  const istatistikKayitlari = []
+  const tabanHavuzu = { form: { win: [], net: [] }, touch: { win: [], net: [] } }
+  let pnlRToplam = 0
+  let cumR = 0
+  let peakR = 0
+  let maxDrawdownR = 0
   let timeouts = 0
   let timeoutPnlAtr = 0
   let nofill = 0
@@ -356,6 +364,11 @@ function runBacktest(memory, prototypes, cfg, onProgress) {
       kb.baseN++
       if (tabanSonuc.win) kb.baseWins++
       kb.baseNetAtr += tabanSonuc.pnlAtr
+      const havuz = tabanHavuzu[kindOf(ev)]
+      if (havuz) {
+        havuz.win.push(tabanSonuc.win ? 1 : 0)
+        havuz.net.push(tabanSonuc.pnlAtr)
+      }
       const yilTaban = yilTabanKaydi(ev.time, kindOf(ev))
       yilTaban[0]++
       if (tabanSonuc.win) yilTaban[1]++
@@ -404,6 +417,25 @@ function runBacktest(memory, prototypes, cfg, onProgress) {
         if (cum > peak) peak = cum
         const dd = peak - cum
         if (dd > maxDrawdownAtr) maxDrawdownAtr = dd
+
+        // R birimi: sonuc, o islemin KENDI riskine bolunur. ATR birimi
+        // islemler arasi riski esitlemez, R esitler.
+        const pnlR = slAtr > 0 ? pnlAtr / slAtr : 0
+        pnlRToplam += pnlR
+        cumR += pnlR
+        if (cumR > peakR) peakR = cumR
+        const ddR = peakR - cumR
+        if (ddR > maxDrawdownR) maxDrawdownR = ddR
+
+        istatistikKayitlari.push({
+          pred: Number(sig.winRate),
+          win: win,
+          pnlAtr: pnlAtr,
+          pnlR: pnlR,
+          kind: kindOf(ev),
+          // Gunluk blok onyukleme icin: ayni gun icindeki islemler bagimli.
+          day: Math.floor(cozumZamani(ev) / 86400),
+        })
 
         const rr = Number(sig.rr)
         if (Number.isFinite(rr)) {
@@ -462,6 +494,7 @@ function runBacktest(memory, prototypes, cfg, onProgress) {
           barsToOutcome: Number.isFinite(Number(ev.barsToOutcome)) ? Number(ev.barsToOutcome) : -1,
           success: ev.success === true,
           win: win,
+          pnlR: slAtr > 0 ? pnlAtr / slAtr : 0,
           grossAtr: grossAtr,   // maliyet dusulmeden
           costAtr: costAtr,     // bu islemin maliyeti, ATR biriminde
           pnlAtr: pnlAtr,       // net: grossAtr - costAtr
@@ -478,7 +511,9 @@ function runBacktest(memory, prototypes, cfg, onProgress) {
           topMatches: Array.isArray(sig.topMatches) ? sig.topMatches.slice(0, 6) : [],
         })
 
-        equity.push({ time: ev.time, value: cum })
+        // Egri noktasi olayin BASLADIGI zamana degil, sonucun belli oldugu
+        // zamana yazilir: kar, islem acilisinda degil kapanisinda gerceklesir.
+        equity.push({ time: cozumZamani(ev), value: cum, valueR: cumR })
       }
     }
 
@@ -496,6 +531,36 @@ function runBacktest(memory, prototypes, cfg, onProgress) {
   let profitFactor
   if (grossLoss > 0) profitFactor = grossProfit / grossLoss
   else profitFactor = grossProfit > 0 ? Infinity : 0
+
+  // ---------------------------------------------------------------------
+  // ISTATISTIK: belirsizlik olmadan nokta tahmin yaniltir.
+  // ---------------------------------------------------------------------
+  /** Tur bazinda tabakalanmis permutasyon: ayni turden ayni SAYIDA rastgele
+   * olay secilseydi sonuc ne olurdu. */
+  function permutasyon (alan, sistemDegeri) {
+    const rnd = stats.mulberry32(12345)
+    const reps = 1000
+    const kovalar = []
+    for (const g of kindMap.entries()) {
+      const havuz = tabanHavuzu[g[0]]
+      if (!havuz || g[1].fired === 0 || havuz[alan].length === 0) continue
+      kovalar.push({ adet: g[1].fired, dizi: havuz[alan] })
+    }
+    if (kovalar.length === 0 || fired === 0) return null
+    let enAzKadarIyi = 0
+    for (let r = 0; r < reps; r++) {
+      let toplam = 0
+      let adet = 0
+      for (const kova of kovalar) {
+        for (let i = 0; i < kova.adet; i++) {
+          toplam += kova.dizi[(rnd() * kova.dizi.length) | 0]
+          adet++
+        }
+      }
+      if (adet > 0 && toplam / adet >= sistemDegeri - 1e-12) enAzKadarIyi++
+    }
+    return enAzKadarIyi / reps
+  }
 
   // Tetiklenen islemlerin tur karisimi: agirlikli taban bununla hesaplanir.
   const tabanAgirlikli = (function () {
@@ -593,6 +658,12 @@ function runBacktest(memory, prototypes, cfg, onProgress) {
           timeouts: k.timeouts,
           timeoutPnlAtr: k.timeoutPnlAtr,
           nofill: k.nofill,
+          winRateCI: k.fired > 0 ? stats.wilson(k.wins, k.fired) : null,
+          baselinePValue: k.fired > 0 && tabanOran !== null
+            ? stats.binomTwoSided(k.wins, k.fired, tabanOran)
+            : null,
+          // Az orneklemde sayilar guvenilmez; arayuz bunu soluk gosterir.
+          lowSample: k.fired > 0 && k.fired < 30,
         }
       }),
       // TABAN: tetiklenen islemlerin TUR KARISIMIYLA agirliklanmis, isinma
@@ -607,6 +678,62 @@ function runBacktest(memory, prototypes, cfg, onProgress) {
       edgeNetAtr: tabanAgirlikli.expectancyAtr === null || fired === 0
         ? null
         : (totalPnl / fired) - tabanAgirlikli.expectancyAtr,
+      // ISTATISTIK
+      // Wilson %95 araligi: kucuk orneklemde isabet oraninin belirsizligi.
+      winRateCI: fired > 0 ? stats.wilson(wins, fired) : null,
+      // Gozlenen isabet, AYNI TURUN tabaniyla aciklanabilir mi (iki yonlu
+      // binom testi). Kucuk p, farkin sansla aciklanmasinin zor oldugunu
+      // soyler; buyuk p "fark yok" demektir.
+      baselinePValue: fired > 0 && tabanAgirlikli.winRate !== null
+        ? stats.binomTwoSided(wins, fired, tabanAgirlikli.winRate)
+        : null,
+      // Net beklenti icin gunluk blok onyukleme araligi.
+      expectancyCI: (function () {
+        const c = stats.blockBootstrapMean(
+          istatistikKayitlari.map((k) => ({ value: k.pnlAtr, day: k.day })),
+          { reps: 1000, seed: 12345 }
+        )
+        return c ? { lo: c.lo, hi: c.hi } : null
+      })(),
+      expectancyRCI: (function () {
+        const c = stats.blockBootstrapMean(
+          istatistikKayitlari.map((k) => ({ value: k.pnlR, day: k.day })),
+          { reps: 1000, seed: 12345 }
+        )
+        return c ? { lo: c.lo, hi: c.hi } : null
+      })(),
+      // Ayni turden ayni sayida rastgele olay secilseydi bu sonuca ulasma
+      // olasiligi. 1'e yakin deger "secim bir sey katmiyor" demektir.
+      permHitP: permutasyon('win', fired > 0 ? wins / fired : 0),
+      permNetP: permutasyon('net', fired > 0 ? totalPnl / fired : 0),
+      // Kalibrasyon: sistemin soyledigi oran ile gerceklesen oran.
+      calibration: stats.calibration(istatistikKayitlari),
+      brier: stats.brier(istatistikKayitlari, tabanAgirlikli.winRate),
+      // R birimi (her islem kendi riskine bolunur).
+      expectancyR: fired > 0 ? pnlRToplam / fired : 0,
+      totalPnlR: pnlRToplam,
+      maxDrawdownR: maxDrawdownR,
+      // Maliyet dahil basa bas isabet: bunun altinda kalan bir isabet orani,
+      // ne kadar yuksek gorunurse gorunsun para kaybettirir.
+      breakEvenWinRate: (function () {
+        const ortRr = rrCount > 0 ? rrSum / rrCount : 0
+        if (!(ortRr > 0)) return null
+        const maliyetR = fired > 0 ? (costTotalAtr / fired) : 0
+        const ortSl = fired > 0 ? (grossPnlAtr === 0 ? 1 : 1) : 1
+        return (1 + maliyetR * ortSl) / (1 + ortRr)
+      })(),
+      // Maliyet iki kat olsaydi net beklenti ne olurdu (duyarlilik).
+      expectancyAtrDoubleCost: fired > 0 ? (totalPnl - costTotalAtr) / fired : 0,
+      // Katki kanitlandi mi: net beklentinin alt siniri tabanin ustunde mi.
+      edgeProven: (function () {
+        if (fired === 0 || tabanAgirlikli.expectancyAtr === null) return null
+        const c = stats.blockBootstrapMean(
+          istatistikKayitlari.map((k) => ({ value: k.pnlAtr, day: k.day })),
+          { reps: 1000, seed: 12345 }
+        )
+        if (!c) return null
+        return c.lo > tabanAgirlikli.expectancyAtr
+      })(),
       // Bilgi amacli ham oran: tum etiketli olaylar, tur ayrimi yok.
       rawWinRate: rawWinRate,
       timeouts: timeouts,

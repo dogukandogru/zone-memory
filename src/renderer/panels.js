@@ -1436,6 +1436,35 @@ export function renderBacktest(el, result, opts) {
     stat('Taban başarı oranı (aynı tür)', tabanOran === null ? '-' : formatPercent(tabanOran, 1), 'muted'),
   ]))
 
+  // ISTATISTIK: nokta tahmin tek basina yaniltir. Isabetin guven araligi,
+  // tabana gore farkin p degeri ve net beklentinin araligi birlikte okunur.
+  const ci = s.winRateCI && Number.isFinite(s.winRateCI.lo) ? s.winRateCI : null
+  if (ci) {
+    el.appendChild(kv('İsabet %95 aralığı',
+      formatPercent(ci.lo, 1) + ' - ' + formatPercent(ci.hi, 1), 'muted'))
+  }
+  if (Number.isFinite(s.baselinePValue)) {
+    const p = s.baselinePValue
+    el.appendChild(kv('Tabandan farkın p değeri',
+      formatNumber(p, 3) + (p < 0.05 ? ' (anlamlı)' : ' (anlamsız, şansla açıklanabilir)'),
+      p < 0.05 ? 'up' : 'muted'))
+  }
+  if (s.expectancyCI && Number.isFinite(s.expectancyCI.lo)) {
+    el.appendChild(kv('Net beklenti %95 aralığı',
+      formatNumber(s.expectancyCI.lo, 3) + ' - ' + formatNumber(s.expectancyCI.hi, 3) + ' ATR',
+      s.expectancyCI.lo > 0 ? 'up' : 'muted'))
+  }
+  if (Number.isFinite(s.permHitP)) {
+    el.appendChild(kv('Aynı türden rastgele seçim bu kadar iyi olabilir mi',
+      'isabet ' + formatPercent(s.permHitP, 0) + ', net ' +
+      (Number.isFinite(s.permNetP) ? formatPercent(s.permNetP, 0) : '-'), 'muted'))
+  }
+  if (s.edgeProven !== null && s.edgeProven !== undefined) {
+    el.appendChild(kv('Katma değer kanıtlandı mı',
+      s.edgeProven ? 'Evet, net beklentinin alt sınırı tabanın üstünde' : 'Hayır, aralık tabanı içeriyor',
+      s.edgeProven ? 'up' : 'down'))
+  }
+
   const katkiPuan = Number.isFinite(s.edgePts) ? s.edgePts : null
   const katkiNet = Number.isFinite(s.edgeNetAtr) ? s.edgeNetAtr : null
   el.appendChild(kv('Tabana göre katkı (isabet)',
@@ -1465,6 +1494,52 @@ export function renderBacktest(el, result, opts) {
   }
   el.appendChild(kv('Isınma (tür ve yön başına asgari aday)',
     tam(Number.isFinite(s.warmupPerBucket) ? s.warmupPerBucket : s.warmupEvents)))
+
+  // MALIYET KIRILIMI: kucuk zaman dilimlerinde maliyet edimin tamamini
+  // yiyebilir, bu yuzden brut ve net ayri gosterilir.
+  el.appendChild(bolumBasligi('Maliyet ve risk birimi'))
+  el.appendChild(kv('Brüt / işlem', formatNumber(s.grossExpectancyAtr, 3) + ' ATR'))
+  el.appendChild(kv('Maliyet / işlem', formatNumber(s.costPerTradeAtr, 3) + ' ATR'))
+  el.appendChild(kv('Maliyetin brüt edimdeki payı',
+    Number.isFinite(s.costShare) && s.costShare !== Infinity ? formatPercent(s.costShare, 0) : '-'))
+  el.appendChild(kv('Maliyet iki kat olsaydı net',
+    formatNumber(s.expectancyAtrDoubleCost, 3) + ' ATR',
+    sayi(s.expectancyAtrDoubleCost, 0) >= 0 ? 'up' : 'down'))
+  if (Number.isFinite(s.breakEvenWinRate)) {
+    el.appendChild(kv('Maliyet dahil başa baş isabet', formatPercent(s.breakEvenWinRate, 1),
+      sayi(s.winRate, 0) >= s.breakEvenWinRate ? 'up' : 'down'))
+  }
+  el.appendChild(kv('Beklenti (R)', formatNumber(s.expectancyR, 3) +
+    (s.expectancyRCI && Number.isFinite(s.expectancyRCI.lo)
+      ? '  [' + formatNumber(s.expectancyRCI.lo, 3) + ', ' + formatNumber(s.expectancyRCI.hi, 3) + ']'
+      : ''),
+  sayi(s.expectancyR, 0) >= 0 ? 'up' : 'down'))
+  el.appendChild(kv('Azami geri çekilme (R)', formatNumber(s.maxDrawdownR, 2), 'down'))
+
+  // KALIBRASYON: sistemin soyledigi oran ile gerceklesen oran. Iyi kalibre
+  // bir sistemde ikisi birbirine yakindir; sapma, ekrandaki yuzdeye
+  // guvenilemeyecegi anlamina gelir.
+  const kalib = Array.isArray(s.calibration) ? s.calibration.filter((k) => k.n > 0) : []
+  if (kalib.length > 0) {
+    el.appendChild(bolumBasligi('Kalibrasyon (söylenen oran ile gerçekleşen)'))
+    el.appendChild(tablo(
+      ['Tahmin aralığı', 'İşlem', 'Ortalama tahmin', 'Gerçekleşen', 'Fark'],
+      kalib.map((k) => [
+        formatPercent(k.from, 0) + ' - ' + formatPercent(k.to, 0),
+        tam(k.n),
+        k.predMean === null ? '-' : formatPercent(k.predMean, 1),
+        k.actual === null ? '-' : formatPercent(k.actual, 1),
+        k.predMean === null || k.actual === null
+          ? '-'
+          : ((k.actual - k.predMean >= 0 ? '+' : '') + formatNumber((k.actual - k.predMean) * 100, 1) + ' puan'),
+      ])))
+    if (s.brier && Number.isFinite(s.brier.model)) {
+      el.appendChild(kv('Brier skoru (küçük daha iyi)',
+        formatNumber(s.brier.model, 4) +
+        (Number.isFinite(s.brier.base) ? '  (sabit taban tahmini: ' + formatNumber(s.brier.base, 4) + ')' : ''),
+        Number.isFinite(s.brier.base) && s.brier.model < s.brier.base ? 'up' : 'down'))
+    }
+  }
 
   // FIILEN KULLANILAN AYAR. Test sekmesi bir donem kullanicinin esiklerini
   // motora hic iletmiyordu; ne olculdugu artik ekranda yazili.

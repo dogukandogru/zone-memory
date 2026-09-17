@@ -199,7 +199,10 @@ test('equity birikimli toplamdir ve islem sayisiyla ayni uzunluktadir', () => {
   for (let i = 0; i < r.trades.length; i++) {
     birikim += r.trades[i].pnlAtr
     assert.ok(Math.abs(r.equity[i].value - birikim) < 1e-9, i + '. adimda sermaye egrisi tutmuyor')
-    assert.equal(r.equity[i].time, r.trades[i].time)
+    // Egri noktasi islemin ACILDIGI zamana degil, SONUCUN BELLI OLDUGU
+    // zamana yazilir (O7): kar acilista degil kapanista gerceklesir.
+    assert.ok(r.equity[i].time >= r.trades[i].time,
+      i + '. adimda egri noktasi islem zamanindan once')
     assert.ok(Math.abs(r.trades[i].equityAtr - birikim) < 1e-9)
     if (i > 0) assert.ok(r.equity[i].time >= r.equity[i - 1].time, 'sermaye egrisi zaman sirali olmali')
   }
@@ -525,4 +528,42 @@ test('dolmayan limit emirler (nofill) islem ve taban sayilmaz, ayrica raporlanir
   }
   // Taban da yalnizca dolan emirlerden birikir.
   assert.equal(temas.baseN, 20)
+})
+
+// O9 - istatistik alanlari: nokta tahmin tek basina yaniltir.
+test('ozet Wilson araligi, p degeri, bootstrap araligi ve kalibrasyon tasir', () => {
+  const mem = fixtures.hafizaKur({ adet: 120 })
+  const r = runBacktest(mem, [], Object.assign({}, CFG, { warmupEvents: 0, warmupPerBucket: 0 }))
+  const s = r.summary
+  if (s.fired === 0) return // esikler tutmadiysa alanlar null olur, bu da gecerli
+
+  assert.ok(s.winRateCI && s.winRateCI.lo <= s.winRate && s.winRate <= s.winRateCI.hi,
+    'isabet orani kendi guven araliginin icinde olmali')
+  assert.ok(s.baselinePValue === null || (s.baselinePValue >= 0 && s.baselinePValue <= 1))
+  assert.ok(s.expectancyCI && s.expectancyCI.lo <= s.expectancyAtr && s.expectancyAtr <= s.expectancyCI.hi,
+    'net beklenti kendi araliginin icinde olmali')
+  assert.ok(s.permHitP === null || (s.permHitP >= 0 && s.permHitP <= 1))
+  assert.ok(Array.isArray(s.calibration) && s.calibration.length === 7)
+  const kalibToplam = s.calibration.reduce((t, k) => t + k.n, 0)
+  assert.equal(kalibToplam, s.fired, 'kalibrasyon kovalarinin toplami islem sayisina esit olmali')
+  assert.ok(s.brier && (s.brier.model === null || s.brier.model >= 0))
+  // R birimi: her islem kendi riskine bolunur.
+  assert.ok(Number.isFinite(s.expectancyR))
+  assert.ok(s.maxDrawdownR >= 0)
+  for (const t of r.trades) {
+    assert.ok(Math.abs(t.pnlR - t.pnlAtr / t.slAtr) < 1e-9, 'pnlR = pnlAtr / slAtr olmali')
+  }
+})
+
+test('istatistik: bilinen girdilerde Wilson ve binom degerleri', () => {
+  const stats = require('../src/core/learn/stats')
+  const w = stats.wilson(890, 1840)
+  assert.ok(Math.abs(w.lo - 0.4606) < 0.001 && Math.abs(w.hi - 0.5068) < 0.001,
+    'Wilson araligi: ' + JSON.stringify(w))
+  assert.ok(Math.abs(stats.binomTwoSided(60, 100, 0.5) - 0.0569) < 0.001)
+  assert.equal(stats.binomTwoSided(50, 100, 0.5), 1)
+  assert.equal(stats.wilson(0, 0), null)
+  // Permutasyon: havuzun tamami 1 ise rastgele secim de her zaman 1 verir.
+  assert.equal(stats.permutationP([1, 1, 1, 1], 2, 1, { reps: 50 }), 1)
+  assert.equal(stats.permutationP([0, 0, 0, 0], 2, 0.5, { reps: 50 }), 0)
 })
