@@ -420,7 +420,33 @@ function turRozeti(kind) {
   const e = h('span', 'badge tiny', kind === 'form' ? 'OLUŞUM' : 'DOKUNUŞ')
   e.title = kind === 'form'
     ? 'Kutunun doğduğu an, giriş onay barının kapanışı'
-    : 'Kutuya ilk dokunuş, giriş bölge kenarı'
+    : 'Kutuya ilk dokunuş, karar bar kapanışında, giriş sonraki barlarda bölge kenarına limit'
+  return e
+}
+
+/**
+ * KANIT ROZETI: bu sinyal turunun katma degeri son olcumde kanitlandi mi.
+ *
+ * Neden: olcum hicbir zaman diliminde kanitlanmis katma deger gostermiyor
+ * (net beklentinin %95 araligi sifiri iceriyor) ama sinyal karti her turu
+ * ayni guvenle yayinliyordu. Rozet bu farki gorunur kilar.
+ * @param {object} kanit {status, n, netR, netRLo, netRHi, liftPts}
+ */
+function kanitRozeti(kanit) {
+  const durum = kanit && kanit.status ? kanit.status : 'kanitlanmadi'
+  const metin = durum === 'kanitli' ? 'KANITLI' : (durum === 'zayif' ? 'ZAYIF' : 'KANIT YOK')
+  const sinif = durum === 'kanitli' ? 'badge tiny up' : (durum === 'zayif' ? 'badge tiny' : 'badge tiny muted')
+  const e = h('span', sinif, metin)
+  if (kanit && Number.isFinite(kanit.netR)) {
+    e.title = 'Son ölçümde bu tür: ' + tam(kanit.n) + ' işlem, net ' +
+      formatNumber(kanit.netR, 3) + ' R' +
+      (Number.isFinite(kanit.netRLo)
+        ? ' (%95 aralık ' + formatNumber(kanit.netRLo, 3) + ' ile ' + formatNumber(kanit.netRHi, 3) + ')'
+        : '') +
+      (durum === 'kanitli' ? '. Aralık sıfırın üstünde.' : '. Aralık sıfırı içeriyor, sonuç şansla açıklanabilir.')
+  } else {
+    e.title = 'Bu sinyal türü için henüz ölçüm yok. Test sekmesinden yürüyen ileri testi çalıştırın.'
+  }
   return e
 }
 
@@ -533,6 +559,7 @@ export function renderSignals(el, signals, opts) {
     const orta = h('span', 'row-main')
     orta.appendChild(document.createTextNode(formatDateTime(s.time) + '  ' + formatPrice(s.price)))
     orta.appendChild(turRozeti(s.kind))
+    if (s.evidence) orta.appendChild(kanitRozeti(s.evidence))
     const altMetin = s.fired
       ? (tam(s.matchCount) + ' benzer kayıt, güven ' + formatPercent(s.confidence, 0))
       : ('Üretilmedi: ' + (Array.isArray(s.reasons) && s.reasons.length
@@ -609,9 +636,29 @@ export function renderSignalDetail(el, signal, opts) {
   el.appendChild(kv('Bölge aralığı', formatPrice(signal.zoneBottom) + ' - ' + formatPrice(signal.zoneTop)))
   el.appendChild(kv('Sinyal türü', signal.kind === 'form'
     ? 'Kutu oluşumu, giriş onay barının kapanışı'
-    : 'Bölgeye geri dönüş, giriş bölge kenarına limit emir'))
+    : 'Bölgeye geri dönüş, karar bar kapanışında, giriş sonraki barlarda bölge kenarına limit'))
   el.appendChild(kv('Durum', signal.fired ? 'Sinyal üretildi' : 'Eşikler geçilmedi',
     signal.fired ? 'up' : 'muted'))
+
+  // KANIT DURUMU: bu turun katma degeri son olcumde kanitlandi mi. Bu satir
+  // olmadan her sinyal ayni guvenle okunuyordu.
+  if (signal.evidence) {
+    const k = signal.evidence
+    const metin = k.status === 'kanitli'
+      ? 'Kanıtlı: son ölçümde bu türün net beklentisi sıfırın üstünde'
+      : (k.status === 'zayif'
+        ? 'Zayıf: nokta tahmin pozitif ama %95 aralık sıfırı içeriyor'
+        : 'Kanıt yok: son ölçümde bu türün katma değeri gösterilemedi')
+    el.appendChild(kv('Kanıt durumu', metin,
+      k.status === 'kanitli' ? 'up' : (k.status === 'zayif' ? 'muted' : 'down')))
+    if (Number.isFinite(k.netR)) {
+      el.appendChild(kv('Ölçümde bu tür',
+        tam(k.n) + ' işlem, net ' + formatNumber(k.netR, 3) + ' R' +
+        (Number.isFinite(k.netRLo)
+          ? ' (%95 aralık ' + formatNumber(k.netRLo, 3) + ' ile ' + formatNumber(k.netRHi, 3) + ')'
+          : ''), 'muted'))
+    }
+  }
 
   // Gercek sonuc. Geriye testte uretilen sinyallerde bellidir; canli
   // sinyallerde henuz olusmadigi icin bolum hic cizilmez.

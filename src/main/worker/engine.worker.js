@@ -169,6 +169,42 @@ function ayarIzi(indicatorParams, outcomeCfg, ctxNames) {
   })
 }
 
+/**
+ * KANIT DURUMU
+ * Bir sinyal turu icin son olcumun ne dedigi: net beklentinin R cinsinden
+ * %95 araligi sifirin ustundeyse "kanitli", nokta tahmin pozitif ama aralik
+ * sifiri iceriyorsa "zayif", diger durumlarda "kanitlanmadi".
+ *
+ * Neden gerekli: olcum hicbir zaman diliminde kanitlanmis katma deger
+ * gostermiyor, ama canli sinyal kartinda bu hic gorunmuyordu; her sinyal
+ * ayni guvenle yayinlaniyordu.
+ * @param {object} summary runBacktest ozeti
+ * @returns {Object<string,{n:number, netR:number|null, netRLo:number|null,
+ *   netRHi:number|null, liftPts:number|null, status:string}>}
+ */
+function kanitDurumu(summary) {
+  const cikti = {}
+  const turler = summary && Array.isArray(summary.byKind) ? summary.byKind : []
+  for (const k of turler) {
+    const ci = k.expectancyRCI
+    const netR = ci && Number.isFinite(ci.mean) ? ci.mean : null
+    const lo = ci && Number.isFinite(ci.lo) ? ci.lo : null
+    const hi = ci && Number.isFinite(ci.hi) ? ci.hi : null
+    let durum = 'kanitlanmadi'
+    if (k.fired > 0 && lo !== null && lo > 0) durum = 'kanitli'
+    else if (k.fired > 0 && netR !== null && netR > 0) durum = 'zayif'
+    cikti[k.kind] = {
+      n: k.fired,
+      netR: netR,
+      netRLo: lo,
+      netRHi: hi,
+      liftPts: Number.isFinite(k.edgePts) ? k.edgePts : null,
+      status: durum,
+    }
+  }
+  return cikti
+}
+
 /** Dosya var mi. */
 async function fileExists(file) {
   try {
@@ -1138,6 +1174,7 @@ handlers['engine:backtest'] = async function (payload, ctx) {
 
   // Olcum diske yazilir: "hangi ayarla ne olculdu" bilgisi uygulama kapaninca
   // kaybolmasin ve otomatik tarama gereksiz yere silmesin (bkz. engine:scan).
+  const kanit = kanitDurumu(ozet)
   const kullanilanAyar = {
     signalCfg: uygulanan.signalCfg,
     outcomeCfg: uygulanan.planOutcomeCfg,
@@ -1158,6 +1195,9 @@ handlers['engine:backtest'] = async function (payload, ctx) {
       usedCfg: kullanilanAyar,
       memory: hafizaOzeti,
       cfgMatch: izUyum,
+      // Tur basina kanit durumu: canli sinyal karti bunu rozet olarak
+      // gosterir ve kanitlanmamis turleri one cikarmaz.
+      evidence: kanit,
       summary: ozet,
       byYear: res && Array.isArray(res.byYear) ? res.byYear : [],
       equity: thinCurve(res ? res.equity : [], 3000),
@@ -1174,6 +1214,7 @@ handlers['engine:backtest'] = async function (payload, ctx) {
     usedCfg: kullanilanAyar,
     memory: hafizaOzeti,
     cfgMatch: izUyum,
+    evidence: kanit,
     summary: ozet,
     byYear: res && Array.isArray(res.byYear) ? res.byYear : [],
     equity: thinCurve(res ? res.equity : [], 3000),
@@ -1448,6 +1489,18 @@ handlers['engine:live-tick'] = async function (payload) {
       // ayarla olculur.
       const mem = await getMemory(tf, false)
       const memMeta = mem && mem.meta ? mem.meta : null
+      // Son olcumun kanit durumu (varsa). Dosya yoksa veya izi farkliysa
+      // kanit yok sayilir.
+      let sonKanit = null
+      try {
+        const sonTest = await readJson(paths.backtestPath(tf))
+        if (sonTest && sonTest.evidence &&
+          (!memMeta || !memMeta.cfgHash || !sonTest.cfgHash || sonTest.cfgHash === memMeta.cfgHash)) {
+          sonKanit = sonTest.evidence
+        }
+      } catch (err) {
+        sonKanit = null
+      }
       // Canli de tarama ve test ile AYNI birlestirmeyi kullanir; plan
       // hedefi hafizanin etiketlendigi outcomeCfg'den gelir.
       const canliCfg = core('learn/presets').resolveCfg(
@@ -1504,6 +1557,18 @@ handlers['engine:live-tick'] = async function (payload) {
           sig.stale = true
           if (!Array.isArray(sig.reasons)) sig.reasons = []
           sig.reasons.push('Gecikmeli degerlendirildi (' + ageBars.toFixed(1) + ' bar sonra).')
+        }
+        // KANIT DURUMU: son olcumde bu TURUN katma degeri kanitlandi mi.
+        // Olcum yoksa veya ayar izi degistiyse "kanitlanmadi" kabul edilir.
+        if (sig) {
+          const kanit = sonKanit && sonKanit[sig.kind === 'form' ? 'form' : 'touch']
+          sig.evidence = kanit || { n: 0, netR: null, netRLo: null, netRHi: null, liftPts: null, status: 'kanitlanmadi' }
+          if (sig.evidence.status !== 'kanitli') {
+            if (!Array.isArray(sig.reasons)) sig.reasons = []
+            sig.reasons.push(sig.evidence.status === 'zayif'
+              ? 'Bu sinyal turunun katma degeri zayif: son olcumde aralik sifiri iceriyor.'
+              : 'Bu sinyal turunun katma degeri kanitlanmadi (son olcume gore).')
+          }
         }
         events.push({
           key: liveEvents.eventKey(cand),
