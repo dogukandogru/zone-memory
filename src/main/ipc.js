@@ -23,6 +23,15 @@ const paths = require('./paths')
 /** @type {import('electron').BrowserWindow|null} */
 let mainWindow = null
 let registered = false
+// Uygulama kapanirken renderer'in sureduran cagrilari (saat, durum yoklama)
+// "No handler registered" hatasi bastiriyordu. Dinleyiciyi kaldirmak yerine
+// anlasilir bir cevap donduruyoruz; surec zaten kapaniyor.
+let kapaniyor = false
+
+/** Kapanis basladi: yeni cagrilara kisa bir hata donulur. */
+function markShuttingDown() {
+  kapaniyor = true
+}
 
 /** Olaylarin gidecegi pencereyi belirler. */
 function setWindow(win) {
@@ -176,6 +185,7 @@ function register(win) {
   ipcMain.handle('api:call', async (event, msg) => {
     const cmd = msg && msg.cmd ? String(msg.cmd) : ''
     const payload = msg && msg.payload ? msg.payload : {}
+    if (kapaniyor) return { ok: false, error: 'Uygulama kapanıyor.' }
     if (!cmd) return { ok: false, error: 'Komut adi verilmedi.' }
     try {
       const data = await dispatch(cmd, payload)
@@ -200,6 +210,7 @@ function unregister() {
 module.exports = {
   register,
   unregister,
+  markShuttingDown,
   setWindow,
   send,
   // Test icin: komut yonlendirici dogrudan cagrilabilsin (yuk bicimi

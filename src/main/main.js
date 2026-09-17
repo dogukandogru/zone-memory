@@ -15,6 +15,22 @@ const live = require('./live')
 const IS_MAC = process.platform === 'darwin'
 const IS_DEV = process.argv.includes('--dev')
 
+/**
+ * EKRAN GORUNTUSU MODU (gelistirme yardimcisi)
+ * `--shot <dosya>` verilirse uygulama acilir, arayuz yerlesene kadar bekler,
+ * pencerenin goruntusunu PNG olarak yazar ve kapanir. Amac: bir degisikligin
+ * gercek arayuzde nasil gorundugunu, pencereyi elle acmadan dogrulayabilmek.
+ * `--shot-panel <ad>` ile once bir panel sekmesi acilir (signals, zones,
+ * memory, settings, test), `--shot-wait <sn>` bekleme suresini uzatir.
+ */
+function argDegeri(ad) {
+  const i = process.argv.indexOf(ad)
+  return i >= 0 && process.argv[i + 1] ? process.argv[i + 1] : null
+}
+const SHOT_PATH = argDegeri('--shot')
+const SHOT_PANEL = argDegeri('--shot-panel')
+const SHOT_WAIT = Number(argDegeri('--shot-wait')) || 12
+
 /** @type {BrowserWindow|null} */
 let mainWindow = null
 
@@ -61,6 +77,28 @@ function createWindow() {
   }
 
   ipc.setWindow(mainWindow)
+
+  if (SHOT_PATH) {
+    mainWindow.webContents.once('did-finish-load', () => {
+      setTimeout(async () => {
+        try {
+          if (SHOT_PANEL && mainWindow) {
+            await mainWindow.webContents.executeJavaScript(
+              'document.querySelector(\'[data-tab="' + SHOT_PANEL + '"]\')?.click(); true'
+            )
+            await new Promise((r) => setTimeout(r, 1500))
+          }
+          const resim = await mainWindow.webContents.capturePage()
+          require('fs').writeFileSync(SHOT_PATH, resim.toPNG())
+          process.stdout.write('Ekran goruntusu yazildi: ' + SHOT_PATH + '\n')
+        } catch (err) {
+          process.stderr.write('Ekran goruntusu alinamadi: ' + (err && err.message ? err.message : String(err)) + '\n')
+        }
+        app.quit()
+      }, SHOT_WAIT * 1000)
+    })
+  }
+
   return mainWindow
 }
 
@@ -184,12 +222,14 @@ if (!gotLock) {
   })
 
   app.on('before-quit', () => {
+    // Once kapanis bayragi: renderer'in sureduran cagrilari (saat, durum
+    // yoklama) "No handler registered" hatasi yerine anlasilir cevap alsin.
+    ipc.markShuttingDown()
     try {
       live.stop()
     } catch (err) {
       // Kapanista hata onemsiz.
     }
-    ipc.unregister()
     engine.stop()
   })
 }
