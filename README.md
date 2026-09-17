@@ -51,41 +51,47 @@ Kısaca: bu bir karar destek aracıdır. Otomatik işlem açmaz, emir göndermez
 
 ### Ölçülen sonuçlar
 
-> **ÖNEMLİ: Aşağıdaki tablo ESKİ indikatöre aittir ve şu anki sürüm için
-> GEÇERLİ DEĞİLDİR.**
->
-> Uygulama önce MASTER 1 TOUCH indikatörüyle çalışıyordu ve o indikatör için
-> aşağıdaki ölçüm yapılmıştı. İndikatör "proje son versiyon 3" ile değiştirildi;
-> kutu oluşum kuralları, sinyal türleri ve özellik vektörü tamamen değişti.
-> Tablo, kullanılan yöntemin ne olduğunu göstermek için duruyor. Yeni
-> indikatörün sayıları **ölçülmedi**; ölçmek için Test sekmesindeki yürüyen
-> ileri testi çalıştırın ve oradaki "Sinyal türüne göre" tablosuna bakın.
-> `src/core/learn/presets.js` içindeki hazır ayarlar da aynı sebeple eski
-> ölçüme dayanır ve yeniden aranmalıdır.
+Aşağıdaki tablo **yeni indikatörün** (proje son versiyon 3) gerçek ölçümüdür,
+17 Eylül 2026'da tüm geçmiş yeniden tarandıktan sonra alındı. Tekrar üretmek
+için:
 
-Yöntem (yeni indikatör için de aynen uygulanabilir):
+```bash
+node scripts/measure-all.mjs            # ölçer ve tabloyu basar
+node scripts/measure-all.mjs --scan     # önce hafızaları yeniden kurar
+```
 
-- 6.086.450 adet 1 dakikalık XAUUSD mumu, 2009-03 ile 2026-07 arası.
-- Geçmiş ikiye bölündü. Parametreler **yalnızca 2009-2018** döneminden seçildi,
-  sonra hiç dokunulmamış **2019-2026** döneminde test edildi. Aşağıdaki tablo
-  o ikinci dönemin sonucudur.
-- Testin kendisi de ileriye bakmaz: her olay yalnızca kendinden **en az bir
-  gün önce sonuçlanmış** kayıtlarla karşılaştırılır.
+Yöntem:
+
+- 6.115.790 adet 1 dakikalık XAUUSD mumu, 2009-03 ile 2026-09 arası.
+- Testin kendisi ileriye bakmaz: her olay yalnızca **sonucu kendisinden önce
+  belli olmuş** kayıtlarla karşılaştırılır (ambargo olay zamanına değil,
+  sonucun çözüldüğü zamana göre işler).
+- Taban, **aynı türün** ve aynı dönemin oranıdır: seçim yapmadan o türün tüm
+  olaylarını almak. Oluşum ve dokunuş tabanları birbirinden çok farklı olduğu
+  için karıştırılmaz.
 - İşlem maliyeti dahildir: fiyatın %0,0068'i, yani 4400 dolarlık altında
   0,30 dolar gidiş-dönüş spread.
+- Dokunuş olaylarında giriş gerçekçidir: karar bar kapanışında verilir, emir
+  bir sonraki bardan itibaren bölge kenarına konur, dolmazsa işlem yazılmaz.
 
-Eski indikatörün (MASTER 1 TOUCH) doğrulama dönemi sonucu:
+| TF | olay | işlem | isabet [%95 aralık] | taban | katkı | p | net/işlem [%95 aralık] | sonuç |
+|---|---|---|---|---|---|---|---|---|
+| 1m | 41.260 | 3.705 | %50,6 [49,0, 52,2] | %49,4 | +1,2 puan | 0,15 | -0,229 [-0,294, -0,155] | kanıtlanmadı |
+| 5m | 13.680 | 990 | %47,7 [44,6, 50,8] | %45,9 | +1,8 puan | 0,28 | -0,084 [-0,211, +0,043] | kanıtlanmadı |
+| 15m | 5.781 | 124 | %39,5 [31,4, 48,3] | %39,3 | +0,3 puan | 1,00 | -0,167 [-0,518, +0,188] | kanıtlanmadı |
+| 1h | 1.471 | 122 | %54,1 [45,3, 62,7] | %47,9 | +6,2 puan | 0,18 | +0,103 [-0,250, +0,445] | kanıtlanmadı |
+| 4h | 490 | 0 | - | - | - | - | - | yetersiz hafıza |
 
-| TF | işlem | isabet | **taban** | brüt/işlem | maliyet | **net/işlem** | kâr faktörü |
-|---|---|---|---|---|---|---|---|
-| 1m | 478 | %72,0 | %52,4 | +0,377 ATR | -0,265 | **+0,112 ATR** | 1,27 |
-| 5m | 113 | %57,5 | %43,2 | +0,293 ATR | -0,108 | **+0,184 ATR** | 1,30 |
-| 15m | 18 | %55,6 | %38,4 | +0,264 ATR | -0,054 | **+0,210 ATR** | 1,35 |
+**Bu tablo nasıl okunur.** Bakılacak sayı, işaret değil **aralığın tamamıdır**.
+1h'de net beklenti pozitif görünüyor (+0,103 ATR) ama %95 aralığı sıfırı
+içeriyor ve tabandan farkın p değeri 0,18: bu sonuç şansla açıklanabilir, yani
+henüz bir katma değer kanıtı değildir. 1 dakikalıkta durum daha net: aralık
+tamamen negatif, yani işlem maliyeti brüt edimi yiyor.
 
-**Taban**, hiçbir seçim yapmadan tüm olayları almanın isabet oranıdır. Sistemin
-katma değeri isabet ile taban arasındaki farktır. Yeni indikatörde de bakılacak
-sayı budur: Test sekmesinde `Taban başarı oranı` ile `Başarı oranı` farkı. Fark
-yoksa sistem bir şey katmıyordur.
+Kısaca: **sistem şu an hiçbir zaman diliminde kanıtlanmış bir katma değer
+üretmiyor.** Fikrin çalışmadığı anlamına gelmez, ölçümün dürüst hâli budur.
+`src/core/learn/presets.js` içindeki hazır ayarlar hâlâ eski indikatörden
+gelir ve yeniden aranmalıdır (parametre arama aracı planda A1 maddesidir).
 
 Zaman dilimini değiştirdiğinizde uygulama o zaman dilimi için kayıtlı hazır
 ayarı uygular (`src/core/learn/presets.js`). Sıra şudur: çekirdek varsayılanı,
@@ -723,12 +729,13 @@ Bunlar açıkça bilinen ve kabul edilmiş sınırlardır:
    widget'ıdır ve iframe içeriğine dışarıdan erişilemez. Kendi bölgelerimiz ve
    sinyallerimiz yalnızca uygulamanın kendi grafiğinde görünür. TradingView
    sekmesi sadece karşılaştırma ve tanıdık bir görünüm içindir.
-2. **Yeni indikatörün sayıları henüz ölçülmedi.** İndikatör MASTER 1 TOUCH'tan
-   "proje son versiyon 3"e geçirildi. README'deki tablo ve `presets.js`
-   içindeki hazır ayarlar eski indikatöre aittir. Yeni indikatörün gerçekten
-   kazandırıp kazandırmadığı, siz Test sekmesinde yürüyen ileri testi
-   çalıştırana kadar **bilinmiyor**. Özellikle kutu oluşumu sinyali tamamen yeni
-   bir fikirdir ve hiç doğrulanmamıştır.
+2. **Sistem şu an kanıtlanmış bir katma değer üretmiyor.** Yeni indikatör
+   17 Eylül 2026'da tüm geçmişte ölçüldü (bkz. 1. bölümdeki tablo): hiçbir
+   zaman diliminde net beklentinin %95 aralığı sıfırın üstünde kalmıyor.
+   1 dakikalıkta işlem maliyeti brüt edimi yiyor, 1 saatlikte pozitif bir iz
+   var ama 122 işlemle şansla açıklanabilir. `presets.js` içindeki hazır
+   ayarlar hâlâ eski indikatörden gelir ve yeniden aranmalıdır. Özellikle kutu
+   oluşumu sinyalinin ölçülebilir bir üstünlüğü yoktur.
 3. **Kutu oluşumu sinyalinin riski sabit değildir.** Dokunuş olayında giriş
    bölge kenarıdır, risk bölge yüksekliğine eşittir ve her kurulumda aynıdır.
    Oluşum olayında giriş onay barının kapanışıdır; fiyat pivottan ne kadar
