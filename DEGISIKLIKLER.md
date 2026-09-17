@@ -34,6 +34,12 @@ olay geldiginde ayni turdeki en benzer gecmis olaylarla karsilastirilip
 | Hafizanin ayar izi (`cfgHash`) | Hafiza hangi indikator ayari ve etiket tanimiyla kuruldugunu saklar. Ayar degisip tarama yapilmazsa canli sinyal uretilmez, test sonucu "eski ayara ait" diye isaretlenir. |
 | Kalici test ozeti (`<ad>_memory.backtest.json`) | "Hangi ayarla ne olculdu" bilgisi uygulama kapaninca kaybolmuyor; Test paneli fiilen kullanilan ayari gosteriyor. |
 | Yapi damgasi olcume baglandi | Tarama ve test ciktilari uretildikleri commit ve kaynak ozetini tasir; kirli calisma agaci basligta gorunur, paketleme kirli agacta durur. |
+| Gercekci dokunus giris modeli | Karar bar kapanisinda, giris kapanistan SONRA: kenara limit emir, dolmazsa islem yok ('nofill'). Dolum orani raporlanir. |
+| Tek kazanc tanimi (`tradeResult`) | Test, taban orani ve ileride canli gunluk ayni fonksiyonu kullanir. Zaman asimi ufuk sonu kapanisiyla degerlenir. |
+| Tur bazli taban ve katki | Ozet ve tablolar katkiyi hem puan hem net ATR olarak, AYNI turun tabanina gore gosterir. |
+| Sonuc zamanina gore ambargo | Bir olay, sonucu henuz belli degilken baska bir olaya komsu olamaz. |
+| Tur ve yon basina isinma | Sabit 500 olay yerine "ayni tur ve yonden en az N aday"; orneklem yetersizse sayi yerine uyari. |
+| Pine aralik kirpmasi | Indikator ayarlari Pine input araliklarina kirpilir, kirpilanlar raporlanir. |
 
 ## Duzeltilen hatalar (olcumu veya veriyi etkileyenler)
 
@@ -61,6 +67,16 @@ olay geldiginde ayni turdeki en benzer gecmis olaylarla karsilastirilip
 - **Tarama kullanicinin olcumunu siliyordu.** Her yeni barda otomatik tarama
   basliyor ve test sinyalleriyle ozeti siliyordu. Artik yalnizca ayar izi
   degistiyse silinir.
+- **Dokunus olayinda bar ici ileriye bakma vardi.** Karar bar kapanisindaki
+  bilgiyle veriliyor, giris ayni barin ICINDE kenardan dolmus sayiliyordu.
+  Karli gorunen alt kumeler gercekci girisle cokuyordu.
+- **Zaman asimi tam zarar sayiliyordu.** Ufuk sonunda sifira yakin kapanan
+  islemler -1R gibi yaziliyor, net beklenti 2-4 kat kotu gorunuyordu.
+- **Taban orani turleri karistiriyordu.** Ekranda +9 ile +13 puan katki
+  gorunuyordu; ayni turun tabaniyla gercek fark -1,5 ile +6 puan arasinda.
+- **Ambargo olay zamanina bakiyordu**, sonucun belli oldugu zamana degil.
+- **Birlestirme kurali Pine'dan farkliydi**: mesafe yeni kutunun ortasindan
+  olculuyor ve ilk eslesmede duruluyordu.
 
 ## Depoda yapilan tek seferlik islemler
 
@@ -70,5 +86,22 @@ olay geldiginde ayni turdeki en benzer gecmis olaylarla karsilastirilip
 - Yaz saati gocu uygulandi (3.839.177 bar), turetilmis zaman dilimleri
   yeniden uretildi. Dogrulama: Binance ile getiri korelasyonunun tepe noktasi
   artik gecikme 0'da.
-- Hafizalarin yeniden taranmasi gerekiyor (olcum duzeltmeleri bittikten sonra
-  tek seferde yapilacak).
+- Olcum duzeltmelerinden sonra 1m, 5m, 15m, 1h ve 4h hafizalari yeniden
+  tarandi (2026-09-17).
+
+## Olculen son durum (2026-09-17, duzeltmelerden sonra)
+
+Kullanicinin kayitli ayarlariyla (benzerlik 0,80, en az 5 eslesme, en az
+tutma %60, en az R/R 0,8, hedef 1,5 ATR) yuruyen ileri test:
+
+| TF | olay | sinyal | isabet | ayni tur tabani | katki | net/islem | taban net |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 1m | 41.260 | 3.705 | %50,6 | %49,4 | +1,2 puan | -0,229 ATR | -0,241 ATR |
+| 5m | 13.680 | 990 | %47,7 | %45,9 | +1,8 puan | -0,084 ATR | -0,141 ATR |
+| 15m | 5.781 | 124 | %39,5 | %39,3 | +0,3 puan | -0,167 ATR | -0,120 ATR |
+| 1h | 1.471 | 122 | %54,1 | %47,9 | +6,2 puan | **+0,103 ATR** | -0,071 ATR |
+| 4h | 490 | 0 | - | - | - | - | - |
+
+Notlar: 1h ilk kez pozitif net beklenti veriyor ama 122 islemle guven araligi
+henuz hesaplanmadi (bir sonraki adim). 15m sistemin tabandan kotu oldugu tek
+zaman dilimi. 4h'de hafiza istatistik icin yetersiz.
