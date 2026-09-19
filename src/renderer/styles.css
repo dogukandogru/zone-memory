@@ -246,15 +246,6 @@ select.mini, input.mini { height: 20px; font-size: 10px; }
 }
 #chart { position: absolute; inset: 0; }
 
-/* overlay.js'in ekledigi bolge canvas'i */
-canvas.zone-overlay {
-  position: absolute;
-  left: 0; top: 0;
-  width: 100%; height: 100%;
-  pointer-events: none;
-  z-index: 3;
-}
-
 .chart-legend {
   position: absolute;
   left: 10px; top: 8px;
@@ -272,6 +263,25 @@ canvas.zone-overlay {
   font-variant-numeric: tabular-nums;
 }
 .chart-legend b { color: var(--text); font-family: var(--mono); font-weight: 500; }
+
+/* Isaret oneklerinin anahtari: efsanenin hemen ALTINDA durur. Sol alt kose
+   lightweight-charts'in kendi filigranina ait. */
+.chart-key {
+  position: absolute;
+  left: 10px; top: 32px;
+  z-index: 4;
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding: 2px 8px;
+  background: rgba(19, 23, 34, 0.72);
+  border: 1px solid var(--border-soft);
+  border-radius: 3px;
+  font-size: 10px;
+  color: var(--text-dim);
+  pointer-events: none;
+}
+.chart-key b { color: var(--text); font-family: var(--mono); font-weight: 600; }
 #legendSymbol { color: var(--text); font-weight: 600; }
 #legendChange.up { color: var(--up); }
 #legendChange.down { color: var(--down); }
@@ -593,33 +603,51 @@ table.tbl tr:hover td { background: var(--bg-hover); }
 .st { overflow: hidden; text-overflow: ellipsis; }
 .st-sep { flex: 0 0 auto; width: 1px; height: 12px; background: var(--border); }
 #statusClock { color: var(--text-dim); }
-#statusEngine.hata { color: var(--down); }
+#statusEngine.hata { color: var(--down); font-weight: 600; }
+#statusMessage { cursor: pointer; }
+#statusMessage:hover { color: var(--text); }
 
-/* ===================================================================== */
-/* panels.js uyumlulugu                                                  */
-/* panels.js kendi `zm-` onekli stillerini calisma aninda ekler. Oradaki  */
-/* bir kismi renk degiskeni eksik kaldigi icin dusebilir; asagidaki yedek */
-/* renkler paneli koyu temada dogru gosterir. panels.js kendi renklerini  */
-/* verirse onlar kazanir (daha sonra eklenen stil sayfasi onceliklidir).  */
-/* ===================================================================== */
-.zm-wrap { color: var(--text); }
-.zm-card { background: var(--bg-raise); border: 1px solid var(--border); }
-.zm-card-bas { border-bottom: 1px solid var(--border); }
-.zm-card-alt, .zm-cift-etiket, .zm-kutu-baslik, .zm-satir-alt,
-.zm-bos, .zm-not { color: var(--text-dim); }
-.zm-kutu { border: 1px solid var(--border-soft); }
-.zm-tablo th { color: var(--text-dim); border-bottom: 1px solid var(--border); }
-.zm-satir { border: 1px solid var(--border-soft); }
-.zm-satir.zm-secili { border-color: var(--accent); }
-.zm-proto-kart { border: 1px solid var(--border-soft); }
-.zm-alan input[type=text], .zm-alan input[type=number],
-.zm-alan input[type=password], .zm-alan select {
-  color: var(--text);
+/* Mesaj gecmisi kutusu (U8): alt seritteki tek satir mesajlari eziyordu. */
+.msg-log {
+  position: fixed;
+  /* SOLDA: sagda acilinca sinyal ayrintisini kapatiyordu, oysa hatayi
+     okurken cogu zaman ayni anda sinyale de bakilir. */
+  left: 8px;
+  bottom: 26px;
+  z-index: 40;
+  width: min(560px, calc(100vw - 16px));
+  max-height: 40vh;
+  overflow-y: auto;
+  background: var(--bg-panel);
   border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  font-size: 11px;
 }
-.zm-dugme { background: var(--accent); color: #fff; }
-.zm-dugme.zm-ikincil { background: transparent; border: 1px solid var(--border); color: var(--text); }
-.zm-mini canvas { border: 1px solid var(--border-soft); }
+.msg-head {
+  position: sticky;
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  background: var(--bg-raise);
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  font-weight: 600;
+}
+.msg-row {
+  display: flex;
+  gap: 8px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border-soft);
+  color: var(--text-dim);
+  white-space: normal;
+}
+.msg-row:last-child { border-bottom: 0; }
+.msg-row.hata { color: var(--down); }
+.msg-time { flex: 0 0 auto; font-family: var(--mono); color: var(--text-dim); }
 
 /* ============================ Kucuk ekran ============================ */
 @media (max-width: 1400px) {

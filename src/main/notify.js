@@ -58,14 +58,14 @@ function cfg() {
 function ozet(signal) {
   const p = (x) => (typeof x === 'number' && isFinite(x) ? x.toFixed(2) : '-')
   const parcalar = [
-    'Giris ' + p(signal.entry),
+    'Giriş ' + p(signal.entry),
     'SL ' + p(signal.sl),
     'TP1 ' + p(signal.tp1),
   ]
   const kisa = signal.summaryText || ''
   if (kisa) parcalar.push(kisa)
   else if (typeof signal.winRate === 'number' && isFinite(signal.winRate)) {
-    parcalar.push('gecmiste %' + Math.round(signal.winRate * 100))
+    parcalar.push('geçmişte %' + Math.round(signal.winRate * 100))
   }
   return parcalar.join(', ')
 }
@@ -98,7 +98,7 @@ function signalGeldi(veri) {
   if (!destekli) return false
 
   const yon = signal.direction === 'SELL' ? 'SAT' : 'AL'
-  const tur = signal.kind === 'form' ? 'kutu olusumu' : 'bolge dokunusu'
+  const tur = signal.kind === 'form' ? 'kutu oluşumu' : 'bölge dokunuşu'
   const baslik = yon + ' sinyali, ' + tur + ' (' + String(veri.tf || '') + ')'
 
   try {

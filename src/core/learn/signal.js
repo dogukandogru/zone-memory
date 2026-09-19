@@ -186,10 +186,28 @@ function toPct (x) {
   return Math.round(clamp(x, 0, 1) * 100)
 }
 
-/** UNIX saniyeyi YYYY-MM-DD metnine cevirir. */
+/**
+ * GOSTERIM ICIN tarih bicimleyici: Istanbul saati (Europe/Istanbul).
+ *
+ * Kullanici Turkiye'de; UTC'ye gore bicimlenen bir tarih gece yarisina yakin
+ * olaylarda bir gun geride gorunuyordu. YALNIZCA GOSTERIM degisir: hesaplarda
+ * kullanilan zaman damgasi (UNIX saniye) hicbir yerde donusturulmez ve
+ * seans/saat OZELLIKLERI kendi zaman dilimini (bkz. core/session.js)
+ * kullanmaya devam eder.
+ */
+const ISTANBUL_TARIH = new Intl.DateTimeFormat('tr-TR', {
+  timeZone: 'Europe/Istanbul',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+})
+
+/** UNIX saniyeyi Istanbul saatine gore YYYY-MM-DD metnine cevirir. */
 function dateText (t) {
   if (!(typeof t === 'number' && isFinite(t))) return '-'
-  return new Date(t * 1000).toISOString().slice(0, 10)
+  const parcalar = {}
+  for (const p of ISTANBUL_TARIH.formatToParts(new Date(t * 1000))) parcalar[p.type] = p.value
+  return parcalar.year + '-' + parcalar.month + '-' + parcalar.day
 }
 
 /**
@@ -726,7 +744,9 @@ function decideFromCandidates (ev, candidates, levels, cfg, ek) {
         bestSimilarity.toFixed(2))
     } else {
       reasons.push(matchCount + ' benzer geçmiş kurulum bulundu (eşik ' + minMatches + ')')
-      reasons.push('Bu kurulumların %' + toPct(winRateRaw) + ' sinde bölge tuttu (ham oran), ' +
+      // Yuzde ekini Turkce yazim kuralina uygun yazariz: "%56'sında". Sayiya
+      // gore ek degistirmeye gerek yok, "'sında" her yuzde degerinde dogrudur.
+      reasons.push('Bu kurulumların %' + toPct(winRateRaw) + "'sında bölge tuttu (ham oran), " +
         'havuz ortalaması %' + toPct(havuzTabani) + ', kalibre edilmiş oran %' + toPct(winRate))
       reasons.push('Kalibre oranın %95 alt sınırı %' + toPct(winRateLo) +
         ', tabana göre fark ' + (lift >= 0 ? '+' : '') + toPct(lift) + ' puan')

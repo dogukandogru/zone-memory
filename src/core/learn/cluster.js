@@ -391,16 +391,16 @@ function secBasarili (ev) {
  *
  * Vektor uc dilime bolunur (bas, orta, son) ve uc bilesen uretilir:
  *   1. Egim      : son dilim ortalamasi eksi bas dilim ortalamasi.
- *                  +EGIM_ESIGI ustu "Yukselen", -EGIM_ESIGI alti "Dusen",
+ *                  +EGIM_ESIGI ustu "Yükselen", -EGIM_ESIGI alti "Düşen",
  *                  arasi "Yatay".
  *   2. Son hareket: ilk bacak (orta eksi bas) ile son bacak (son eksi orta).
- *                  Isaretleri zit ve ikisi de DONUS_ESIGI'ni asiyorsa "V donus"
+ *                  Isaretleri zit ve ikisi de DONUS_ESIGI'ni asiyorsa "V dönüş"
  *                  (pencerenin ortasinda yon degistirmis, klasik tepki hareketi),
  *                  ayni yonde ve son bacak hem KIRILMA_ESIGI'ni hem de ilk
- *                  bacagin IVME_KATI katini asiyorsa "kirilma" (sona dogru
- *                  ivmelenme), aksi halde "duz" (duzgun veya kararsiz seyir).
+ *                  bacagin IVME_KATI katini asiyorsa "kırılma" (sona dogru
+ *                  ivmelenme), aksi halde "düz" (duzgun veya kararsiz seyir).
  *
- * Ornek cikti: 'Dusen + V donus'
+ * Ornek cikti: 'Düşen + V dönüş'
  *
  * OYNAKLIK PARCASI KALDIRILDI: merkez vektor normalize edildigi icin
  * "sikisik / genis" ayrimi sekil hakkinda bir sey soylemiyordu, yalnizca
@@ -433,8 +433,8 @@ function label (centroid) {
   // 1. Egim
   const egim = sonOrt - basOrt
   let egimAdi
-  if (egim > EGIM_ESIGI) egimAdi = 'Yukselen'
-  else if (egim < -EGIM_ESIGI) egimAdi = 'Dusen'
+  if (egim > EGIM_ESIGI) egimAdi = 'Yükselen'
+  else if (egim < -EGIM_ESIGI) egimAdi = 'Düşen'
   else egimAdi = 'Yatay'
 
   // 2. Son hareket
@@ -445,11 +445,11 @@ function label (centroid) {
 
   let hareketAdi
   if (ilkBacak * sonBacak < 0 && sonBuyukluk >= DONUS_ESIGI && ilkBuyukluk >= DONUS_ESIGI) {
-    hareketAdi = 'V donus'
+    hareketAdi = 'V dönüş'
   } else if (sonBuyukluk >= KIRILMA_ESIGI && sonBuyukluk > ilkBuyukluk * IVME_KATI) {
-    hareketAdi = 'kirilma'
+    hareketAdi = 'kırılma'
   } else {
-    hareketAdi = 'duz'
+    hareketAdi = 'düz'
   }
 
   return egimAdi + ' + ' + hareketAdi

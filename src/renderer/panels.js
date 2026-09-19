@@ -392,17 +392,16 @@ export function drawSparkline(canvas, values, opts) {
 
 /**
  * Bir eslesme kaydindan mini grafik serisi uretir.
- * Kayitta gercek sekil vektoru varsa (shape/values/closes) o kullanilir,
- * yoksa mfeAtr / maeAtr degerlerinden seyir taslagi cizilir.
- * @returns {{degerler:number[], isaret:number, gercek:boolean}}
+ *
+ * Bu SEYIR TASLAGIDIR, gercek mum serisi degil: lehte ve aleyhte azami
+ * hareketten cizilen bir siluettir. Once bir de "kayitta shape/values/closes
+ * varsa onu kullan" dali vardi; isci eslesme kayitlarina hicbir zaman sekil
+ * vektoru koymadigi icin o dal hic calismadi ve kodu, gercek seri
+ * gosterilebiliyormus gibi okutuyordu. Gercek seriyi gormek icin ornege
+ * tiklanir, grafik o tarihe gider.
+ * @returns {{degerler:number[], isaret:number}}
  */
 function eslesmeSerisi(m) {
-  const ham = m && (m.shape || m.values || m.closes)
-  if (ham && ham.length >= 4) {
-    const d = new Array(ham.length)
-    for (let i = 0; i < ham.length; i++) d[i] = sayi(ham[i], NaN)
-    return { degerler: d, isaret: d.length - 1, gercek: true }
-  }
   const mfe = Math.abs(sayi(m && m.mfeAtr, 0))
   const mae = -Math.abs(sayi(m && m.maeAtr, 0))
   const basarili = !!(m && m.success)
@@ -411,7 +410,6 @@ function eslesmeSerisi(m) {
   return {
     degerler: [0, 0, 0, 0, 0, 0, 0, 0, once * 0.5, once, sonra * 0.55, sonra, sonra * 0.9],
     isaret: 7,
-    gercek: false,
   }
 }
 
@@ -592,7 +590,8 @@ function sonucEtiketi(m) {
  * Sinyal listesini cizer (yalnizca satirlar, baslik serisi index.html'de).
  * @param {HTMLElement} el Liste kabi (ornek: #signalList)
  * @param {Array<object>} signals
- * @param {{onSelect?:(s:object)=>void, selectedId?:*, filter?:string}} [opts]
+ * @param {{onSelect?:(s:object)=>void, selectedId?:*, filter?:string,
+ *          total?:number, truncated?:boolean}} [opts]
  */
 export function renderSignals(el, signals, opts) {
   if (!el) return
@@ -647,6 +646,19 @@ export function renderSignals(el, signals, opts) {
       (ortPnl >= 0 ? '+' : '') + formatNumber(ortPnl, 3) + ' ATR'))
     ozet.title = 'Sonucu belli olan ' + sonuclu + ' sinyalin isabet oranı ve işlem başına net kazancı'
     el.appendChild(ozet)
+  }
+
+  // KIRPILMIS LISTE ACIKCA SOYLENIR (U8).
+  //
+  // Arayuz isciden yalnizca son N sinyali istiyor. Bugun 15m'de 252 sinyal
+  // oldugu icin fark etmiyor, ama kirpma basladigi anda buradaki isabet
+  // orani Test sekmesindekinden sessizce ayrilir ve hangisinin dogru oldugu
+  // anlasilmaz. Kirpma varsa yaziyor.
+  const toplam = sayi(o.total, 0)
+  if (o.truncated === true && toplam > hepsi.length) {
+    el.appendChild(h('div', 'small muted',
+      'Aşağıdaki oran yalnızca son ' + tam(hepsi.length) + ' sinyale ait, toplam ' +
+      tam(toplam) + ' sinyal var. Tamamı için Test sekmesindeki özete bakın.'))
   }
 
   const adet = Math.min(liste.length, AZAMI_SATIR)
@@ -933,7 +945,6 @@ export function renderSignalDetail(el, signal, opts) {
     return
   }
 
-  let taslakVar = false
   const cizimler = []
   const ornegeGit = typeof o.onMatchSelect === 'function' ? o.onMatchSelect : null
 
@@ -974,7 +985,6 @@ export function renderSignalDetail(el, signal, opts) {
     el.appendChild(satir)
 
     const seri = eslesmeSerisi(m)
-    if (!seri.gercek) taslakVar = true
     cizimler.push({ cnv, seri, basarili: sonuc.sinif === 'up', notr: sonuc.sinif === 'muted' })
   }
 
@@ -987,13 +997,12 @@ export function renderSignalDetail(el, signal, opts) {
         ? 'rgba(128,128,128,0.10)'
         : (c.basarili ? 'rgba(38,166,154,0.14)' : 'rgba(239,83,80,0.14)'),
       markerIndex: c.seri.isaret,
-      baseline: c.seri.gercek ? undefined : 0,
+      baseline: 0,
     })
   }
 
-  const notlar = [taslakVar
-    ? 'Mini grafikler seyir taslağıdır: kesik dikey çizgi sinyal anını, sonrası lehte ve aleyhte azami hareketi gösterir.'
-    : 'Kesik dikey çizgi sinyal anını gösterir.']
+  const notlar = ['Mini grafikler seyir taslağıdır: kesik dikey çizgi sinyal anını, ' +
+    'sonrası lehte ve aleyhte azami hareketi gösterir.']
   if (ornegeGit) notlar.push('Bir örneğe tıklayınca grafik o tarihe gider.')
   for (let i = 0; i < notlar.length; i++) {
     el.appendChild(h('div', 'small muted', notlar[i]))
@@ -1923,23 +1932,23 @@ function alanDugumu(tanim, ayarlar, bozar, kanca) {
  * Yuruyen ileri test sonuclarini cizer.
  * @param {HTMLElement} el Govde kabi (ornek: #panelTest .panel-body)
  * @param {object} result {trades, summary, byYear, equity}
- * @param {{onRun?:()=>void, running?:boolean}} [opts]
+ * @param {{running?:boolean, otherTf?:string|null}} [opts]
  */
 export function renderBacktest(el, result, opts) {
   if (!el) return
   const o = opts || {}
   bosalt(el)
 
+  // IKINCI CALISTIR DUGMESI KALDIRILDI.
+  //
+  // Panel basligindaki #testRunBtn ile burada cizilen dugme ayni isi
+  // yapiyordu; bastaki her zaman gorunur, buradaki icerik kaydirilinca
+  // kayboluyordu. Iki dugmeden hangisinin "asil" oldugu belli degildi ve
+  // calisma durumu ikisinde ayri ayri yonetiliyordu. Not satiri kaldi.
   const ayak = h('div', 'panel-foot')
-  const calistir = h('button', 'btn btn-primary mini', o.running ? 'Test çalışıyor...' : 'Testi Çalıştır')
-  calistir.type = 'button'
-  calistir.disabled = !!o.running
-  calistir.addEventListener('click', () => {
-    if (typeof o.onRun === 'function') o.onRun()
-  })
-  ayak.appendChild(calistir)
-  ayak.appendChild(h('span', 'small muted',
-    'Her olay yalnızca kendinden önceki hafızayla değerlendirilir, ileriye bakma yoktur.'))
+  ayak.appendChild(h('span', 'small muted', o.running
+    ? 'Test çalışıyor...'
+    : 'Her olay yalnızca kendinden önceki hafızayla değerlendirilir, ileriye bakma yoktur.'))
   el.appendChild(ayak)
 
   const r = result || null

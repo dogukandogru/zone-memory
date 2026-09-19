@@ -1452,10 +1452,24 @@ dolmamis kutu demektir; omru dolan kutu "Süresi doldu" yazar.
 
 Sinyal isaretleri: `series.setMarkers` ile BUY icin altta yukari ok (`arrowUp`),
 SELL icin ustte asagi ok. Etikette olay turu oneki ve basari orani yazar:
-`O %78` kutu olusumu, `D %78` bolgeye geri donus. Sinyal listesinde ayni ayrim
-`OLUSUM` / `DOKUNUS` rozetiyle gosterilir ve suzgecte ayri secenekleri vardir.
+`OL 13/25` kutu olusumu, `DK 13/25` bolgeye geri donus; onekleri grafigin sol
+alt kosesindeki `#chartMarkerKey` anahtari acikliyor. Sinyal listesinde ayni
+ayrim `OLUSUM` / `DOKUNUS` rozetiyle gosterilir ve suzgecte ayri secenekleri
+vardir. ISARETE tiklaninca o sinyal secilir (`view.onMarkerClick`); grafigin
+bos bir yerine tiklamak sinyal SECMEZ, cunku bolgeye tiklamakla carpisiyordu.
 Bir sinyale tiklaninca sag panelde detay acilir: giris/TP1/TP2/SL fiyat cizgileri
-grafige dusler ve benzer gecmis ornekler mini grafik (sparkline canvas) olarak listelenir.
+grafige dusler ve benzer gecmis ornekler mini grafik (sparkline canvas) olarak
+listelenir. Mini grafik bir SEYIR TASLAGIDIR, gercek mum serisi degil; panelde
+de boyle yaziyor.
+
+Alt serit: `bildir` bilgi, `hataGoster` hata yazar. Ikisi de son 50 mesaji
+`durum.mesajGecmisi`nde tutar; alt serit satirina tiklaninca `#messageLog`
+kutusu acilir. Hata 12 saniye boyunca bilgi mesajiyla EZILMEZ ve hata
+oldugu surece `#statusEngine` `hata` sinifini tasir.
+
+Klavye: `Esc` ayrintiyi ve gecmis kutusunu kapatir, `J`/`K` listede onceki ve
+sonraki sinyale gider, `1`-`6` zaman dilimi, `L` canli anahtari, `End`
+guncel mumlara doner. Bir metin alanina yaziliyorsa hicbiri calismaz.
 
 `Test` sekmesi: yuruyen ileri test sonuclari, ozet tablo, yillara gore kirilim
 ve sermaye egrisi (basit canvas cizimi). Panelin ALTINA `renderLiveLog` ile

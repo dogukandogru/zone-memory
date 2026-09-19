@@ -243,7 +243,7 @@ test('engine:backtest ESKI yuk bicimini SESSIZCE YOK SAYMAZ, hata firlatir', asy
     // okumadigi icin kullanicinin esikleri hicbir yere gitmiyordu.
     await assert.rejects(
       () => cagir('engine:backtest', { tf: TF, warmupEvents: 2, signalCfg: { minMatches: 3 } }),
-      /yuk bicimi degisti/
+      /yük biçimi değişti/
     )
     await assert.rejects(
       () => cagir('engine:backtest', { tf: TF, outcomeCfg: { targetAtr: 2 } }),
@@ -357,7 +357,7 @@ test('engine:live-tick: ayni bardaki iki olayin IKISI DE degerlendirilir', async
     assert.ok(a.ageBars > 1, 'gecikme bar cinsinden hesaplanmali')
     assert.equal(a.signal.stale, true, 'gecikmeli sinyal isaretlenmeli')
     assert.ok(
-      a.signal.reasons.some((x) => /Gecikmeli degerlendirildi/.test(x)),
+      a.signal.reasons.some((x) => /Gecikmeli değerlendirildi/.test(x)),
       'gecikme gerekce olarak yazilmali'
     )
   })

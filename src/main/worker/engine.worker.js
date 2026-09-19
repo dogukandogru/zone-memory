@@ -56,7 +56,7 @@ function core(rel) {
   try {
     mod = require('../../core/' + rel)
   } catch (err) {
-    throw new Error('Cekirdek modul yuklenemedi: core/' + rel + ' (' + (err && err.message ? err.message : String(err)) + ')')
+    throw new Error('Çekirdek modül yüklenemedi: core/' + rel + ' (' + (err && err.message ? err.message : String(err)) + ')')
   }
   coreCache.set(rel, mod)
   return mod
@@ -229,7 +229,7 @@ async function fileExists(file) {
 function requireTf(tf) {
   const tfmod = core('tf')
   if (!tf || !tfmod.TF_SECONDS[tf]) {
-    throw new Error('Gecersiz zaman dilimi: ' + String(tf))
+    throw new Error('Geçersiz zaman dilimi: ' + String(tf))
   }
   return tf
 }
@@ -405,9 +405,9 @@ async function getMemory(tf, force) {
     const guncel = core('learn/features').CTX_NAMES
     if (mem.ctxNames.length !== guncel.length) {
       throw new Error(
-        'Bu zaman diliminin hafizasi eski indikator surumunden kalma (baglam ' +
-        mem.ctxNames.length + ' boyut, simdi ' + guncel.length +
-        '). "Geçmişi Tara" ile yeniden olusturun.'
+        'Bu zaman diliminin hafızası eski indikatör sürümünden kalma (bağlam ' +
+        mem.ctxNames.length + ' boyut, şimdi ' + guncel.length +
+        '). "Geçmişi Tara" ile yeniden oluşturun.'
       )
     }
   }
@@ -419,7 +419,7 @@ async function getMemory(tf, force) {
 async function requireMemory(tf, force) {
   const mem = await getMemory(tf, force)
   if (!mem || !mem.events || mem.events.length === 0) {
-    throw new Error('Bu zaman dilimi icin hafiza yok. Once "Geçmişi Tara" calistirin.')
+    throw new Error('Bu zaman dilimi için hafıza yok. Önce "Geçmişi Tara" çalıştırın.')
   }
   return mem
 }
@@ -493,7 +493,7 @@ async function liveLogEkle(tf, satir, logs) {
       if (!liveLogWarned) {
         liveLogWarned = true
         if (Array.isArray(logs)) {
-          logs.push('Canli sinyal gunlugu yazilamadi: ' + (err2 && err2.message ? err2.message : String(err2)))
+          logs.push('Canlı sinyal günlüğü yazılamadı: ' + (err2 && err2.message ? err2.message : String(err2)))
         }
       }
       return false
@@ -701,7 +701,7 @@ handlers['data:doctor'] = async function (payload) {
   const tfSec = core('tf').tfSeconds(tf)
   const s = await getSeries(tf, false)
   if (!s || s.length === 0) {
-    return { tf: tf, bars: 0, gaps: [], monthly: [], message: 'Depoda bu zaman dilimi icin veri yok.' }
+    return { tf: tf, bars: 0, gaps: [], monthly: [], message: 'Depoda bu zaman dilimi için veri yok.' }
   }
   const rapor = core('data/doctor').veriDoktoru(s, tfSec, {
     minGapMinutes: num(payload.minGapMinutes, 30),
@@ -868,7 +868,7 @@ handlers['data:sync'] = async function (payload, ctx) {
     if (taban && taban.length > 0) {
       for (let i = 0; i < TURETILEN_TF.length; i++) {
         const ust = TURETILEN_TF[i]
-        ctx.progress(75 + (i / TURETILEN_TF.length) * 24, ust + ' yeniden uretiliyor')
+        ctx.progress(75 + (i / TURETILEN_TF.length) * 24, ust + ' yeniden üretiliyor')
         const s = seriesMod.resample(taban, tfSeconds(ust))
         await binstore.writeSeries(paths.candlePath(ust), s)
         uretilen.push({ tf: ust, count: s.length })
@@ -877,7 +877,7 @@ handlers['data:sync'] = async function (payload, ctx) {
   }
 
   clearCache(null)
-  ctx.progress(100, 'Veri guncellendi')
+  ctx.progress(100, 'Veri güncellendi')
   return Object.assign({ added: 0 }, res, { syncedTf: hedefTf, derived: uretilen })
 }
 
@@ -889,8 +889,8 @@ handlers['data:sync'] = async function (payload, ctx) {
 handlers['data:import'] = async function (payload, ctx) {
   const tf = requireTf(payload.tf)
   const file = String(payload.filePath || '')
-  if (!file) throw new Error('Iceri aktarilacak dosya yolu verilmedi.')
-  if (!(await fileExists(file))) throw new Error('Dosya bulunamadi: ' + file)
+  if (!file) throw new Error('İçeri aktarılacak dosya yolu verilmedi.')
+  if (!(await fileExists(file))) throw new Error('Dosya bulunamadı: ' + file)
 
   const binstore = core('store/binstore')
   const seriesMod = core('series')
@@ -898,7 +898,7 @@ handlers['data:import'] = async function (payload, ctx) {
 
   if (file.toLowerCase().endsWith('.bin')) {
     incoming = await binstore.readSeries(file)
-    if (!incoming) throw new Error('Ikili dosya okunamadi: ' + file)
+    if (!incoming) throw new Error('İkili dosya okunamadı: ' + file)
   } else {
     ctx.progress(5, 'CSV okunuyor')
     const text = await fsp.readFile(file, 'utf8')
@@ -924,16 +924,16 @@ handlers['data:import'] = async function (payload, ctx) {
       cols.low.push(l)
       cols.close.push(c)
       cols.volume.push(p.length > 5 ? num(Number(p[5]), 0) : 0)
-      if ((i & 65535) === 0) ctx.progress(5 + 60 * (i / lines.length), 'CSV ayristiriliyor')
+      if ((i & 65535) === 0) ctx.progress(5 + 60 * (i / lines.length), 'CSV ayrıştırılıyor')
     }
     incoming = seriesMod.fromArrays(cols)
   }
 
-  ctx.progress(75, 'Depoya yaziliyor')
+  ctx.progress(75, 'Depoya yazılıyor')
   const res = await binstore.appendSeries(paths.candlePath(tf), incoming)
   clearCache(tf)
   if (tf === '1m') clearCache(null)
-  ctx.progress(100, 'Tamamlandi')
+  ctx.progress(100, 'Tamamlandı')
   return { tf: tf, added: res ? res.added : 0, total: res ? res.total : 0 }
 }
 
@@ -946,7 +946,7 @@ handlers['engine:scan'] = async function (payload, ctx) {
   ctx.progress(0, 'Mumlar okunuyor')
   const s = await getSeries(tf, force)
   if (!s || s.length < 200) {
-    throw new Error('Tarama icin yeterli mum yok (' + (s ? s.length : 0) + ' bar). Once veri indirin.')
+    throw new Error('Tarama için yeterli mum yok (' + (s ? s.length : 0) + ' bar). Önce veri indirin.')
   }
 
   const memoryMod = core('learn/memory')
@@ -958,7 +958,7 @@ handlers['engine:scan'] = async function (payload, ctx) {
   const uygulanan = core('learn/presets').resolveCfg(tf, payload.cfgPatch || cfgPatchGeriUyum(payload), null)
   const params = Object.assign({}, payload.params || {})
 
-  ctx.progress(2, 'Indikator calisiyor')
+  ctx.progress(2, 'İndikatör çalışıyor')
   const built = memoryMod.buildMemory(
     s,
     { tf: tf, params: params, outcomeCfg: uygulanan.outcomeCfg },
@@ -971,7 +971,7 @@ handlers['engine:scan'] = async function (payload, ctx) {
   // olmadigini belirler (tek yerde hesaplanir).
   const yeniIz = ayarIzi(params, uygulanan.outcomeCfg, built.ctxNames)
 
-  ctx.progress(82, 'Hafiza diske yaziliyor')
+  ctx.progress(82, 'Hafıza diske yazılıyor')
   await memstore.saveMemory(paths.memoryPath(tf), {
     tf: tf,
     ctxNames: built.ctxNames,
@@ -991,16 +991,16 @@ handlers['engine:scan'] = async function (payload, ctx) {
     cfgHash: yeniIz,
   })
 
-  ctx.progress(88, 'Bolgeler kaydediliyor')
+  ctx.progress(88, 'Bölgeler kaydediliyor')
   await writeJsonAtomic(paths.zonesPath(tf), zones)
 
-  ctx.progress(91, 'Prototipler cikariliyor')
+  ctx.progress(91, 'Prototipler çıkarılıyor')
   let protos = []
   try {
     protos = core('learn/cluster').buildPrototypes({ events: events }, {}) || []
   } catch (err) {
     protos = []
-    log('Prototipler hesaplanamadi: ' + (err && err.message ? err.message : String(err)))
+    log('Prototipler hesaplanamadı: ' + (err && err.message ? err.message : String(err)))
   }
   await writeJsonAtomic(paths.protosPath(tf), protosToJson(protos))
 
@@ -1048,12 +1048,12 @@ handlers['engine:scan'] = async function (payload, ctx) {
         // Dosya yoksa sorun degil.
       }
     }
-    log('Ayarlar degistigi icin eski test sinyalleri ve ozeti silindi.')
+    log('Ayarlar değiştiği için eski test sinyalleri ve özeti silindi.')
   } else {
     signalCache = { tf: null, signals: null }
   }
 
-  ctx.progress(97, 'Ozet hazirlaniyor')
+  ctx.progress(97, 'Özet hazırlanıyor')
   let summary = null
   try {
     summary = memoryMod.summarize({ tf: tf, ctxNames: built.ctxNames, events: events })
@@ -1061,7 +1061,7 @@ handlers['engine:scan'] = async function (payload, ctx) {
     summary = null
   }
 
-  ctx.progress(100, 'Tarama tamamlandi')
+  ctx.progress(100, 'Tarama tamamlandı')
   return {
     tf: tf,
     bars: s.length,
@@ -1174,7 +1174,7 @@ handlers['engine:export-csv'] = async function (payload) {
 
   if (ne === 'trades') {
     if (!sonBacktest || sonBacktest.tf !== tf) {
-      throw new Error('Once bu zaman diliminde Test sekmesinden olcum calistirin.')
+      throw new Error('Önce bu zaman diliminde Test sekmesinden ölçüm çalıştırın.')
     }
     satirlar = sonBacktest.trades
     ozet = sonBacktest.summary
@@ -1192,7 +1192,7 @@ handlers['engine:export-csv'] = async function (payload) {
   } else {
     const mem = await getMemory(tf, false)
     if (!mem || !mem.events || mem.events.length === 0) {
-      throw new Error('Bu zaman diliminde hafiza yok.')
+      throw new Error('Bu zaman diliminde hafıza yok.')
     }
     const ctxAdlari = Array.isArray(mem.ctxNames) ? mem.ctxNames : []
     satirlar = mem.events.map((e) => {
@@ -1247,7 +1247,7 @@ handlers['engine:export-csv'] = async function (payload) {
       buildSrcHash: damga.buildSrcHash,
     })
   } catch (err) {
-    log('CSV yan bilgisi yazilamadi: ' + (err && err.message ? err.message : String(err)))
+    log('CSV yan bilgisi yazılamadı: ' + (err && err.message ? err.message : String(err)))
   }
 
   return { tf: tf, what: ne, rows: yazilan, filePath: dosya }
@@ -1282,8 +1282,8 @@ handlers['engine:backtest'] = async function (payload, ctx) {
   // hicbir yerde gorunmuyordu. Yanlis bicim artik sessizce yok sayilmaz.
   if (!payload.cfg && (payload.signalCfg || payload.outcomeCfg || payload.warmupEvents !== undefined)) {
     throw new Error(
-      'engine:backtest yuk bicimi degisti: esikler ve isinma ' +
-      '{ cfg: { warmupEvents, cfgPatch } } icinde gonderilmeli.'
+      'engine:backtest yük biçimi değişti: eşikler ve ısınma ' +
+      '{ cfg: { warmupEvents, cfgPatch } } içinde gönderilmeli.'
     )
   }
 
@@ -1339,14 +1339,14 @@ handlers['engine:backtest'] = async function (payload, ctx) {
     cache = null
   }
   if (!cache) {
-    ctx.progress(1, 'Komsular hesaplaniyor (ilk kosu)')
+    ctx.progress(1, 'Komşular hesaplanıyor (ilk koşu)')
     cache = candcache.buildCandidates(mem, cfg, (pct, msg) => ctx.progress(num(pct, 0) * 0.6, msg))
     try {
       const tmp = onbellekYolu + '.tmp'
       await fsp.writeFile(tmp, candcache.serialize(cache))
       await fsp.rename(tmp, onbellekYolu)
     } catch (err) {
-      log('Aday onbellegi yazilamadi: ' + (err && err.message ? err.message : String(err)))
+      log('Aday önbelleği yazılamadı: ' + (err && err.message ? err.message : String(err)))
     }
   }
 
@@ -1393,11 +1393,11 @@ handlers['engine:backtest'] = async function (payload, ctx) {
             ev.direction === 'SELL' ? 'SELL' : 'BUY', { atr: ustAtrBul(karar), nearAtr: 0.5 })
           return 'Üst TF bölgesi (' + ustTf + '): ' + htf.htfSubset(durum)
         })
-        log('Ust zaman dilimi baglami hazir: ' + ustTf + ', ' + dizin.rows.length + ' kutu araligi')
+        log('Üst zaman dilimi bağlamı hazır: ' + ustTf + ', ' + dizin.rows.length + ' kutu aralığı')
       }
     }
   } catch (err) {
-    log('Ust zaman dilimi baglami kurulamadi: ' + (err && err.message ? err.message : String(err)))
+    log('Üst zaman dilimi bağlamı kurulamadı: ' + (err && err.message ? err.message : String(err)))
   }
 
   // EKONOMIK TAKVIM (Y2): dosya varsa testin alt kume kirilimi doldurulur.
@@ -1411,8 +1411,8 @@ handlers['engine:backtest'] = async function (payload, ctx) {
     // Karar ani olayin BASLADIGI an degil, barin KAPANISIDIR.
     altKumeKancalari.push((ev) =>
       'Veri penceresi: ' + takvimModul.newsSubset(takvim, num(ev.time, 0) + tfSn))
-    log('Ekonomik takvim yuklendi: ' + takvim.count + ' kayit' +
-      (takvim.skipped > 0 ? ', ' + takvim.skipped + ' satir atlandi' : ''))
+    log('Ekonomik takvim yüklendi: ' + takvim.count + ' kayıt' +
+      (takvim.skipped > 0 ? ', ' + takvim.skipped + ' satır atlandı' : ''))
   }
 
   // Her boyut kendi icinde tum olaylari boler; kanca etiket DIZISI doner.
@@ -1420,7 +1420,7 @@ handlers['engine:backtest'] = async function (payload, ctx) {
     cfg.subsetOf = (ev) => altKumeKancalari.map((f) => f(ev))
   }
 
-  ctx.progress(62, 'Geriye test basliyor')
+  ctx.progress(62, 'Geriye test başlıyor')
   const res = bt.runBacktestFromCache(mem, cache, protos, cfg,
     (pct, msg) => ctx.progress(62 + num(pct, 0) * 0.3, msg))
 
@@ -1476,7 +1476,7 @@ handlers['engine:backtest'] = async function (payload, ctx) {
       buildSrcHash: damga.buildSrcHash,
     })
   } catch (err) {
-    log('Test ozeti diske yazilamadi: ' + (err && err.message ? err.message : String(err)))
+    log('Test özeti diske yazılamadı: ' + (err && err.message ? err.message : String(err)))
   }
 
   // CSV DISA AKTARIMI ICIN: kirpilmamis islem listesi bellekte tutulur.
@@ -1492,7 +1492,7 @@ handlers['engine:backtest'] = async function (payload, ctx) {
     memory: hafizaOzeti,
   }
 
-  ctx.progress(100, 'Test tamamlandi')
+  ctx.progress(100, 'Test tamamlandı')
   return {
     tf: tf,
     usedCfg: kullanilanAyar,
@@ -1653,7 +1653,7 @@ function takvimOnbellek () {
     cal = null
   }
   takvimDurumu = { yuklendi: true, cal: cal }
-  if (cal) log('Ekonomik takvim yuklendi: ' + cal.count + ' kayit')
+  if (cal) log('Ekonomik takvim yüklendi: ' + cal.count + ' kayıt')
   return cal
 }
 
@@ -1776,7 +1776,7 @@ handlers['engine:live-tick'] = async function (payload) {
     return {
       tf: tf, added: 0, basis: payload.basis === undefined ? null : payload.basis,
       lastBar: null, events: [], labeled: 0, signal: null, touch: null,
-      logs: ['Saglayicidan mum gelmedi.'],
+      logs: ['Sağlayıcıdan mum gelmedi.'],
     }
   }
   inc = seriesMod.sanitize(inc)
@@ -1844,12 +1844,12 @@ handlers['engine:live-tick'] = async function (payload) {
         needsSync = true
         if (!basisWarned) {
           basisWarned = true
-          logs.push('Vekil kaynak duzeltilemedi (' + duzeltme.reason + '), bar yazilmadi. Veri Cek ile bosluk kapatilmali.')
+          logs.push('Vekil kaynak düzeltilemedi (' + duzeltme.reason + '), bar yazılmadı. Veri Çek ile boşluk kapatılmalı.')
         }
       }
     } catch (err) {
       needsSync = true
-      logs.push('Vekil duzeltme hesaplanamadi: ' + (err && err.message ? err.message : String(err)))
+      logs.push('Vekil düzeltme hesaplanamadı: ' + (err && err.message ? err.message : String(err)))
     }
   }
 
@@ -1858,7 +1858,7 @@ handlers['engine:live-tick'] = async function (payload) {
       tf: tf, added: 0, basis: basis, volScale: volScale, basisWarned: basisWarned,
       needsSync: needsSync, lastBar: null, events: [], labeled: 0,
       signal: null, touch: null,
-      logs: logs.length ? logs : ['Duzeltmeden sonra yazilacak bar kalmadi.'],
+      logs: logs.length ? logs : ['Düzeltmeden sonra yazılacak bar kalmadı.'],
     }
   }
 
@@ -1918,8 +1918,8 @@ handlers['engine:live-tick'] = async function (payload) {
       }
       if (acikBosluk > 0) {
         needsSync = true
-        logs.push('Canli akista bosluk var (' + new Date(lastKnown * 1000).toISOString() +
-          ' sonrasi), bar eklenmedi. Eksik donem Veri Cek ile kapatilmali.')
+        logs.push('Canlı akışta boşluk var (' + new Date(lastKnown * 1000).toISOString() +
+          ' sonrası), bar eklenmedi. Eksik dönem Veri Çek ile kapatılmalı.')
         startIdx = closedEnd
       }
     }
@@ -1941,7 +1941,7 @@ handlers['engine:live-tick'] = async function (payload) {
         added = fresh.length
         if (!liveStoreWarned) {
           liveStoreWarned = true
-          logs.push('Canli barlar bellekte tutuluyor: ' + tf + ' serisi 1m deposundan turetiliyor, ayri dosya acilmadi.')
+          logs.push('Canlı barlar bellekte tutuluyor: ' + tf + ' serisi 1m deposundan türetiliyor, ayrı dosya açılmadı.')
         }
       }
       if (cached) {
@@ -2026,8 +2026,8 @@ handlers['engine:live-tick'] = async function (payload) {
       // uretilmez.
       const rejim = await hacimRejimiKontrol(tf, s, tfSec)
       if (rejim && rejim.bozuk) {
-        logs.push('Hacim rejimi kaymis (kapi orani %' + (rejim.rate * 100).toFixed(1) +
-          ', referans %' + (rejim.ref * 100).toFixed(1) + '), sinyal uretilmedi.')
+        logs.push('Hacim rejimi kaymış (kapı oranı %' + (rejim.rate * 100).toFixed(1) +
+          ', referans %' + (rejim.ref * 100).toFixed(1) + '), sinyal üretilmedi.')
       }
       // EKONOMIK TAKVIM (Y2): dosya yoksa null kalir ve hicbir sey degismez.
       // Her tikta diskten okumak yerine surec boyunca bir kez yuklenir.
@@ -2048,10 +2048,10 @@ handlers['engine:live-tick'] = async function (payload) {
 
       if (adaylar.length > 0) {
         if (!hafizaVar) {
-          logs.push('Yeni bolge olayi bulundu ama hafiza bos. Once "Geçmişi Tara" calistirin.')
+          logs.push('Yeni bölge olayı bulundu ama hafıza boş. Önce "Geçmişi Tara" çalıştırın.')
         } else if (izUyum === false) {
           cfgMismatch = true
-          logs.push('Hafiza farkli bir ayarla kuruldu, sinyal uretilmedi. "Geçmişi Tara" calistirin.')
+          logs.push('Hafıza farklı bir ayarla kuruldu, sinyal üretilmedi. "Geçmişi Tara" çalıştırın.')
         }
       }
       const uretilebilir = hafizaVar && izUyum !== false && !(rejim && rejim.bozuk)
@@ -2079,9 +2079,9 @@ handlers['engine:live-tick'] = async function (payload) {
               // Basisin DEGERI ve YASI birlikte yazilir: eskimis bir basis
               // sessizce yanlis fiyat seviyesi uretir, kullanici bunu
               // gerekcede gormeli.
-              sig.reasons.push('Vekil kaynak fiyati ' + basis.toFixed(2) + ' birim kaydirildi' +
+              sig.reasons.push('Vekil kaynak fiyatı ' + basis.toFixed(2) + ' birim kaydırıldı' +
                 (Number.isFinite(basisYas)
-                  ? ' (depodaki son gercek bar ' + Math.round(basisYas / 60) + ' dakika once)'
+                  ? ' (depodaki son gerçek bar ' + Math.round(basisYas / 60) + ' dakika önce)'
                   : '') + '.')
             }
             // UST ZAMAN DILIMI BAGLAMI: bilgi, sinyale KATILMAZ.
@@ -2106,7 +2106,7 @@ handlers['engine:live-tick'] = async function (payload) {
         if (sig && ageBars > 1) {
           sig.stale = true
           if (!Array.isArray(sig.reasons)) sig.reasons = []
-          sig.reasons.push('Gecikmeli degerlendirildi (' + ageBars.toFixed(1) + ' bar sonra).')
+          sig.reasons.push('Gecikmeli değerlendirildi (' + ageBars.toFixed(1) + ' bar sonra).')
         }
         // KANIT DURUMU: son olcumde bu TURUN katma degeri kanitlandi mi.
         // Olcum yoksa veya ayar izi degistiyse "kanitlanmadi" kabul edilir.
@@ -2119,8 +2119,8 @@ handlers['engine:live-tick'] = async function (payload) {
           if (sig.evidence.status !== 'kanitli') {
             if (!Array.isArray(sig.reasons)) sig.reasons = []
             sig.reasons.push(sig.evidence.status === 'zayif'
-              ? 'Bu sinyal turunun katma degeri zayif: son olcumde aralik sifiri iceriyor.'
-              : 'Bu sinyal turunun katma degeri kanitlanmadi (son olcume gore).')
+              ? 'Bu sinyal türünün katma değeri zayıf: son ölçümde aralık sıfırı içeriyor.'
+              : 'Bu sinyal türünün katma değeri kanıtlanmadı (son ölçüme göre).')
           }
         }
         events.push({
@@ -2131,7 +2131,7 @@ handlers['engine:live-tick'] = async function (payload) {
         })
       }
       if (ozellikYok > 0) {
-        logs.push(ozellikYok + ' yeni bolge olayi bulundu ama ozellik penceresi yetersiz.')
+        logs.push(ozellikYok + ' yeni bölge olayı bulundu ama özellik penceresi yetersiz.')
       }
 
       // GUNLUK: tetiklenmeyen olaylar da yazilir. Canli performansi olcmek
@@ -2165,7 +2165,7 @@ handlers['engine:live-tick'] = async function (payload) {
       // Gunluk satiri 12-20 saniyede kayboluyordu; hata artik durum
       // nesnesiyle de donuyor ve gostergede kalici olarak gorunuyor.
       kontrolHatasi = (err && err.message ? err.message : String(err))
-      logs.push('Canli kontrol hatasi: ' + kontrolHatasi)
+      logs.push('Canlı kontrol hatası: ' + kontrolHatasi)
     }
   }
 
@@ -2334,7 +2334,9 @@ function tradesToSignals(trades, memory) {
     out.push({
       id: t.id,
       fired: true,
-      // Olay turu geriye testin islem kaydinda yok, hafizadaki olaydan gelir.
+      // Olay turu HAFIZADAKI olaydan okunur. Islem kaydinin kendisinde de
+      // `kind` alani var (bkz. learn/backtest.js), ama olay bulunamazsa
+      // burada dokunus varsayilir.
       kind: e && e.kind === 'form' ? 'form' : 'touch',
       time: t.time,
       bar: t.bar,
@@ -2412,7 +2414,7 @@ async function gecicileriTemizle () {
         const st = await fsp.stat(tam)
         if ((simdi - st.mtimeMs) / 1000 < GECICI_YAS_SN) continue
         await fsp.unlink(tam)
-        log('Yarim kalmis hafiza gecici dosyasi silindi: ' + ad)
+        log('Yarım kalmış hafıza geçici dosyası silindi: ' + ad)
       } catch (err) {
         // Baska bir surec kullaniyor olabilir, sessizce gec.
       }

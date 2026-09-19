@@ -73,6 +73,9 @@ olay geldiginde ayni turdeki en benzer gecmis olaylarla karsilastirilip
 | Masaustu bildirimi (`src/main/notify.js`) | Yalnizca tetiklenen, gecikmemis ve kanitli sinyallerde; tiklayinca sinyali aciyor. |
 | "O ana kadar goster" kipi (`#asOfToggle`) | Gecmis sinyal incelenirken ekran o andan sonrasini gostermiyor: sonraki mum, sonraki isaret ve kutularin bugunku hali gizli. |
 | Bolge omru arayuzde ayri durum | "Aktif" artik kirilmamis VE omru dolmamis demek; omru dolan kutu "Süresi doldu" yaziyor. |
+| Alt serit mesaj gecmisi (`#messageLog`) | Son 50 mesaj saklaniyor, hata 12 saniye boyunca ezilmiyor, hata varken motor satiri kirmizi kaliyor. |
+| Klavye kisayollari | Esc, J/K (onceki/sonraki sinyal), 1-6 zaman dilimi, L canli, End guncele don. |
+| Isaret anahtari (`#chartMarkerKey`) | Grafikteki "OL"/"DK" oneklerinin ne demek oldugu artik grafigin kosesinde yaziyor. |
 
 ## Duzeltilen hatalar (olcumu veya veriyi etkileyenler)
 
@@ -162,6 +165,24 @@ olay geldiginde ayni turdeki en benzer gecmis olaylarla karsilastirilip
   Kullanici "zaten kirilacakmis" diye okuyup kendi degerlendirmesini gecmise
   uyduruyordu. Olculemeyen ama karari dogrudan bozan bir ileriye bakma
   bicimiydi.
+- **Grafige tiklamak yanlislikla sinyal seciyordu.** Herhangi bir noktaya
+  tiklamak 1,5 bar icindeki sinyali seciyordu; bir kutunun kenarina tiklayip
+  bolgeyi incelemek isteyen kullanici sinyal paneline atiyordu. Asil olmasi
+  gereken ISARET tiklamasi ise chart.js'te ad cakismasi yuzunden hic
+  calismiyordu (ayni kapsamda iki `onChartClick` bildirimi vardi, ikincisi
+  birincisini eziyordu).
+- **Gecmise kaydirma uzun tatillerde takiliyordu.** Eski mum istegi duvar
+  saatine gore bir pencere kuruyordu; piyasa kapaliyken bar olusmadigi icin
+  uzun bir tatil bu pencerenin tamamini yutabiliyordu (1m serisinde 4000
+  dakikadan uzun 30 bosluk var, en uzunu 3,2 gun).
+- **Motor hatadan sonra "hazır" yaziyordu** ve hata mesaji bir sonraki log
+  satiriyla siliniyordu.
+- **Mum yuklenemeyince ekranda "Veri yok" yaziyordu.** Kullanici saatlerce
+  veri indirmeye calisiyor, oysa sorun motorun cevap verememesiydi.
+- **Turetilen zaman dilimlerinde "kayıt yok" yaziyordu.** Durum satiri zaman
+  dilimi basina bir `.bin` dosyasina bakiyor; 30m'nin kendi dosyasi yok, seri
+  1m'den uretiliyor. Grafikte binlerce mum gorunurken alt serit "kayıt yok"
+  diyordu.
 - **`Number(null)` SIFIR tuzagi dorduncu kez.** Bu kez kirilma ani tasimayan
   kutular "1970'te kirilmis" sayiliyor ve her an icin kirik gorunuyordu.
   Tuzak, onu yakalayan testle birlikte kodda adiyla yaziyor.

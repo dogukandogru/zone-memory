@@ -395,17 +395,36 @@ Bir kutuya tıklarsanız sağ panelde o bölgenin bilgileri ve olay geçmişi a�
 akış gücü (1 ile 10 arası), doğuştaki akış, bandın dışına ne kadar taşmış, kaç
 yakın pivotun bu kutuya katıldığı ve kutunun ürettiği olaylar.
 
+Bölgeler listesindeki **Aktif** süzgeci yalnızca kırılmamış **ve ömrü dolmamış**
+kutuları gösterir. Bir kutu kırılmadan da biter: Pine kutusu belirli bir bar
+sayısı yaşar, sonrasında artık fiyatla ilgisi kalmaz. Bunlar "Süresi doldu"
+yazar. Eskiden "Aktif" görünüyorlardı ve aylar önce sonlanmış bir destek bugün
+geçerliymiş gibi okunuyordu.
+
+**"O an" kipi (varsayılan açık).** Sinyaller panelindeki `O an` kutusu işaretliyken
+geçmiş bir sinyale tıkladığınızda ekran o sinyalden **sonrasını göstermez**:
+o andan sonraki mum çizilmez, o andan sonra doğan kutu görünmez, kutunun sağ
+kenarı o anda durur ve **kırılması o andan sonra olan kutu sağlam görünür**.
+Grafiğin sol üstünde kilitli anı yazan turuncu bir rozet belirir. Bu kip,
+kararı geçmişe uydurmayı engellemek içindir: sinyal anında sağlam olan bir
+destek, iki hafta sonra kırıldığı için kesikli çizilince "zaten kırılacakmış"
+diye okunuyordu. Sonucu görmek için kutunun işaretini kaldırın.
+
 ### 4.3 Sinyallerin okunması
 
 Grafikte alta bakan yukarı ok ALIŞ, üste bakan aşağı ok SATIŞ sinyalidir.
-Etiketin başındaki harf sinyalin türünü söyler:
+Etiketin başındaki önek sinyalin türünü söyler (grafiğin sol alt köşesindeki
+anahtarda da yazar):
 
-- **O** = kutu oluşumu (kutu o barda doğdu)
-- **D** = bölgeye geri dönüş (fiyat kutuya döndü ve dokundu)
+- **OL** = kutu oluşumu (kutu o barda doğdu)
+- **DK** = bölgeye geri dönüş (fiyat kutuya döndü ve dokundu)
 
-Harften sonraki yüzde, geçmişteki **aynı türdeki** benzer kurulumların kazanma
-oranıdır. Sinyal listesinde aynı ayrım `OLUŞUM` / `DOKUNUŞ` rozetiyle görünür,
-üstteki süzgeçten yalnızca bir türü de gösterebilirsiniz.
+Önekten sonraki **13/25** gibi sayı, geçmişteki **aynı türdeki** benzer
+kurulumların kaçından kaçının tuttuğudur. Yüzde tek başına yazmıyor, çünkü
+5 kayıttan 3'ü ile 30 kayıttan 18'i aynı yüzdeyi verir ama aynı şey değildir.
+Sinyal listesinde aynı ayrım `OLUŞUM` / `DOKUNUŞ` rozetiyle görünür, üstteki
+süzgeçten yalnızca bir türü de gösterebilirsiniz. Bir **işarete** tıklamak o
+sinyali seçer; grafiğin boş bir yerine tıklamak sinyal seçmez.
 
 Bir sinyale tıklayınca sağ panelde detay açılır:
 
@@ -416,7 +435,7 @@ Bir sinyale tıklayınca sağ panelde detay açılır:
 | Eşleşme sayısı | Benzerlik eşiğini geçen, aynı türdeki geçmiş kayıt sayısı |
 | Ortalama benzerlik | Bu eşleşmelerin ortalama benzerlik puanı (0 ile 1) |
 | Kazanma oranı | Eşleşmelerin kaçı bölgeye saygı göstermiş |
-| Güven skoru | Eşleşme sayısı, oranın 0,5'ten uzaklığı ve benzerliğin bileşimi |
+| Kanıt puanı (olasılık değil) | Eşleşme sayısı, oranın 0,5'ten uzaklığı ve benzerliğin bileşimi. Bir olasılık DEĞİLDİR ve ana kutuda gösterilmez |
 | Benzerlerde sonuca kadar ortalama lehte / aleyhte hareket | Eşleşmelerin `mfeExitAtr` ve `maeExitAtr` ortalaması, ATR cinsinden. Tüm ufku ölçen ham MFE değil: o, stop vurulduktan sonraki hareketi de sayıyor ve hedefin 2,5 katına çıkabiliyordu |
 | Plan riski (SL mesafesi) | Girişten stopa uzaklık, ATR cinsinden. Yukarıdaki aleyhte hareketle aynı şey değil |
 | Durum | Sinyal üretildi mi, yoksa eşikler mi geçilmedi |
@@ -581,6 +600,25 @@ kullanılan kaynak ve uygulanan kaydırma miktarı yazar.
 | Yahoo GC=F | ⚠️ | Tekrarlı isteklerde HTTP 429, canlı için güvenilmez |
 | Twelve Data | 🔑 | Spot doğru fiyat ama forexte hacim vermez |
 | Polygon C:XAUUSD | 🔑 | Ücretli, gerçek spot + tick hacmi. **En doğru seçenek.** |
+
+### 4.7 Klavye kısayolları ve alt şerit
+
+Sinyal listesini fareyle gezmek yüzlerce kayıtta pratik değildi. Bir metin
+alanına yazmıyorken şu kısayollar çalışır:
+
+| Tuş | Ne yapar |
+| --- | --- |
+| `J` / `K` | Listede sonraki / önceki sinyale geçer, grafik oraya kayar |
+| `Esc` | Seçimi ve ayrıntıyı kapatır, "o an" kilidini kaldırır |
+| `1` - `6` | Zaman dilimi (1m, 5m, 15m, 30m, 1h, 4h) |
+| `L` | Canlı akışı açar veya kapatır |
+| `End` | Geçmiş bir pencereden güncel mumlara döner |
+
+Alt şerit **son 50 mesajı** saklar; şeride tıklayınca liste açılır. Bir hata
+12 saniye boyunca sıradan bir bilgi mesajıyla **ezilmez** ve hata olduğu sürece
+`Motor:` satırı kırmızı kalır. Eskiden hata bir sonraki log satırıyla siliniyor,
+motor da hemen ardından "hazır" yazıyordu. Saat göstergesi **TSİ** ekiyle yazar:
+listelerdeki ve grafikteki bütün saatler İstanbul saatindedir.
 
 ---
 

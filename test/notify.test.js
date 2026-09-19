@@ -77,7 +77,7 @@ test('kanitli, tetiklenmis ve gecikmemis sinyal bildirilir', () => {
   assert.match(gosterilen[0].title, /AL sinyali/)
   assert.match(gosterilen[0].title, /15m/)
   // Govde plan seviyelerini tasir: bildirime bakip karar verilebilmeli.
-  assert.match(gosterilen[0].body, /Giris 2650\.10/)
+  assert.match(gosterilen[0].body, /Giriş 2650\.10/)
   assert.match(gosterilen[0].body, /SL 2645\.30/)
   assert.match(gosterilen[0].body, /TP1 2656\.00/)
   assert.strictEqual(notify.unreadCount(), 1)

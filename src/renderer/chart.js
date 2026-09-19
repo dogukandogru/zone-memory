@@ -18,8 +18,9 @@
  *   clearPriceLines, fitContent, scrollToTime, onVisibleRangeChange,
  *   priceToY, timeToX, resize, destroy
  * Sozlesme disinda kalan ekler (overlay.js ve app.js icin kolaylik):
- *   volumeSeries, getPaneSize, getVisibleTimeRange, onCrosshairMove,
- *   onMarkerClick, barCount, lastBarTime, xToTime, isDestroyed
+ *   volumeSeries, attachPrimitive, detachPrimitive, onChartClick,
+ *   getVisibleTimeRange, getDataTimeRange, onCrosshairMove, onMarkerClick,
+ *   setPlanLines, clearPlanLines, lastBarTime, isDestroyed
  */
 
 const TZ = 'Europe/Istanbul';
@@ -313,7 +314,12 @@ export function createChartView(container) {
   // olarak bildirir.
   const markerClickListeners = [];
 
-  function onChartClick(param) {
+  // ADI ONEMLI. Bu once `onChartClick` idi, ama dosyanin altinda AYNI KAPSAMDA
+  // ayni adla ikinci bir fonksiyon bildirimi var. Fonksiyon bildirimleri one
+  // cekildigi icin asagidaki `subscribeClick` cagrisi aslinda O IKINCIYI
+  // aboneliyordu; o da `typeof cb !== 'function'` kontrolunden hemen donuyor.
+  // Sonuc: isaret tiklamasi HIC calismiyordu ve `onMarkerClick` olu bir APIydi.
+  function isaretTiklamasi(param) {
     if (markerClickListeners.length === 0) return;
     if (!param || param.hoveredObjectId === undefined || param.hoveredObjectId === null) return;
     const bilgi = { id: param.hoveredObjectId, time: param.time != null ? param.time : null, point: param.point || null };
@@ -321,7 +327,7 @@ export function createChartView(container) {
       try { markerClickListeners[i](bilgi); } catch (_e) { /* yoksay */ }
     }
   }
-  chart.subscribeClick(onChartClick);
+  chart.subscribeClick(isaretTiklamasi);
 
   function onCrosshair(param) {
     if (crosshairListeners.length === 0) return;
@@ -643,10 +649,12 @@ export function createChartView(container) {
     const point = { time: t, open: +bar.open, high: +bar.high, low: +bar.low, close: +bar.close };
     if (!isNum(point.open) || !isNum(point.high) || !isNum(point.low)) return;
 
+    let yeniBar = false;
     if (count === 0 || t > times[count - 1]) {
       ensureCapacity(count + 1);
       times[count++] = t;
       recomputeStep();
+      yeniBar = true;
     } else if (t === times[count - 1]) {
       // ayni bar guncelleniyor
     } else {
@@ -661,7 +669,10 @@ export function createChartView(container) {
       value: vol,
       color: point.close >= point.open ? 'rgba(38, 166, 154, 0.32)' : 'rgba(239, 83, 80, 0.32)',
     });
-    emitRange();
+    // Aralik YALNIZCA yeni bar eklenince yayinlanir. Ayni barin fiyati
+    // degisince veri araligi degismez; her canli tikte yayinlamak app.js'teki
+    // "gecmise dogru genislet" akisini bos yere tetikliyordu.
+    if (yeniBar) emitRange();
   }
 
   function setMarkers(markers) {
@@ -712,39 +723,6 @@ export function createChartView(container) {
     const x1 = ts.logicalToCoordinate(i + 1);
     if (!isNum(x1)) return x0;
     return x0 + (x1 - x0) * f;
-  }
-
-  function xToTime(x) {
-    if (destroyed || !isNum(+x)) return null;
-    const l = chart.timeScale().coordinateToLogical(+x);
-    return isNum(l) ? logicalToTime(l) : null;
-  }
-
-  /**
-   * Cizim alani: fiyat ve zaman olcekleri disarida birakilmis kutu.
-   * Not: olcek genislikleri ilk boyama tamamlanana kadar 0 gelebilir; bu
-   * durumda kap boyutu dondurulur ve `measured` false olur.
-   */
-  function getPaneSize() {
-    const w = Math.max(1, container.clientWidth);
-    const h = Math.max(1, container.clientHeight);
-    let sw = 0, th = 0, tw = 0;
-    try { sw = chart.priceScale('right').width() || 0; } catch (_e) { sw = 0; }
-    try {
-      const ts = chart.timeScale();
-      th = ts.height() || 0;
-      tw = ts.width() || 0;
-    } catch (_e) { th = 0; tw = 0; }
-    // Iki olcumden kucuk olani gercek cizim alanidir.
-    const byScale = sw > 0 ? w - sw : w;
-    const width = Math.max(1, Math.min(tw > 0 ? tw : w, byScale));
-    return {
-      width,
-      height: Math.max(1, h - th),
-      fullWidth: w,
-      fullHeight: h,
-      measured: sw > 0 && th > 0,
-    };
   }
 
   // ---------------------------------------------------------------------
@@ -835,7 +813,7 @@ export function createChartView(container) {
     markerClickListeners.length = 0;
     try { chart.timeScale().unsubscribeVisibleLogicalRangeChange(onLogicalRangeChange); } catch (_e) { /* yoksay */ }
     try { chart.unsubscribeCrosshairMove(onCrosshair); } catch (_e) { /* yoksay */ }
-    try { chart.unsubscribeClick(onChartClick); } catch (_e) { /* yoksay */ }
+    try { chart.unsubscribeClick(isaretTiklamasi); } catch (_e) { /* yoksay */ }
     priceLines = [];
     try { chart.remove(); } catch (_e) { /* yoksay */ }
     times = new Float64Array(0);
@@ -902,13 +880,10 @@ export function createChartView(container) {
     onMarkerClick,
     priceToY,
     timeToX,
-    xToTime,
-    getPaneSize,
     getVisibleTimeRange,
     getDataTimeRange,
     resize,
     destroy,
-    barCount: () => count,
     lastBarTime: () => (count > 0 ? times[count - 1] : null),
     isDestroyed: () => destroyed,
   };

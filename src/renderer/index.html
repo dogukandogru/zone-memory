@@ -120,6 +120,14 @@
                Rozet olmadan kullanici mumlarin neden durdugunu anlamaz. -->
           <span id="legendAsOf" class="tag asof" hidden></span>
         </div>
+
+        <!-- Isaret okunun uzerindeki onekin ne demek oldugu hicbir yerde
+             yazmiyordu: "OL 13/25" gorup ne oldugunu anlamak mumkun degildi. -->
+        <div id="chartMarkerKey" class="chart-key">
+          <span><b>OL</b> kutu oluşumu</span>
+          <span><b>DK</b> bölge dokunuşu</span>
+          <span class="muted">yanındaki sayı: geçmişte kaç kayıttan kaçı tuttu</span>
+        </div>
         <div id="chartEmpty" class="chart-empty">
           Veri yok. Önce <b>Veri Çek</b>, sonra <b>Geçmişi Tara</b> düğmesini kullanın.
         </div>
@@ -262,9 +270,14 @@
     <span id="statusLive" class="st muted">Canlı: kapalı</span>
     <span class="st-sep"></span>
     <span id="statusProvider" class="st muted">Kaynak: -</span>
-    <span id="statusMessage" class="st grow muted"></span>
-    <span id="statusClock" class="st mono">--:--:--</span>
+    <span id="statusMessage" class="st grow muted" role="button" tabindex="0"
+          title="Son mesajları göster"></span>
+    <span id="statusClock" class="st mono" title="İstanbul saati">--:--:--</span>
   </footer>
+
+  <!-- U8: son 50 mesaj. Alt seritte tek satir vardi ve her mesaj bir
+       oncekini eziyordu; hata gorulmeden kayboluyordu. -->
+  <div id="messageLog" class="msg-log" hidden></div>
 
 </div>
 
@@ -341,7 +354,7 @@ SAG PANEL
 
 ALT SERIT
   #statusbar #statusData #statusRange #statusEngine #statusLive
-  #statusProvider #statusMessage #statusClock
+  #statusProvider #statusMessage #statusClock #messageLog
 
 PANELLERDE KULLANILABILIR CSS SINIFLARI
   .row .row-main .row-sub .row-side .badge .tag .up .down
@@ -352,8 +365,8 @@ PANELLERDE KULLANILABILIR CSS SINIFLARI
   .field .field-grid .select .input .check .inline
   .panel-head .panel-title .panel-actions .panel-body .panel-foot
   .list ve .row.selected
-  Ayrica panels.js kendi `zm-` onekli stillerini calisma aninda ekler;
-  styles.css bu siniflara koyu tema renklerini yedek olarak verir.
+  Not: panels.js bir donem kendi `zm-` onekli stillerini calisma aninda
+  ekliyordu; artik eklemiyor ve styles.css'teki yedek renkler kaldirildi.
 =======================================================================
 -->
 </body>

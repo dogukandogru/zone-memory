@@ -43,11 +43,15 @@ const TF_SANIYE = { '1m': 60, '5m': 300, '15m': 900, '30m': 1800, '1h': 3600, '4
 const RENK = { up: '#26a69a', down: '#ef5350', dim: '#787b86', warn: '#f2b40e' }
 
 /** Sag panel sekmeleri: anahtar -> {panel kimlikleri, sekme kimlikleri}. */
+// Panel kimlikleri index.html ile birebir. Bir donem her satirda Turkce bir
+// YEDEK kimlik de vardi (panelSinyaller gibi); o kimlikler hicbir zaman
+// index.html'e girmedi, yani yedek hic calismadi ve yalnizca "iki farkli
+// iskelet olabilir" izlenimi verdi.
 const PANELLER = {
-  signals: { panel: ['panelSignals', 'panelSinyaller'], baslik: 'Sinyaller' },
-  zones: { panel: ['panelZones', 'panelBolgeler'], baslik: 'Bölgeler' },
-  memory: { panel: ['panelMemory', 'panelHafiza'], baslik: 'Hafıza' },
-  settings: { panel: ['panelSettings', 'panelAyarlar'], baslik: 'Ayarlar' },
+  signals: { panel: ['panelSignals'], baslik: 'Sinyaller' },
+  zones: { panel: ['panelZones'], baslik: 'Bölgeler' },
+  memory: { panel: ['panelMemory'], baslik: 'Hafıza' },
+  settings: { panel: ['panelSettings'], baslik: 'Ayarlar' },
   test: { panel: ['panelTest'], baslik: 'Test' },
 }
 
@@ -91,6 +95,13 @@ const durum = {
   hazirlikCalisiyor: false,
   taramaCalisiyor: false,
   canli: false,
+  // Isciden gelen sinyal listesi kirpildi mi (U8).
+  sinyalToplam: 0,
+  sinyalKirpildi: false,
+  // Alt serit mesaj gecmisi (U8): {t, seviye, metin}
+  mesajGecmisi: [],
+  sonHataAni: 0,
+  motorHatali: false,
   aktifPanel: 'signals',
   aktifGorunum: 'analysis',
   motorMetni: 'Motor: hazır',
@@ -157,17 +168,51 @@ function panelGovdesi(anahtar) {
 /* Alt serit bildirimleri                                              */
 /* ------------------------------------------------------------------ */
 
-/** Motor durumunu alt seritte gosterir. */
-function motorDurumu(metin) {
-  durum.motorMetni = 'Motor: ' + metin
+// ALT SERIT MESAJLARI (U8)
+//
+// Alt seritte TEK bir satir vardi ve her mesaj bir oncekini eziyordu. Iki
+// somut sonucu: (1) bir hata 20 saniye duracakken hemen ardindan gelen
+// siradan bir 'log' satiri onu siliyordu, kullanici hatayi hic gormuyordu;
+// (2) hata sonrasi akis `motorDurumu('hazır')` ile bitiyordu ve motor
+// gercekte basarisiz olmusken "hazır" yaziyordu.
+//
+// Artik mesajlar gecmiste tutuluyor, hata 12 saniye boyunca ezilmiyor ve
+// hata olduysa motor satiri kirmizi kaliyor. Satira tiklaninca gecmis acilir.
+
+/** Gecmiste tutulan en fazla mesaj sayisi. */
+const MESAJ_GECMISI_SINIRI = 50
+/** Bir hatanin bilgi mesajiyla ezilemeyecegi sure. */
+const HATA_KORUMA_MS = 12000
+
+/** Gecmise bir satir ekler. */
+function mesajKaydet(seviye, metin) {
+  durum.mesajGecmisi.push({ t: Date.now(), seviye: seviye, metin: String(metin) })
+  if (durum.mesajGecmisi.length > MESAJ_GECMISI_SINIRI) {
+    durum.mesajGecmisi.splice(0, durum.mesajGecmisi.length - MESAJ_GECMISI_SINIRI)
+  }
+  if (mesajGecmisiAcik) mesajGecmisiniCiz()
+}
+
+/** Motor satirini yazar; hata olduysa kirmizi kalir. */
+function motorSatiriniYaz() {
   const e = el('statusEngine')
   if (!e) return
   e.textContent = durum.motorMetni
-  e.style.color = ''
+  if (durum.motorHatali) e.classList.add('hata')
+  else e.classList.remove('hata')
+}
+
+/** Motor durumunu alt seritte gosterir. */
+function motorDurumu(metin) {
+  durum.motorMetni = 'Motor: ' + metin
+  motorSatiriniYaz()
 }
 
 /** Bilgi mesaji (ses ve gorsel efekt yok, yalnizca alt serit satiri). */
 function bildir(mesaj) {
+  mesajKaydet('bilgi', mesaj)
+  // Taze bir hata duruyorsa ustune yazma; mesaj gecmiste zaten duruyor.
+  if (durum.sonHataAni && (Date.now() - durum.sonHataAni) < HATA_KORUMA_MS) return
   const e = el('statusMessage', 'statusEngine')
   if (!e) return
   e.textContent = String(mesaj)
@@ -181,6 +226,11 @@ function bildir(mesaj) {
 
 /** Hatayi alt seritte Turkce gosterir. */
 function hataGoster(mesaj) {
+  mesajKaydet('hata', mesaj)
+  durum.sonHataAni = Date.now()
+  durum.motorHatali = true
+  motorSatiriniYaz()
+
   const e = el('statusMessage', 'statusEngine')
   if (e) {
     e.textContent = 'Hata: ' + mesaj
@@ -190,9 +240,76 @@ function hataGoster(mesaj) {
   mesajZamanlayici = setTimeout(() => {
     mesajZamanlayici = 0
     const m = el('statusMessage')
-    if (m) { m.textContent = ''; m.style.color = '' }
-    else motorDurumu(durum.motorMetni.replace(/^Motor:\s*/, ''))
-  }, 12000)
+    if (m) { m.textContent = 'Son hata için alt şeride tıklayın.'; m.style.color = '' }
+  }, HATA_KORUMA_MS)
+}
+
+/** Mesaj gecmisi kutusu acik mi. */
+let mesajGecmisiAcik = false
+
+/** Gecmis kutusunu doldurur. */
+function mesajGecmisiniCiz() {
+  const kutu = el('messageLog')
+  if (!kutu) return
+  while (kutu.firstChild) kutu.removeChild(kutu.firstChild)
+
+  const baslik = document.createElement('div')
+  baslik.className = 'msg-head'
+  baslik.textContent = 'Son mesajlar'
+  const kapat = document.createElement('button')
+  kapat.type = 'button'
+  kapat.className = 'btn mini'
+  kapat.textContent = 'Kapat'
+  kapat.addEventListener('click', () => mesajGecmisiniKapat())
+  baslik.appendChild(kapat)
+  kutu.appendChild(baslik)
+
+  if (durum.mesajGecmisi.length === 0) {
+    const bos = document.createElement('div')
+    bos.className = 'msg-row'
+    bos.textContent = 'Henüz mesaj yok.'
+    kutu.appendChild(bos)
+    return
+  }
+  for (let i = durum.mesajGecmisi.length - 1; i >= 0; i--) {
+    const m = durum.mesajGecmisi[i]
+    const satir = document.createElement('div')
+    satir.className = 'msg-row' + (m.seviye === 'hata' ? ' hata' : '')
+    const saat = document.createElement('span')
+    saat.className = 'msg-time'
+    saat.textContent = saatMetni(m.t)
+    const metin = document.createElement('span')
+    metin.textContent = m.metin
+    satir.appendChild(saat)
+    satir.appendChild(metin)
+    kutu.appendChild(satir)
+  }
+}
+
+/** Gecmisi acar; hata isareti "gorulmus" sayilir. */
+function mesajGecmisiniAc() {
+  const kutu = el('messageLog')
+  if (!kutu) return
+  mesajGecmisiAcik = true
+  // Hata gorulmus sayilir: motor satirindaki kirmizi ve alt seritteki
+  // "son hataya bakin" hatirlatmasi kalkar.
+  durum.motorHatali = false
+  durum.sonHataAni = 0
+  motorSatiriniYaz()
+  const satir = el('statusMessage')
+  if (satir && satir.textContent === 'Son hata için alt şeride tıklayın.') {
+    satir.textContent = ''
+    satir.style.color = ''
+  }
+  mesajGecmisiniCiz()
+  kutu.removeAttribute('hidden')
+}
+
+/** Gecmisi kapatir. */
+function mesajGecmisiniKapat() {
+  mesajGecmisiAcik = false
+  const kutu = el('messageLog')
+  if (kutu) kutu.setAttribute('hidden', '')
 }
 
 /** Canli durum metnini gunceller. */
@@ -388,6 +505,9 @@ function sinyalleriNormalle(ham) {
   if (Array.isArray(ham)) liste = ham
   else if (ham && Array.isArray(ham.signals)) liste = ham.signals
   else if (ham && ham.signal) liste = [ham.signal]
+  // Kirpma bilgisi: isci son N sinyali doner, panel bunu yazmali.
+  durum.sinyalToplam = (ham && Number.isFinite(Number(ham.total))) ? Number(ham.total) : liste.length
+  durum.sinyalKirpildi = !!(ham && ham.truncated === true)
   for (let i = 0; i < liste.length; i++) {
     const s = liste[i]
     if (!s) continue
@@ -468,15 +588,22 @@ function grafigiKur() {
     }
   }
 
-  // Grafige tiklaninca en yakin sinyali secer (isaret tiklamasi karsiligi).
-  if (view.chart && typeof view.chart.subscribeClick === 'function') {
+  // ISARETE tiklaninca o sinyal secilir.
+  //
+  // Onceden grafigin HERHANGI bir yerine tiklamak, 1,5 bar icindeki sinyali
+  // seciyordu. Bir kutunun sol kenarina tiklayip bolgeyi incelemek isteyen
+  // kullanici, kutu bir sinyalin yaninda dogdugu icin sinyal paneline
+  // atiyordu: iki tiklama ayni noktada carpisiyordu. Isaret tiklamasi zaten
+  // vardi ama chart.js'te ad cakismasi yuzunden hic calismiyordu (duzeltildi).
+  if (typeof view.onMarkerClick === 'function') {
     try {
-      view.chart.subscribeClick((param) => {
-        if (!param || !Number.isFinite(param.time)) return
-        enYakinSinyaliSec(param.time)
+      view.onMarkerClick((bilgi) => {
+        if (!bilgi || bilgi.id === undefined || bilgi.id === null) return
+        const s = durum.signals.find((x) => x && String(x.id) === String(bilgi.id))
+        if (s) sinyalSec(s)
       })
     } catch (err) {
-      // Tiklama destegi yoksa sessizce gec.
+      // Isaret tiklamasi olmasa da uygulama calisir.
     }
   }
 }
@@ -489,20 +616,6 @@ function grafik(fnAdi, arg) {
   } catch (err) {
     hataGoster('Grafik güncellenemedi: ' + hataMetni(err))
   }
-}
-
-/** Verilen zamana en yakin sinyali secer (yarim bar toleransi). */
-function enYakinSinyaliSec(zaman) {
-  const tolerans = tfSaniye(durum.tf) * 1.5
-  let enIyi = null
-  let enIyiFark = Infinity
-  for (let i = 0; i < durum.signals.length; i++) {
-    const s = durum.signals[i]
-    if (!s) continue
-    const fark = Math.abs(sayi(s.time, 0) - zaman)
-    if (fark < enIyiFark) { enIyiFark = fark; enIyi = s }
-  }
-  if (enIyi && enIyiFark <= tolerans) sinyalSec(enIyi)
 }
 
 /** Bolgeleri katmana verir. */
@@ -851,6 +964,8 @@ const GENISLETME_ESIGI_BAR = 300
 const GENISLETME_PARCASI = 4000
 
 let genisletmeSuruyor = false
+/** Bar siniri uyarisi bir kez verilir. */
+let genisletmeSiniriBildirildi = false
 
 /**
  * Kullanici gecmise dogru kaydirirken yuklu pencereyi sola dogru buyutur.
@@ -865,7 +980,16 @@ async function gecmiseDogruGenislet(aralik) {
   if (genisletmeSuruyor) return
   const barlar = durum.bars
   if (!Array.isArray(barlar) || barlar.length === 0) return
-  if (barlar.length >= AZAMI_YUKLU_BAR) return
+  if (barlar.length >= AZAMI_YUKLU_BAR) {
+    // Sinira bir kez deginildigini soyle: onceden kaydirma sessizce
+    // duruyordu ve kullanici veri bittigini saniyordu.
+    if (!genisletmeSiniriBildirildi) {
+      genisletmeSiniriBildirildi = true
+      bildir('Grafikte ' + formatNumber(AZAMI_YUKLU_BAR, 0) + ' mum yüklü, daha eskisi için ' +
+        'bir sinyale veya bölgeye tıklayın.')
+    }
+    return
+  }
 
   const adim = tfSaniye(durum.tf)
   const ilkZaman = barlar[0].time
@@ -878,9 +1002,16 @@ async function gecmiseDogruGenislet(aralik) {
 
   genisletmeSuruyor = true
   try {
+    // ALT SINIR VERILMEZ, BILEREK.
+    //
+    // Onceden `from = to - 4000 * adim` idi, yani duvar saatine gore bir
+    // pencere. Piyasa kapaliyken bar olusmadigindan uzun bir tatil bu
+    // pencerenin TAMAMINI yutabiliyordu: istek bos donuyor, fonksiyon
+    // ilerlemeden cikiyor ve kaydirma orada takiliyordu (1m serisinde 4000
+    // dakikadan uzun 30 bosluk var, en uzunu 3,2 gun). Isci zaten araligin
+    // SON `limit` barini kesiyor, dolayisiyla ust sinir ve limit yeterli.
     const to = ilkZaman - adim
-    const from = to - GENISLETME_PARCASI * adim
-    const ham = await cagir('data:candles', { tf: durum.tf, from: from, to: to, limit: GENISLETME_PARCASI })
+    const ham = await cagir('data:candles', { tf: durum.tf, from: 0, to: to, limit: GENISLETME_PARCASI })
     const eski = barlariNormalle(ham)
     if (eski.length === 0) return
 
@@ -929,6 +1060,22 @@ async function veriDurumunuYukle() {
   }
   const adet = sayi(st.count !== undefined ? st.count : (st.bars !== undefined ? st.bars : st.total), 0)
   if (adet <= 0) {
+    // "KAYIT YOK" YANLISTI.
+    //
+    // Durum, zaman dilimi basina bir .bin dosyasina bakiyor. 30m gibi
+    // turetilen dilimlerin kendi dosyasi yok, seri 1m'den uretiliyor;
+    // ekranda "kayıt yok (30m)" yaziyor ama grafikte binlerce mum
+    // gorunuyordu. Dosya yoksa turetilmis serinin sayisini soruyoruz.
+    const turetilmis = await cagirGuvenli('data:candles',
+      { tf: durum.tf, limit: 1 }, 'Veri durumu okunamadı')
+    const tAdet = turetilmis ? sayi(turetilmis.total, 0) : 0
+    if (tAdet > 0) {
+      durum.veriDurumu = veriDurumuKaydi(turetilmis, durum.tf) || st0
+      e.textContent = 'Veri: ' + formatNumber(tAdet, 0) + ' mum (türetilmiş), ' +
+        formatDateTime(turetilmis.firstTime) + ' - ' + formatDateTime(turetilmis.lastTime) +
+        ' (' + durum.tf + ')'
+      return
+    }
     e.textContent = 'Veri: kayıt yok (' + durum.tf + ')'
     return
   }
@@ -947,7 +1094,23 @@ async function mumlariYukle() {
   durum.bars = barlar
   durum.pencereliMumlar = false
   pencereDugmesiniTazele()
-  goster(el('chartEmpty'), barlar.length === 0)
+
+  // HATAYI "veri yok" diye gostermeyi birakti.
+  //
+  // `cagirGuvenli` hata durumunda null dondurur ve bu da bos bar dizisine
+  // ceviriliyordu. Ekranda "Veri yok. Once Veri Cek..." yaziyordu; kullanici
+  // saatlerce veri indirmeye calisiyor, oysa sorun motorun cevap
+  // verememesiydi. Artik iki hal ayri yaziliyor.
+  const kutu = el('chartEmpty')
+  if (kutu) {
+    if (ham === null) {
+      kutu.textContent = 'Mumlar yüklenemedi. Alt şeritteki hata mesajına bakın.'
+    } else if (barlar.length === 0) {
+      kutu.textContent = 'Veri yok. Önce Veri Çek, sonra Geçmişi Tara düğmesini kullanın.'
+    }
+    goster(kutu, ham === null || barlar.length === 0)
+  }
+
   barlariGrafigeBas(barlar)
   if (barlar.length > 0) {
     grafik('fitContent')
@@ -1010,7 +1173,9 @@ async function bolgeleriYukle(from, to) {
   if (ham === null) return
   durum.zones = bolgeleriNormalle(ham)
   bolgeleriCiz()
-  if (durum.seciliBolgeId === null) bolgePaneliniCiz()
+  // Panel gorunur degilken cizmek bos is: her kaydirmada yuzlerce DOM
+  // dugumu uretiliyor ve hicbiri ekrana girmiyordu.
+  if (durum.seciliBolgeId === null && durum.aktifPanel === 'zones') bolgePaneliniCiz()
 }
 
 /** Sinyalleri yukler, isaretleri ve paneli tazeler. */
@@ -1019,7 +1184,7 @@ async function sinyalleriYukle() {
   if (ham === null) return
   durum.signals = sinyalleriNormalle(ham)
   isaretleriCiz()
-  if (durum.seciliSinyalId === null) sinyalPaneliniCiz()
+  if (durum.seciliSinyalId === null && durum.aktifPanel === 'signals') sinyalPaneliniCiz()
 }
 
 /** Hafiza ozetini ve sekil kumelerini yukler. */
@@ -1616,10 +1781,10 @@ function gorunumSekmeleriniKur() {
   const kap = el('mainTabs')
   const dugmeler = kap
     ? Array.prototype.slice.call(kap.querySelectorAll('[data-view]'))
-    : [el('tabAnaliz'), el('tabTradingView')].filter(Boolean)
+    : []
   for (let i = 0; i < dugmeler.length; i++) {
     const b = dugmeler[i]
-    const ad = b.dataset && b.dataset.view ? b.dataset.view : (b.id === 'tabTradingView' ? 'tradingview' : 'analysis')
+    const ad = b.dataset.view
     b.addEventListener('click', () => gorunumSec(ad))
   }
   gorunumSec(durum.aktifGorunum)
@@ -1738,6 +1903,8 @@ function sinyalPaneliniCiz() {
     onSelect: (s) => sinyalSec(s),
     selectedId: durum.seciliSinyalId,
     filter: suzgec,
+    total: durum.sinyalToplam,
+    truncated: durum.sinyalKirpildi,
   })
   goster(n.bos, false)
 
@@ -2186,7 +2353,6 @@ function testPaneliniCiz() {
   renderBacktest(kap, sonuc, {
     running: durum.testCalisiyor,
     otherTf: baskaTf,
-    onRun: () => testCalistir(),
   })
   // Test ozetinin ALTINA canli gunluk bolumu eklenir: "olculen" ile "canlida
   // olan" yan yana durmadikca aradaki sapma gorunmez.
@@ -2401,6 +2567,15 @@ const SAAT_BICIMI = new Intl.DateTimeFormat('tr-TR', {
   timeZone: 'Europe/Istanbul', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
 })
 
+/** Milisaniye damgasini Istanbul saatine cevirir (mesaj gecmisi icin). */
+function saatMetni(ms) {
+  try {
+    return SAAT_BICIMI.format(new Date(ms))
+  } catch (err) {
+    return ''
+  }
+}
+
 /**
  * Uygulama surumunu ve yapi damgasini pencere basligina yazar.
  *
@@ -2459,7 +2634,10 @@ async function yapiDamgasiniYaz() {
 function saatiBaslat() {
   const e = el('statusClock')
   if (!e) return
-  const yaz = () => { e.textContent = SAAT_BICIMI.format(new Date()) }
+  // "TSİ" eki: listelerdeki ve grafikteki butun saatler Istanbul saatine
+  // gore ama bunu hicbir yer soylemiyordu; UTC sanan kullanici sinyal
+  // saatlerini uc saat yanlis okuyabiliyordu.
+  const yaz = () => { e.textContent = SAAT_BICIMI.format(new Date()) + ' TSİ' }
   yaz()
   if (saatZamanlayici) clearInterval(saatZamanlayici)
   saatZamanlayici = setInterval(yaz, 1000)
@@ -2482,6 +2660,100 @@ function pencereOlaylari() {
       try { view.destroy() } catch (err) { /* onemsiz */ }
     }
   })
+  window.addEventListener('keydown', kisayol)
+}
+
+/**
+ * KLAVYE KISAYOLLARI (U8)
+ *
+ * Sinyal listesini gozden gecirmek tamamen fareyle yapiliyordu: her sinyal
+ * icin listeye git, tikla, grafige bak, geri don. Yuzlerce sinyali boyle
+ * taramak pratikte imkansiz. J/K listede gezdirir, Esc ayrintiyi kapatir.
+ *
+ * Bir metin alanina yaziliyorsa hicbir kisayol calismaz.
+ */
+function kisayol(ev) {
+  if (ev.defaultPrevented || ev.metaKey || ev.ctrlKey || ev.altKey) return
+  const hedef = ev.target
+  if (hedef && (hedef.tagName === 'INPUT' || hedef.tagName === 'TEXTAREA' ||
+      hedef.tagName === 'SELECT' || hedef.isContentEditable)) return
+
+  const tus = ev.key
+
+  if (tus === 'Escape') {
+    if (mesajGecmisiAcik) { mesajGecmisiniKapat(); ev.preventDefault(); return }
+    if (durum.seciliSinyalId !== null || durum.seciliBolgeId !== null) {
+      durum.seciliSinyalId = null
+      durum.seciliBolgeId = null
+      durum.vurguluOrnek = null
+      anaKadarUygula(null)
+      planCizgileri(null)
+      if (overlay && typeof overlay.setHighlight === 'function') {
+        try { overlay.setHighlight(null) } catch (err) { /* onemsiz */ }
+      }
+      isaretleriCiz()
+      paneliCiz()
+      ev.preventDefault()
+    }
+    return
+  }
+
+  if (tus === 'j' || tus === 'J' || tus === 'k' || tus === 'K') {
+    const ileri = (tus === 'j' || tus === 'J')
+    komsuSinyaliSec(ileri)
+    ev.preventDefault()
+    return
+  }
+
+  if (tus === 'l' || tus === 'L') {
+    const anahtar = el('liveToggle')
+    if (anahtar && !anahtar.disabled) anahtar.click()
+    ev.preventDefault()
+    return
+  }
+
+  if (tus === 'End') {
+    if (durum.pencereliMumlar || durum.asOf !== null) {
+      guncelMumlaraDon()
+      ev.preventDefault()
+    }
+    return
+  }
+
+  // 1-6: zaman dilimi. TF_LISTESI ile ayni sira.
+  if (tus >= '1' && tus <= '6') {
+    const tf = TF_LISTESI[Number(tus) - 1]
+    if (tf && tf !== durum.tf && !mesgulMu()) {
+      tfDegistir(tf)
+      ev.preventDefault()
+    }
+  }
+}
+
+/**
+ * Listedeki bir onceki veya sonraki sinyali secer.
+ *
+ * Sira LISTEDEKI siradir (yeniden eskiye), aksi halde J tusu bazen yukari
+ * bazen asagi gidiyormus gibi olurdu.
+ * @param {boolean} ileri true ise listede bir asagi (daha eski)
+ */
+function komsuSinyaliSec(ileri) {
+  const kap = el('signalList')
+  if (!kap) return
+  const satirlar = kap.querySelectorAll('.row')
+  if (satirlar.length === 0) return
+
+  let yer = -1
+  for (let i = 0; i < satirlar.length; i++) {
+    if (satirlar[i].classList.contains('selected')) { yer = i; break }
+  }
+  let hedef = yer < 0 ? 0 : yer + (ileri ? 1 : -1)
+  if (hedef < 0) hedef = 0
+  if (hedef > satirlar.length - 1) hedef = satirlar.length - 1
+  const satir = satirlar[hedef]
+  if (!satir) return
+  satir.click()
+  try { satir.scrollIntoView({ block: 'nearest' }) } catch (err) { /* onemsiz */ }
 }
 
 /** Ust serit ve panel basligi dugmelerini baglar. */
@@ -2494,6 +2766,19 @@ function dugmeleriBagla() {
 
   const guncele = el('goLatestBtn')
   if (guncele) guncele.addEventListener('click', () => guncelMumlaraDon())
+
+  // Alt serit mesaj satiri: son mesajlari acar (U8).
+  const mesajSatiri = el('statusMessage')
+  if (mesajSatiri) {
+    const ac = () => { if (mesajGecmisiAcik) mesajGecmisiniKapat(); else mesajGecmisiniAc() }
+    mesajSatiri.addEventListener('click', ac)
+    mesajSatiri.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); ac() }
+    })
+  }
+  // Motor satiri hata rengindeyken de ayni gecmise goturur.
+  const motorSatiri = el('statusEngine')
+  if (motorSatiri) motorSatiri.addEventListener('click', () => mesajGecmisiniAc())
 
   const hafizaCsv = el('memoryExportBtn')
   if (hafizaCsv) hafizaCsv.addEventListener('click', () => csvDisaAktar('events'))

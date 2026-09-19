@@ -122,10 +122,10 @@ function getProviderById(id) {
   try {
     providerMod = require('../core/data/provider')
   } catch (err) {
-    throw new Error('Saglayici modulu yuklenemedi: ' + (err && err.message ? err.message : String(err)))
+    throw new Error('Sağlayıcı modülü yüklenemedi: ' + (err && err.message ? err.message : String(err)))
   }
   const p = providerMod.getProvider(id)
-  if (!p) throw new Error('Canli saglayici bulunamadi: ' + String(id))
+  if (!p) throw new Error('Canlı sağlayıcı bulunamadı: ' + String(id))
   return p
 }
 
@@ -185,10 +185,10 @@ async function start(opts) {
   const provider = getProviderById(providerId)
   const apiKey = (cfg.apiKeys && cfg.apiKeys[providerId]) || ''
   if (provider.needsKey && !apiKey) {
-    throw new Error(provider.name + ' icin API anahtari gerekli. Ayarlar sekmesinden girin.')
+    throw new Error(provider.name + ' için API anahtarı gerekli. Ayarlar sekmesinden girin.')
   }
   if (Array.isArray(provider.caps) && provider.caps.indexOf('live') === -1) {
-    logLine(provider.name + ' canli veri icin onerilmiyor, yine de denenecek.')
+    logLine(provider.name + ' canlı veri için önerilmiyor, yine de denenecek.')
   }
 
   stopTimer()
@@ -216,7 +216,7 @@ async function start(opts) {
   basisLogged = false
   basisWarned = false
 
-  logLine('Canli akis basladi: ' + state.providerName + ', ' + tf + ', ' + state.pollSeconds + ' saniyede bir.')
+  logLine('Canlı akış başladı: ' + state.providerName + ', ' + tf + ', ' + state.pollSeconds + ' saniyede bir.')
   emitEvent('live:status', status())
 
   // 1 dakikalik depo varsa canli akis 1 dakikalik bar ceker ve yalnizca
@@ -253,7 +253,7 @@ async function yazimTfBelirle(tf) {
     const varMi = !!(satir && Number(satir.count) > 0)
     state.writeTf = varMi ? '1m' : tf
     if (varMi) {
-      logLine('Canli barlar 1 dakikalik depoya yaziliyor, ' + tf + ' serisi ondan turetiliyor.')
+      logLine('Canlı barlar 1 dakikalık depoya yazılıyor, ' + tf + ' serisi ondan türetiliyor.')
     }
   } catch (err) {
     state.writeTf = tf
@@ -276,7 +276,7 @@ function stop() {
   state.session = ++sessionSeq
   state.waitingForEngine = false
   if (wasRunning) {
-    logLine('Canli akis durduruldu.')
+    logLine('Canlı akış durduruldu.')
     emitEvent('live:status', status())
   }
   return status()
@@ -334,7 +334,7 @@ async function tick() {
     if (!state.running || state.session !== oturum) return
 
     if (!fetched || !fetched.length) {
-      state.lastError = 'Saglayicidan mum gelmedi.'
+      state.lastError = 'Sağlayıcıdan mum gelmedi.'
       logLine(state.providerName + ': mum gelmedi, tekrar denenecek.')
       return
     }
@@ -410,7 +410,7 @@ async function tick() {
       state.basis = res.basis
       if (!basisLogged) {
         basisLogged = true
-        logLine('Vekil kaynak fiyati spot seviyesine ' + res.basis.toFixed(2) + ' birim kaydirilarak kullaniliyor.')
+        logLine('Vekil kaynak fiyatı spot seviyesine ' + res.basis.toFixed(2) + ' birim kaydırılarak kullanılıyor.')
       }
     }
     if (res && Array.isArray(res.logs)) {
@@ -460,17 +460,17 @@ async function tick() {
           // Bildirim gosterilemezse akis durmamali.
         }
       }
-      const dir = olay.signal.direction === 'BUY' ? 'ALIS' : 'SATIS'
+      const dir = olay.signal.direction === 'BUY' ? 'ALIŞ' : 'SATIŞ'
       if (olay.signal.fired) {
-        const tur = olay.signal.kind === 'form' ? 'kutu olusumu' : 'bolge dokunusu'
+        const tur = olay.signal.kind === 'form' ? 'kutu oluşumu' : 'bölge dokunuşu'
         // Ozet metin isciden gelir (learn/signalText.js): "9/15 tuttu,
         // %95 aralik %36-80, tur tabani %40". "Basari beklentisi %X" tek
         // basina orneklem buyuklugunu gizliyordu.
         const ozet = olay.signal.summaryText || ''
         logLine('Yeni sinyal: ' + dir + ' (' + tur + ')' + (ozet ? ', ' + ozet : '') +
-          (olay.signal.stale ? ', gecikmeli degerlendirildi' : '') + '.')
+          (olay.signal.stale ? ', gecikmeli değerlendirildi' : '') + '.')
       } else {
-        logLine('Yeni bolge olayi bulundu ama esikler gecilmedi, sinyal yayinlanmadi.')
+        logLine('Yeni bölge olayı bulundu ama eşikler geçilmedi, sinyal yayınlanmadı.')
       }
     }
     // Hafizanin sinirini as: eski anahtarlar dusurulur.
@@ -483,7 +483,7 @@ async function tick() {
     state.lastError = message
     state.consecutiveErrors += 1
     // Durdurulduktan sonra gelen hatalar icin gurultu yapma.
-    if (state.running) logLine('Canli veri hatasi: ' + message + ' Denemeye devam ediliyor.')
+    if (state.running) logLine('Canlı veri hatası: ' + message + ' Denemeye devam ediliyor.')
   } finally {
     if (tickingSession === oturum) tickingSession = 0
     // HER TIKTE DURUM YAYINLANIR.
