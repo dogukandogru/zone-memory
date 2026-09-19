@@ -17,6 +17,7 @@
 
 import { createChartView } from './chart.js'
 import { createZoneOverlay } from './overlay.js'
+import { isaretMetni, sinyalOzetiMetni } from './istatistik.mjs'
 import {
   renderSignals,
   renderSignalDetail,
@@ -532,16 +533,16 @@ function isaretleriCiz() {
     const t = sayi(s.time, 0)
     if (ilk === null || t < ilk || t > son) continue
     const alis = s.direction !== 'SELL'
-    // Tur oneki: O = kutu olusumu, D = bolgeye geri donus. Isaret metni cok
-    // kisa olmali, grafikte mumun ustune sigacak.
-    const onek = s.kind === 'form' ? 'O ' : 'D '
+    // Isaret metni "kac kayittan kaci" gosterir: onceden "O %53" yaziyordu ve
+    // 3 kayittan 3'u ile 30 kayittan 16'si AYNI gorunuyordu. Onek OL = kutu
+    // olusumu, DK = bolgeye donus (tek harf yeterince acik degildi).
     isaretler.push({
       id: String(s.id),
       time: t,
       position: alis ? 'belowBar' : 'aboveBar',
       shape: alis ? 'arrowUp' : 'arrowDown',
       color: alis ? RENK.up : RENK.down,
-      text: onek + '%' + Math.round(sayi(s.winRate, 0) * 100),
+      text: isaretMetni(s),
     })
   }
   // Benzer gecmis ornek isareti. Sinyal oklarindan ayrilsin diye daire ve
@@ -1732,10 +1733,14 @@ async function bolgeSec(z) {
     try { overlay.setHighlight(z.id) } catch (err) { /* onemsiz */ }
   }
 
+  // YEDEK LISTE KALDIRILDI. Isci artik yalnizca bu bolgenin olaylarini
+  // donduruyor; eslesme yoksa dogru cevap BOS LISTEDIR. Onceki hal, eslesme
+  // bulamayinca son 5000 olayin tamamini o bolgeninmis gibi gosteriyordu
+  // (olculdu: 15m'de bolgelerin %42'si, 1m'de %92,4'u yanlis liste goruyordu).
   const ham = await cagirGuvenli('engine:touches', { tf: durum.tf, zoneId: z.id }, 'Bölge dokunuşları alınamadı')
   const hepsi = dokunuslariNormalle(ham)
   const dokunuslar = hepsi.filter((t) => t && sayi(t.zoneId, -1) === sayi(z.id, -2))
-  bolgeAyrintisiniCiz(z, dokunuslar.length > 0 ? dokunuslar : hepsi)
+  bolgeAyrintisiniCiz(z, dokunuslar)
 }
 
 /** Bolge ayrintisini (dokunus gecmisi) cizer. */
@@ -2130,9 +2135,12 @@ function canliSinyalEkle(s) {
       (dk >= 0 ? dk + ' dk sonra' : (-dk) + ' dk önce')
   }
   if (s.fired) {
+    // "Guven" ifadesi KALDIRILDI: bir olasilik degildi ve olculdu, guven
+    // yukseldikce gerceklesen oran dusuyordu. Yerine kac kayittan kaci
+    // tuttugu, %95 araligi ve turun tabani yaziliyor.
+    const ozet = s.summaryText || sinyalOzetiMetni(s)
     bildir('Yeni sinyal: ' + yon + ' (' + tur + ') ' + formatPrice(s.price) +
-      ', başarı ' + formatPercent(s.winRate, 0) +
-      ', güven ' + formatPercent(s.confidence, 0) +
+      (ozet ? ', ' + ozet : '') +
       ', ' + formatDateTime(s.time) + haberNotu)
   } else {
     bildir('Olay kaydedildi (' + yon + ', ' + tur + '), eşikler geçilmedi: ' +

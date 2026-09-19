@@ -1093,7 +1093,33 @@ handlers['engine:touches'] = async function (payload) {
   const to = num(payload.to, MAX_TIME)
   const limit = clampInt(payload.limit, 1, 20000, 5000)
 
+  // TEK BIR BOLGENIN OLAYLARI ISTENDIYSE zaman araligi ve limit UYGULANMAZ.
+  //
+  // Onceden `zoneId` yok sayiliyordu: bolgeye tiklayan kullaniciya son 5000
+  // olay donuyordu ve arayuz eslesme bulamayinca butun listeyi o bolgeninmis
+  // gibi basiyordu. Olculdu: yanlis liste gosterilen bolge payi 15m'de %42,
+  // 5m'de %74, 1m'de %92,4. Baska bolgelerin skorlari ve etiketleri yanlis
+  // bolgeye kanit olarak atfediliyordu; ustelik her tiklamada birkac MB IPC
+  // ve 5000 DOM satiri arayuzu donduruyordu.
   const evs = mem.events
+  const zoneIdHam = payload.zoneId
+  const zoneId = zoneIdHam === undefined || zoneIdHam === null || zoneIdHam === ''
+    ? null
+    : Number(zoneIdHam)
+  if (zoneId !== null && Number.isFinite(zoneId)) {
+    const bolgeOlaylari = []
+    for (let i = 0; i < evs.length; i++) {
+      if (Number(evs[i].zoneId) === zoneId) bolgeOlaylari.push(evs[i])
+    }
+    return {
+      tf: tf,
+      zoneId: zoneId,
+      touches: bolgeOlaylari.map(lightEvent),
+      total: bolgeOlaylari.length,
+      truncated: false,
+    }
+  }
+
   const picked = []
   for (let i = 0; i < evs.length; i++) {
     const t = num(evs[i].time, 0)
@@ -1952,6 +1978,9 @@ handlers['engine:live-tick'] = async function (payload) {
         // KANIT DURUMU: son olcumde bu TURUN katma degeri kanitlandi mi.
         // Olcum yoksa veya ayar izi degistiyse "kanitlanmadi" kabul edilir.
         if (sig) {
+          // Tek kaynaktan metin: alt serit, gunluk ve masaustu bildirimi ayni
+          // cumleyi kullansin.
+          sig.summaryText = core('learn/signalText').sinyalOzeti(sig)
           const kanit = sonKanit && sonKanit[sig.kind === 'form' ? 'form' : 'touch']
           sig.evidence = kanit || { n: 0, netR: null, netRLo: null, netRHi: null, liftPts: null, status: 'kanitlanmadi' }
           if (sig.evidence.status !== 'kanitli') {
@@ -2201,6 +2230,9 @@ function tradesToSignals(trades, memory) {
       atr: num(t.atr, 0),
       session: t.session || (e ? e.session : ''),
       expectancy: num(t.expectancy, 0),
+      // TEK KAYNAKTAN METIN: alt serit, gunluk, masaustu bildirimi ve grafik
+      // isareti ayni cumleyi kullansin (bkz. learn/signalText.js).
+      summaryText: core('learn/signalText').sinyalOzeti(t),
       topMatches: Array.isArray(t.topMatches) ? t.topMatches : [],
       reasons: reasons,
       outcome: t.outcome || null,

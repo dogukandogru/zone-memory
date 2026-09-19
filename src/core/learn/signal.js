@@ -772,7 +772,12 @@ function decideFromCandidates (ev, candidates, levels, cfg, ek) {
   }
 
   if (fired) {
-    reasons.push('Tüm eşikler geçildi, sinyal üretildi (güven %' + toPct(confidence) + ')')
+    // "Guven" bir OLASILIK DEGIL, uc bilesenin agirlikli toplamiydi; olculdu,
+    // guven yukseldikce GERCEKLESEN oran dusuyordu. Gerekce artik orneklem
+    // buyuklugunu ve araligi soyluyor.
+    reasons.push('Tüm eşikler geçildi, sinyal üretildi (' +
+      Math.round(winRateRaw * matchCount) + '/' + matchCount + ' tuttu, ' +
+      '%95 alt sınır %' + toPct(winRateLo) + ')')
   } else {
     if (matchCount < minMatches) {
       reasons.push('Yeterli benzer kayıt yok (' + matchCount + ' < ' + minMatches + '), sinyal üretilmedi')

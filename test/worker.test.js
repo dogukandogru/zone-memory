@@ -440,3 +440,49 @@ test('engine:memory-summary hafiza ozetini tur bazinda verir', async () => {
     assert.equal(r.summary.total, 60)
   })
 })
+
+// ---------------------------------------------------------------------------
+// U2 - BOLGE AYRINTISI YALNIZCA O BOLGENIN OLAYLARINI DONER
+// ---------------------------------------------------------------------------
+// Onceden `zoneId` yok sayiliyor, son 5000 olay donuyordu ve arayuz eslesme
+// bulamayinca butun listeyi o bolgeninmis gibi basiyordu. Olculdu: yanlis
+// liste gosterilen bolge payi 15m'de %42, 5m'de %74, 1m'de %92,4.
+
+test('engine:touches zoneId verilince yalnizca o bolgenin olaylarini doner', async () => {
+  await isciyle(async (cagir, dir) => {
+    // Uc bolgeye dagilmis olaylar; biri zaman araliginin EN BASINDA.
+    const mem = fixtures.hafizaKur({
+      adet: 30,
+      basarili: 20,
+      tf: TF,
+      alanlar: (i) => ({ zoneId: i % 3 }),
+    })
+    await memstore.saveMemory(path.join(dir, 'XAUUSD_' + TF + '_memory'), {
+      tf: TF,
+      ctxNames: CTX_NAMES.slice(),
+      events: mem.events,
+      builtToTime: mem.events[mem.events.length - 1].time,
+      indicatorParams: INDIKATOR_AYARI,
+      outcomeCfg: HAFIZA_OUTCOME,
+    })
+
+    const tek = await cagir('engine:touches', { tf: TF, zoneId: 1 })
+    assert.ok(tek.touches.length > 0, 'bolgenin olaylari donmeli')
+    for (const t of tek.touches) {
+      assert.strictEqual(t.zoneId, 1, 'baska bolgenin olayi donmemeli')
+    }
+    assert.strictEqual(tek.total, tek.touches.length)
+    assert.strictEqual(tek.truncated, false)
+    assert.strictEqual(tek.zoneId, 1)
+
+    // Hic olayi olmayan bolgede BOS liste doner (yedek liste yok).
+    const bos = await cagir('engine:touches', { tf: TF, zoneId: 9999 })
+    assert.strictEqual(bos.touches.length, 0, 'olayi olmayan bolgede bos liste')
+    assert.strictEqual(bos.total, 0)
+
+    // zoneId verilmezse eski davranis: zaman araligi ve limit calisir.
+    const hepsi = await cagir('engine:touches', { tf: TF })
+    assert.strictEqual(hepsi.touches.length, 30)
+    assert.strictEqual(hepsi.zoneId, undefined)
+  })
+})

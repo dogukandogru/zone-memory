@@ -23,6 +23,14 @@
  * (Ek olarak app.js'in de kullandigi bicimlendirme yardimcilari disa acilir.)
  */
 
+import {
+  sinyalAraligi,
+  sinyalSayilari,
+  basabasOran,
+  aralikSinifi,
+  ornekRozeti,
+} from './istatistik.mjs'
+
 const TF_SECENEKLERI = ['1m', '5m', '15m', '30m', '1h', '4h', '1d']
 
 const SEANS_ADLARI = { Asia: 'Asya', London: 'Londra', 'New York': 'New York', Other: 'Diğer' }
@@ -592,7 +600,7 @@ export function renderSignals(el, signals, opts) {
     orta.appendChild(turRozeti(s.kind))
     if (s.evidence) orta.appendChild(kanitRozeti(s.evidence))
     const altMetin = s.fired
-      ? (tam(s.matchCount) + ' benzer kayıt, güven ' + formatPercent(s.confidence, 0))
+      ? (tam(s.matchCount) + ' benzer kayıt, R/R ' + formatNumber(s.rr, 2))
       : ('Üretilmedi: ' + (Array.isArray(s.reasons) && s.reasons.length
         ? String(s.reasons[s.reasons.length - 1])
         : 'eşikler geçilmedi'))
@@ -610,10 +618,25 @@ export function renderSignals(el, signals, opts) {
       sag.appendChild(h('span', 'row-sub ' + (sayi(s.pnlAtr, 0) >= 0 ? 'up' : 'down'),
         (sayi(s.pnlAtr, 0) >= 0 ? '+' : '') + formatNumber(s.pnlAtr, 2) + ' ATR'))
     } else {
-      const oran = h('span', sayi(s.winRate, 0) >= 0.5 ? 'up' : 'down', formatPercent(s.winRate, 0))
-      oran.title = 'Benzer geçmiş kurulumların tutma oranı'
+      // ORAN TEK BASINA YANILTIYOR: 5 eslesmeli %60 ile 25 eslesmeli %60
+      // ekranda ayni gorunuyordu. Artik "9/15" sayimi, %95 araligi ve
+      // BASABASA gore renk gosteriliyor (sabit %50 esigi, risk/odulu hesaba
+      // katmadigi icin basabasi %31 olan kurulumu kirmizi gosterebiliyordu).
+      const sayimlar = sinyalSayilari(s)
+      const aralik = sinyalAraligi(s)
+      const bb = basabasOran(s.rr)
+      const oran = h('span', aralikSinifi(aralik, bb),
+        sayimlar ? tam(sayimlar.k) + '/' + tam(sayimlar.n) : formatPercent(s.winRate, 0))
+      oran.title = 'Benzer geçmiş kurulumların tutma oranı: ' +
+        formatPercent(s.winRate, 0) +
+        (aralik ? ', %95 aralık ' + formatPercent(aralik.lo, 0) + ' - ' + formatPercent(aralik.hi, 0) : '') +
+        '. Başabaş ' + formatPercent(bb, 0) + ' (R/R ' + formatNumber(s.rr, 2) + ').'
       sag.appendChild(oran)
-      sag.appendChild(h('span', 'row-sub', 'RR ' + formatNumber(s.rr, 2)))
+      const rozet = ornekRozeti(s.matchCount)
+      sag.appendChild(h('span', 'row-sub' + (rozet ? ' ' + rozet.sinif : ''),
+        rozet ? rozet.metin : (aralik
+          ? formatPercent(aralik.lo, 0) + '-' + formatPercent(aralik.hi, 0)
+          : 'RR ' + formatNumber(s.rr, 2))))
     }
     satir.appendChild(sag)
 
@@ -651,16 +674,57 @@ export function renderSignalDetail(el, signal, opts) {
   const alis = signal.direction !== 'SELL'
   const yonSinifi = alis ? 'up' : 'down'
 
+  // BASLIK: sinyal uretilmediyse bunu sakla.
+  const baslikSonek = signal.fired === false ? ' (sinyal üretilmedi)' : ''
   el.appendChild(bolumBasligi((alis ? 'AL sinyali' : 'SAT sinyali') + ' - ' +
-    turAdi(signal.kind) + ' - ' + formatDateTime(signal.time)))
+    turAdi(signal.kind) + ' - ' + formatDateTime(signal.time) + baslikSonek))
+
+  // ORNEKLEM ROZETI: 5 kayitlik bir oran ile 40 kayitlik oran ayni
+  // gorunmesin. Olculdu: gosterilen oran gerceklesenden ortalama 16,6 puan
+  // yuksek ve orneklem kucukken sapma buyuyor.
+  const rozet = ornekRozeti(signal.matchCount)
+  if (rozet) {
+    const uyari = uyariKutusu('Örneklem küçük (' + tam(signal.matchCount) +
+      ' benzer kayıt): ' + rozet.metin + '. Bu orandaki belirsizlik yüksektir.')
+    uyari.style.color = rozet.sinif === 'down'
+      ? 'var(--down, ' + RENK.down + ')'
+      : 'var(--warn, ' + RENK.warn + ')'
+    el.appendChild(uyari)
+  }
+
+  const sayimlar = sinyalSayilari(signal)
+  const aralik = sinyalAraligi(signal)
+  const basabas = basabasOran(signal.rr)
+  const oranSinifi = aralikSinifi(aralik, basabas)
 
   el.appendChild(statIzgara([
-    stat('Güven skoru', formatPercent(signal.confidence, 0), yonSinifi),
-    stat('Başarı oranı', formatPercent(signal.winRate, 0), sayi(signal.winRate, 0) >= 0.5 ? 'up' : 'down'),
-    stat('Benzer kayıt', tam(signal.matchCount)),
-    stat('Ort. benzerlik', formatNumber(signal.avgSimilarity, 3)),
+    // Ana sayi artik "kacindan kaci": tek basina yuzde, orneklem buyuklugunu
+    // gizliyordu.
+    stat('Tuttu', sayimlar ? tam(sayimlar.k) + '/' + tam(sayimlar.n) : '-', oranSinifi),
+    stat('Oran', formatPercent(signal.winRate, 0), oranSinifi),
+    stat('%95 aralık',
+      aralik ? formatPercent(aralik.lo, 0) + ' - ' + formatPercent(aralik.hi, 0) : '-'),
+    stat('Başabaş', formatPercent(basabas, 0)),
   ]))
 
+  // KALIBRE ORAN ILE HAM ORAN AYRI. Gosterilen oran havuz tabanina dogru
+  // cekilmis oranlardir (bkz. S1); ham oran bilgi olarak durur.
+  if (Number.isFinite(Number(signal.winRateRaw)) &&
+      Math.abs(Number(signal.winRateRaw) - sayi(signal.winRate, 0)) > 1e-9) {
+    el.appendChild(kv('Ham oran (kalibrasyon öncesi)', formatPercent(signal.winRateRaw, 1)))
+  }
+  if (Number.isFinite(Number(signal.baseRate))) {
+    const fark = sayi(signal.winRate, 0) - Number(signal.baseRate)
+    el.appendChild(kv('Bu türün havuz tabanı',
+      formatPercent(signal.baseRate, 1) + ', fark ' +
+      (fark >= 0 ? '+' : '') + formatNumber(fark * 100, 1) + ' puan',
+      Math.abs(fark) < 0.005 ? 'muted' : (fark > 0 ? 'up' : 'down')))
+  }
+
+  // "Guven skoru" KALDIRILDI: bir olasilik degil, uc bilesenin agirlikli
+  // toplamiydi ve olculdu, guven yukseldikce GERCEKLESEN oran dusuyordu.
+  // Bilgi amacli, ikincil bir satir olarak duruyor.
+  el.appendChild(kv('Kanıt puanı (olasılık değil)', formatPercent(signal.confidence, 0), 'muted'))
   el.appendChild(kv('En yüksek benzerlik', formatNumber(signal.bestSimilarity, 3)))
   // "Beklenen" kelimesi bir tahmin gibi okunuyordu; sayi aslinda benzer
   // kayitlarin SONUCA KADAR olan ortalama hareketidir. Plan riski (SL

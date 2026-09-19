@@ -49,7 +49,12 @@ function cfg() {
   }
 }
 
-/** Sinyalin ozet metni (bildirim govdesi). */
+/**
+ * Sinyalin ozet metni (bildirim govdesi).
+ *
+ * Plan seviyeleri + orneklem ozeti. Oran TEK BASINA yazilmaz: 5 kayittan
+ * 3'u ile 30 kayittan 18'i ayni yuzdeyi verir ama ayni sey degildir.
+ */
 function ozet(signal) {
   const p = (x) => (typeof x === 'number' && isFinite(x) ? x.toFixed(2) : '-')
   const parcalar = [
@@ -57,7 +62,9 @@ function ozet(signal) {
     'SL ' + p(signal.sl),
     'TP1 ' + p(signal.tp1),
   ]
-  if (typeof signal.winRate === 'number' && isFinite(signal.winRate)) {
+  const kisa = signal.summaryText || ''
+  if (kisa) parcalar.push(kisa)
+  else if (typeof signal.winRate === 'number' && isFinite(signal.winRate)) {
     parcalar.push('gecmiste %' + Math.round(signal.winRate * 100))
   }
   return parcalar.join(', ')

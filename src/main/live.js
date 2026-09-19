@@ -463,8 +463,11 @@ async function tick() {
       const dir = olay.signal.direction === 'BUY' ? 'ALIS' : 'SATIS'
       if (olay.signal.fired) {
         const tur = olay.signal.kind === 'form' ? 'kutu olusumu' : 'bolge dokunusu'
-        logLine('Yeni sinyal: ' + dir + ' (' + tur + '), basari beklentisi %' +
-          Math.round((olay.signal.winRate || 0) * 100) +
+        // Ozet metin isciden gelir (learn/signalText.js): "9/15 tuttu,
+        // %95 aralik %36-80, tur tabani %40". "Basari beklentisi %X" tek
+        // basina orneklem buyuklugunu gizliyordu.
+        const ozet = olay.signal.summaryText || ''
+        logLine('Yeni sinyal: ' + dir + ' (' + tur + ')' + (ozet ? ', ' + ozet : '') +
           (olay.signal.stale ? ', gecikmeli degerlendirildi' : '') + '.')
       } else {
         logLine('Yeni bolge olayi bulundu ama esikler gecilmedi, sinyal yayinlanmadi.')
