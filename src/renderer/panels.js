@@ -1772,6 +1772,16 @@ export function renderBacktest(el, result, opts) {
   }
   const s = r.summary
 
+  // BASKA BIR ZAMAN DILIMINE AIT SONUC. Test sururken zaman dilimi
+  // degistirilebiliyordu ve sonuc kontrol edilmeden gosteriliyordu.
+  if (o.otherTf) {
+    const uyari = uyariKutusu(
+      'Bu sonuç ' + String(o.otherTf) + ' zaman dilimine ait. Görüntülenen zaman ' +
+      'dilimi için ölçüm almak istiyorsanız testi yeniden çalıştırın.')
+    uyari.style.color = 'var(--warn, ' + RENK.warn + ')'
+    el.appendChild(uyari)
+  }
+
   // Hafizanin kuruldugu ayar ile su anki ayar uyusmuyorsa bu olcum eski
   // etiketlere aittir. Onceden bu hicbir yerde gorunmuyordu.
   if (r.cfgMatch === false) {

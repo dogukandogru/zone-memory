@@ -83,6 +83,8 @@ const durum = {
   // Test sekmesinde olculen rakam ancak boylece karsilastirilabilir.
   canliGunluk: null,
   testCalisiyor: false,
+  // Otomatik hazirlik (eksik mum indirme ve gerekirse tarama) suruyor mu.
+  hazirlikCalisiyor: false,
   taramaCalisiyor: false,
   canli: false,
   aktifPanel: 'signals',
@@ -983,11 +985,42 @@ function tfDugmeleriniKur() {
     const b = dugmeler[i]
     b.addEventListener('click', () => {
       const tf = b.dataset.tf
-      if (!tf || tf === durum.tf || durum.taramaCalisiyor) return
+      if (!tf || tf === durum.tf || mesgulMu()) return
       tfDegistir(tf)
     })
   }
   tfDugmeleriniIsaretle()
+}
+
+/**
+ * Uzun bir is suruyor mu (tarama, test ya da otomatik hazirlik).
+ *
+ * Bu sirada zaman dilimi ve saglayici degistirilirse eski isin sonucu yeni
+ * secimin etiketiyle gosterilebiliyor, hatta yeni zaman diliminin deposuna
+ * yazilabiliyordu.
+ */
+function mesgulMu() {
+  return !!(durum.taramaCalisiyor || durum.testCalisiyor || durum.hazirlikCalisiyor)
+}
+
+/** Mesgulken degistirilemeyecek denetimleri kilitler. */
+function mesgulKilidiUygula() {
+  const kilitli = mesgulMu()
+  const kap = el('tfButtons')
+  if (kap) {
+    const dugmeler = kap.querySelectorAll('[data-tf]')
+    for (let i = 0; i < dugmeler.length; i++) {
+      dugmeler[i].disabled = kilitli
+      dugmeler[i].title = kilitli ? 'İşlem sürerken zaman dilimi değiştirilemez' : ''
+    }
+  }
+  for (const id of ['providerSelect', 'liveProviderSelect']) {
+    const e = el(id)
+    if (e) {
+      e.disabled = kilitli
+      e.title = kilitli ? 'İşlem sürerken kaynak değiştirilemez' : ''
+    }
+  }
 }
 
 /** Secili zaman dilimi dugmesini isaretler. */
@@ -1037,6 +1070,19 @@ function senkronBeklemede(tf, simdi) {
 async function tfHazirla(tf) {
   const ayar = durum.ayarlar || {}
   if (ayar.autoPrepareOnTfChange === false) return false
+  // Hazirlik da uzun bir istir: sirasinda zaman dilimi ve kaynak kilitlenir.
+  durum.hazirlikCalisiyor = true
+  mesgulKilidiUygula()
+  try {
+    return await tfHazirlaIc(tf, ayar)
+  } finally {
+    durum.hazirlikCalisiyor = false
+    mesgulKilidiUygula()
+  }
+}
+
+/** tfHazirla'nin govdesi (kilit disarida tutuluyor). */
+async function tfHazirlaIc(tf, ayar) {
 
   const durumBilgisi = await cagirGuvenli('data:status', {}, 'Veri durumu okunamadı')
   const satir = durumBilgisi && durumBilgisi.byTf ? durumBilgisi.byTf[tf] : null
@@ -1110,6 +1156,7 @@ async function tfHazirla(tf) {
       }
     } finally {
       durum.taramaCalisiyor = false
+    mesgulKilidiUygula()
       isBitti(taraDugmesi)
     }
   }
@@ -1252,6 +1299,7 @@ async function veriCek() {
 async function taramaCalistir() {
   if (durum.taramaCalisiyor) return
   durum.taramaCalisiyor = true
+  mesgulKilidiUygula()
   const dugme = el('scanBtn')
   isBasladi(dugme, 'Taranıyor...')
   motorDurumu('geçmiş taranıyor')
@@ -1271,6 +1319,7 @@ async function taramaCalistir() {
     hataGoster('Tarama başarısız: ' + hataMetni(err))
   } finally {
     durum.taramaCalisiyor = false
+    mesgulKilidiUygula()
     isBitti(dugme)
   }
 
@@ -1900,8 +1949,13 @@ async function ayarlariSifirla() {
 function testPaneliniCiz() {
   const kap = panelGovdesi('test')
   if (!kap) return
-  renderBacktest(kap, durum.testSonucu, {
+  // SONUC BASKA BIR ZAMAN DILIMINE AITSE SOYLE. Test sururken zaman dilimi
+  // degistirilebiliyordu ve sonuc kontrol edilmeden gosteriliyordu.
+  const sonuc = durum.testSonucu
+  const baskaTf = sonuc && sonuc.tf && sonuc.tf !== durum.tf ? sonuc.tf : null
+  renderBacktest(kap, sonuc, {
     running: durum.testCalisiyor,
+    otherTf: baskaTf,
     onRun: () => testCalistir(),
   })
   // Test ozetinin ALTINA canli gunluk bolumu eklenir: "olculen" ile "canlida
@@ -1913,6 +1967,7 @@ function testPaneliniCiz() {
 async function testCalistir() {
   if (durum.testCalisiyor) return
   durum.testCalisiyor = true
+  mesgulKilidiUygula()
   const dugme = el('testRunBtn')
   isBasladi(dugme, 'Çalışıyor...')
   testPaneliniCiz()
@@ -1950,6 +2005,7 @@ async function testCalistir() {
     hataGoster('Test başarısız: ' + hataMetni(err))
   } finally {
     durum.testCalisiyor = false
+    mesgulKilidiUygula()
     isBitti(dugme)
     testPaneliniCiz()
     setTimeout(ilerlemeyiKapat, 1500)

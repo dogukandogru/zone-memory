@@ -69,10 +69,24 @@ const state = {
   // Duzeltme hesaplanamadi veya akista bosluk var: bar yazilmiyor, once
   // Veri Cek ile eksik donem kapatilmali.
   needsSync: false,
+  // Motor uzun bir isle mesgul: canli tik kuyrukta bekliyor.
+  waitingForEngine: false,
+  // Oturum kimligi: her start() ile artar (bkz. sessionSeq).
+  session: 0,
 }
 
 let timer = null
-let ticking = false
+/**
+ * Calisan oturumun kimligi. `start()` her cagrildiginda artar.
+ *
+ * Neden gerekli: tick() iki kez await ediyor (saglayici cekimi ve isci
+ * cagrisi). Bu iki nokta arasinda kullanici durdurup baslatabilir ya da zaman
+ * dilimini degistirebilir; eski turun sonucu o zaman YENI zaman diliminin
+ * etiketiyle grafige, hatta yeni zaman diliminin deposuna yazilabiliyordu.
+ */
+let sessionSeq = 0
+/** Su an tik atan oturumun kimligi (0 = tik atilmiyor). */
+let tickingSession = 0
 let basisLogged = false
 let basisWarned = false
 
@@ -146,6 +160,7 @@ function status() {
     signals: state.signals,
     addedBars: state.addedBars,
     needsSync: state.needsSync,
+    waitingForEngine: state.waitingForEngine,
   }
 }
 
@@ -170,6 +185,9 @@ async function start(opts) {
   stopTimer()
 
   state.running = true
+  // Yeni oturum: bu andan once baslamis tiklerin sonucu artik gecersizdir.
+  state.session = ++sessionSeq
+  state.waitingForEngine = false
   state.tf = tf
   state.providerId = providerId
   state.providerName = provider.name || providerId
@@ -213,6 +231,9 @@ function stop() {
   const wasRunning = state.running
   stopTimer()
   state.running = false
+  // Oturum kimligi degisir: suren tikin sonucu kullanilmaz.
+  state.session = ++sessionSeq
+  state.waitingForEngine = false
   if (wasRunning) {
     logLine('Canli akis durduruldu.')
     emitEvent('live:status', status())
@@ -222,14 +243,22 @@ function stop() {
 
 /** Tek bir cekim adimi. */
 async function tick() {
-  if (!state.running || ticking) return
-  ticking = true
+  if (!state.running) return
+  // Ayni OTURUMUN tiki calisiyorsa atla. Global bir bayrak, yeni oturumun ilk
+  // tikini de atliyordu: durdur/baslat sonrasi ilk veri bir tur gecikiyordu.
+  const oturum = state.session
+  if (tickingSession === oturum) return
+  tickingSession = oturum
   try {
     const cfg = settings.load()
-    const provider = getProviderById(state.providerId)
-    const apiKey = (cfg.apiKeys && cfg.apiKeys[state.providerId]) || ''
+    // Tur boyunca kullanilacak DEGERLER BASTA alinir. Onceden tf iki ayri
+    // yerden okunuyordu (cekimden once ve sonra) ve arada degisebiliyordu.
+    const tf = state.tf
+    const providerId = state.providerId
+    const provider = getProviderById(providerId)
+    const apiKey = (cfg.apiKeys && cfg.apiKeys[providerId]) || ''
     const tfmod = require('../core/tf')
-    const tfSec = tfmod.tfSeconds(state.tf)
+    const tfSec = tfmod.tfSeconds(tf)
 
     // Kapanmis bar olcutu bu an uzerinden hesaplanir. Istegin GONDERILDIGI
     // ani kullaniriz: isci uzun bir isle mesgulse mesaj dakikalar sonra
@@ -252,8 +281,10 @@ async function tick() {
       apiKey: apiKey,
     })
 
-    // Cekim sirasinda durdurulmus olabiliriz.
-    if (!state.running) return
+    // Cekim sirasinda durdurulmus, yeniden baslatilmis ya da zaman dilimi
+    // degistirilmis olabiliriz. Oturum degistiyse bu turun sonucu ARTIK
+    // BASKA BIR SEYE ait: kullanilmaz.
+    if (!state.running || state.session !== oturum) return
 
     if (!fetched || !fetched.length) {
       state.lastError = 'Saglayicidan mum gelmedi.'
@@ -261,8 +292,22 @@ async function tick() {
       return
     }
 
+    // MOTOR MESGULSE ARAYUZ BILSIN. Tek isci oldugu icin uzun bir geriye test
+    // suruyorken canli tik kuyrukta bekler (olculdu: 1m testi 53-60 sn) ve
+    // arayuzde bu hic gorunmuyordu.
+    try {
+      const motor = engine.status()
+      const bekleyen = motor && Number.isFinite(motor.pending) ? motor.pending : 0
+      if (bekleyen > 0 && !state.waitingForEngine) {
+        state.waitingForEngine = true
+        emitEvent('live:status', status())
+      }
+    } catch (err) {
+      // Durum okunamazsa tik yine denenir.
+    }
+
     const res = await engine.call('engine:live-tick', {
-      tf: state.tf,
+      tf: tf,
       series: {
         length: fetched.length,
         time: fetched.time,
@@ -275,7 +320,7 @@ async function tick() {
       isProxy: state.isProxy,
       // Hangi saglayicidan geldigi canli sinyal gunlugune yazilir: sonradan
       // "bu olcu hangi kaynakla alindi" sorusu cevaplanabilmeli.
-      providerId: state.providerId,
+      providerId: providerId,
       basis: state.basis,
       volScale: state.volScale,
       basisWarned: basisWarned,
@@ -290,6 +335,15 @@ async function tick() {
       // 1.5 ATR ile etiketlenmisti).
       cfgPatch: settings.loadPatch(),
     })
+
+    state.waitingForEngine = false
+    // ISCI YANITI ARTIK BASKA BIR OTURUMA AIT OLABILIR.
+    //
+    // Isci tf'yi yanitinda geri donuyor; eslesmiyorsa yanit ATILIR. Aksi
+    // halde eski zaman diliminin barlari yeni zaman diliminin etiketiyle
+    // grafige ve duruma yazilabiliyordu.
+    if (!state.running || state.session !== oturum) return
+    if (res && res.tf && res.tf !== tf) return
 
     state.ticks += 1
     state.lastPollTime = Math.floor(Date.now() / 1000)
@@ -369,7 +423,7 @@ async function tick() {
     // Durdurulduktan sonra gelen hatalar icin gurultu yapma.
     if (state.running) logLine('Canli veri hatasi: ' + message + ' Denemeye devam ediliyor.')
   } finally {
-    ticking = false
+    if (tickingSession === oturum) tickingSession = 0
     // HER TIKTE DURUM YAYINLANIR.
     //
     // Gosterge onceden yalnizca baslama ve durmada guncelleniyordu: Binance
