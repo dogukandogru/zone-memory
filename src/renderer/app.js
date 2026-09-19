@@ -1634,7 +1634,10 @@ function sinyalPaneliniCiz() {
     if (s) {
       // Once gorunur yapilir: mini grafiklerin genisligi yerlesimden okunur.
       goster(n.ayrinti, true)
-      renderSignalDetail(n.ayrinti, s, { onMatchSelect: ornegeGit })
+      renderSignalDetail(n.ayrinti, s, {
+        onMatchSelect: ornegeGit,
+        risk: durum.ayarlar ? durum.ayarlar.risk : null,
+      })
       geriDugmesiEkle(n.ayrinti, 'Ayrıntıyı kapat', () => {
         durum.seciliSinyalId = null
         durum.vurguluOrnek = null
@@ -1647,7 +1650,10 @@ function sinyalPaneliniCiz() {
     }
   } else if (s) {
     // Ayri ayrinti kabi yoksa listenin yerine ayrintiyi ciz.
-    renderSignalDetail(n.liste, s, { onMatchSelect: ornegeGit })
+    renderSignalDetail(n.liste, s, {
+      onMatchSelect: ornegeGit,
+      risk: durum.ayarlar ? durum.ayarlar.risk : null,
+    })
     geriDugmesiEkle(n.liste, 'Sinyal listesine dön', () => {
       durum.seciliSinyalId = null
       durum.vurguluOrnek = null

@@ -60,6 +60,11 @@ const DEFAULTS = {
   // `onlyProven` varsayilan acik: kanitlanmamis bir sinyal icin bildirim
   // gondermek, olculmemis bir seyi acil gibi gostermek olurdu.
   notify: { desktop: true, sound: true, onlyFired: true, onlyProven: true },
+  // RISK VE POZISYON (Y1).
+  // `balance` 0 iken hesaplayici gizli kalir. Turler arasinda risk UC KAT
+  // farkli (olusum 2,02-2,10 ATR, dokunus 0,68-0,75 ATR); sabit lotla acan
+  // kullanici olusumda uc kat fazla risk aliyor.
+  risk: { balance: 0, riskPct: 1, contractSize: 100, lotStep: 0.01, minLot: 0.01, costUsd: null },
   livePollSeconds: 20,
   // Uygulama acilir acilmaz canli takibi kendiliginden baslatir. Kapatmak
   // istersen Ayarlar ekranindan kapatabilirsin; basarisiz olursa uygulama
@@ -211,6 +216,12 @@ const SINIRLAR = {
   'signalCfg.priorStrength': [0, 200],
   'signalCfg.minLift': [0, 0.5],
   'signalCfg.newsBlackoutMin': [0, 240],
+  'risk.balance': [0, 100000000],
+  'risk.riskPct': [0.01, 100],
+  'risk.contractSize': [1, 100000],
+  'risk.lotStep': [0.001, 100],
+  'risk.minLot': [0.001, 100],
+  'risk.costUsd': [0, 1000],
   'signalCfg.halfLifeYears': [0, 30],
   'signalCfg.baseWindowYears': [0, 30],
   'signalCfg.tp1Pct': [1, 99],

@@ -23,6 +23,7 @@
  * (Ek olarak app.js'in de kullandigi bicimlendirme yardimcilari disa acilir.)
  */
 
+import { pozisyonBoyutu } from './risk.mjs'
 import {
   sinyalAraligi,
   sinyalSayilari,
@@ -482,6 +483,68 @@ function sonucBilgisi(s) {
   }
 }
 
+/**
+ * Sinyal ayrintisina "Pozisyon" bolumunu ekler.
+ *
+ * @param {HTMLElement} el
+ * @param {Object} signal
+ * @param {Object|null} risk Ayarlardaki risk bolumu
+ */
+function pozisyonBolumu(el, signal, risk) {
+  el.appendChild(bolumBasligi('Pozisyon'))
+  const r = risk || {}
+  const bakiye = sayi(r.balance, 0)
+  if (!(bakiye > 0)) {
+    el.appendChild(h('div', 'small muted',
+      'Hesap bakiyesi girilmedi. Ayarlar > Risk ve pozisyon bölümünden bakiye girin, ' +
+      'stop mesafesi lota ve dolara çevrilsin.'))
+    return
+  }
+
+  const sonuc = pozisyonBoyutu({
+    entry: sayi(signal.entry, NaN),
+    sl: sayi(signal.sl, NaN),
+    tp1: sayi(signal.tp1, NaN),
+    balance: bakiye,
+    riskPct: sayi(r.riskPct, 1),
+    contractSize: sayi(r.contractSize, 100),
+    lotStep: sayi(r.lotStep, 0.01),
+    minLot: sayi(r.minLot, 0.01),
+    // Maliyet verilmediyse testteki ile AYNI oran kullanilir (fiyat x %0,0068).
+    //
+    // DIKKAT: `Number(null)` SIFIRDIR. Once acikca null/undefined/bos elenir;
+    // yoksa "maliyet girilmedi" durumu "maliyet sifir" diye okunuyor ve risk
+    // ile TP1 kazanci ayni cikiyordu (olculdu: 97,29 dolar / 97,29 dolar,
+    // dogrusu 99,39 / 95,21).
+    costUsd: (r.costUsd === null || r.costUsd === undefined || r.costUsd === '' ||
+      !Number.isFinite(Number(r.costUsd)) || Number(r.costUsd) < 0)
+      ? sayi(signal.entry, 0) * 0.000068
+      : Number(r.costUsd),
+  })
+
+  if (sonuc.gecersiz) {
+    el.appendChild(h('div', 'small muted', 'Pozisyon hesaplanamadı: ' + (sonuc.sebep || 'geçersiz plan')))
+    return
+  }
+  if (sonuc.yetersiz) {
+    const uyari = uyariKutusu('Bakiye bu kurulum için yetersiz: en küçük lot bile ' +
+      formatNumber(sonuc.enKucukLotRiskPct, 2) + '% risk demek (hedefiniz ' +
+      formatNumber(sayi(r.riskPct, 1), 2) + '%).')
+    uyari.style.color = 'var(--warn, ' + RENK.warn + ')'
+    el.appendChild(uyari)
+    return
+  }
+
+  el.appendChild(kv('Lot', formatNumber(sonuc.lot, 2)))
+  el.appendChild(kv('Risk', formatNumber(sonuc.riskUsd, 2) + ' $ (' +
+    formatNumber(sonuc.gerceklesenRiskPct, 2) + '%)', 'down'))
+  el.appendChild(kv('TP1 gerçekleşirse', formatNumber(sonuc.tp1KazancUsd, 2) + ' $',
+    sonuc.tp1KazancUsd >= 0 ? 'up' : 'down'))
+  el.appendChild(h('div', 'small muted',
+    'Maliyet dahil. Lot yalnızca riski sınırlar: başarı oranına göre büyütülmez, ' +
+    'çünkü sistem henüz kanıtlanmış bir katma değer üretmiyor.'))
+}
+
 /** Skor bilesenlerinin okunabilir adlari. */
 const PARCA_ADLARI = {
   flow: 'akış gücü',
@@ -840,6 +903,14 @@ export function renderSignalDetail(el, signal, opts) {
     el.appendChild(h('div', 'small muted',
       'Uzatma hedefi (TP2) yok: yeterli sayıda tutmuş benzer kayıt bulunamadı.'))
   }
+
+  // POZISYON: stop mesafesini dolara ve lota cevirir.
+  //
+  // Turler arasinda risk UC KAT farkli (olculdu: olusum ortalama 2,02-2,10
+  // ATR, dokunus 0,68-0,75 ATR). Sabit lotla acan kullanici olusumda uc kat
+  // fazla risk aliyordu. Hesaplayici yalnizca riski SINIRLAR; basari oranina
+  // gore lot buyutmez, cunku sistem henuz pozitif net beklenti uretmiyor.
+  pozisyonBolumu(el, signal, o.risk)
 
   // Gerekceler
   el.appendChild(bolumBasligi('Gerekçeler'))
@@ -1522,6 +1593,28 @@ function ayarGruplari(saglayiciSecenekleri) {
         { yol: 'backtestCfg.warmupPerBucket', ad: 'Isınma: tür ve yön başına asgari aday', tip: 'sayi', adim: 10, min: 0, max: 5000,
           not: 'Bir olay ancak hafızada aynı türden ve aynı yönden bu kadar aday varsa ' +
             'değerlendirilir. Sabit olay sayısı yüksek zaman dilimlerinde testi anlamsız kılıyordu.' },
+      ],
+    },
+    {
+      // Bu grup hafizayi ETKILEMEZ: yeniden tarama uyarisi cikmamali.
+      baslik: 'Risk ve pozisyon',
+      bozar: false,
+      not: 'Bakiye girilince sinyal kartında lot ve dolar riski görünür. Türler arasında ' +
+        'risk üç kat farklı (ölçüldü: oluşum 2,02-2,10 ATR, dokunuş 0,68-0,75 ATR), ' +
+        'bu yüzden sabit lotla işlem açmak oluşumda üç kat fazla risk demek.',
+      alanlar: [
+        { yol: 'risk.balance', ad: 'Hesap bakiyesi ($)', tip: 'sayi', adim: 100, min: 0,
+          not: '0 bırakılırsa pozisyon hesaplayıcı gizli kalır.' },
+        { yol: 'risk.riskPct', ad: 'İşlem başına risk (%)', tip: 'sayi', adim: 0.1, min: 0.01, max: 100,
+          not: 'Stop vurulursa kaybedilecek bakiye yüzdesi.' },
+        { yol: 'risk.contractSize', ad: 'Sözleşme büyüklüğü (ons)', tip: 'sayi', adim: 1, min: 1,
+          not: 'XAUUSD standart lotta 100 onstur.' },
+        { yol: 'risk.lotStep', ad: 'Lot adımı', tip: 'sayi', adim: 0.01, min: 0.001,
+          not: 'Brokerinizin izin verdiği en küçük artış.' },
+        { yol: 'risk.minLot', ad: 'En küçük lot', tip: 'sayi', adim: 0.01, min: 0.001,
+          not: 'Bunun altına düşen hesaplarda uyarı gösterilir.' },
+        { yol: 'risk.costUsd', ad: 'Gidiş dönüş maliyet ($)', tip: 'sayi', adim: 0.01, min: 0,
+          not: 'Boş bırakılırsa fiyatın %0,0068\'i kullanılır (ölçüm ile aynı).' },
       ],
     },
     {

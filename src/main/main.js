@@ -24,7 +24,8 @@ const IS_DEV = process.argv.includes('--dev')
  * gercek arayuzde nasil gorundugunu, pencereyi elle acmadan dogrulayabilmek.
  * `--shot-panel <ad>` ile once bir panel sekmesi acilir (signals, zones,
  * memory, settings, test), `--shot-wait <sn>` bekleme suresini uzatir,
- * `--shot-scroll son` (ya da piksel sayisi) panel govdesini kaydirir.
+ * `--shot-scroll son` (ya da piksel sayisi) panel govdesini kaydirir,
+ * `--shot-click <secici>` once bir ogeye tiklar.
  */
 function argDegeri(ad) {
   const i = process.argv.indexOf(ad)
@@ -35,6 +36,8 @@ const SHOT_PANEL = argDegeri('--shot-panel')
 const SHOT_WAIT = Number(argDegeri('--shot-wait')) || 12
 /** `--shot-scroll son` panelin sonuna kaydirir, sayi verilirse o kadar piksel. */
 const SHOT_SCROLL = argDegeri('--shot-scroll')
+/** `--shot-click <secici>` ekran goruntusunden once bir ogeye tiklar. */
+const SHOT_CLICK = argDegeri('--shot-click')
 
 /** @type {BrowserWindow|null} */
 let mainWindow = null
@@ -108,15 +111,30 @@ function createWindow() {
             )
             await new Promise((r) => setTimeout(r, 1500))
           }
+          // Tiklama gerektiren durumlar (sinyal ayrintisi, bolge karti) baska
+          // turlu dogrulanamiyordu.
+          if (SHOT_CLICK && mainWindow) {
+            await mainWindow.webContents.executeJavaScript(
+              '(function(){var e=document.querySelector(' + JSON.stringify(String(SHOT_CLICK)) + ');' +
+              'if(e)e.click();return !!e})()'
+            )
+            await new Promise((r) => setTimeout(r, 1200))
+          }
+
           // Panel govdesini kaydirmak: uzun panellerde ekranin altinda kalan
           // tablolar (alt kume kirilimi, sermaye egrisi) baska turlu
           // dogrulanamiyordu.
           if (SHOT_SCROLL && mainWindow) {
             await mainWindow.webContents.executeJavaScript(
-              '(function(){var k=document.querySelector(".panel.active .panel-body")' +
-              '||document.querySelector(".panel-body");' +
-              'if(k)k.scrollTop=' + (SHOT_SCROLL === 'son' ? 'k.scrollHeight' : Number(SHOT_SCROLL) || 0) +
-              ';return true})()'
+              // Aktif paneldeki TUM kaydirilabilir kaplar kaydirilir: sinyal
+              // ayrintisi ayri bir kapta cizildigi icin yalnizca panel
+              // govdesini kaydirmak yetmiyordu.
+              '(function(){var hedef=' + (SHOT_SCROLL === 'son' ? '-1' : String(Number(SHOT_SCROLL) || 0)) + ';' +
+              'var kaplar=document.querySelectorAll(".panel.active .scroll, .panel.active .panel-body");' +
+              'if(!kaplar.length)kaplar=document.querySelectorAll(".panel-body");' +
+              'for(var i=0;i<kaplar.length;i++){var k=kaplar[i];' +
+              'if(k.scrollHeight>k.clientHeight)k.scrollTop=hedef<0?k.scrollHeight:hedef}' +
+              'return true})()'
             )
             await new Promise((r) => setTimeout(r, 600))
           }
