@@ -99,6 +99,10 @@ const DEFAULT_SIGNAL_CFG = {
   // %33,1 ve araliklar ortusmuyor); pencere bunu sinirlar. Komsu secimini
   // DEGISTIRMEZ, yalnizca kuculutme tabanini degistirir.
   baseWindowYears: null,
+  // YUKSEK ETKILI VERI PENCERESI (dakika). 0 ise kapali. Acikken karar ani
+  // takvimdeki bir veriye bu kadar yakinsa sinyal uretilmez. Takvim dosyasi
+  // yoksa ayar ne olursa olsun etkisizdir (bkz. src/core/calendar.js).
+  newsBlackoutMin: 0,
   // Asgari beklenen deger, risk birimi cinsinden:
   //   bd = winRate * rr - (1 - winRate)
   // Bu, isabet orani ile risk/odulu tek bir olcute baglar. 0 esigi baskabas,
@@ -687,8 +691,24 @@ function decideFromCandidates (ev, candidates, levels, cfg, ek) {
   const minLift = num(conf.minLift, 0)
   const liftOk = lift >= minLift
 
+  // YUKSEK ETKILI VERI PENCERESI (Y2, varsayilan KAPALI).
+  //
+  // Olculdu: yaklasik NFP penceresinde 15m dokunus isabeti %15,3 (n=59),
+  // diger zamanlarda %28,1; bir bar icinde kirilma %79,7 ile %54,0. Orneklem
+  // kucuk ve guven araliklari ortusuyor, yani filtrenin faydasi KANITLI
+  // DEGIL. Bu yuzden varsayilan 0'dir (kapali) ve kapiyi acmak kullanicinin
+  // kararidir; ozellik vektorune yeni bir boyut EKLENMEDI, cunku tek ikili
+  // boyut kNN mesafesinde kaybolur ve tum hafizalari gecersiz kilardi.
+  //
+  // `ek.news` cagiran taraftan gelir (takvim yoksa null) ve
+  // {code, deltaMin} tasir.
+  const haberDk = Math.max(0, num(conf.newsBlackoutMin, 0))
+  const haber = baglam.news && typeof baglam.news === 'object' ? baglam.news : null
+  const haberEngeli = haberDk > 0 && haber !== null &&
+    Number.isFinite(haber.deltaMin) && Math.abs(haber.deltaMin) <= haberDk
+
   const fired = matchCount >= minMatches && winRate >= minWinRate && liftOk && rrOk && evOk &&
-    !formRiskBlocked
+    !formRiskBlocked && !haberEngeli
 
   // Gerekceler: sinyalin neden olustugu veya neden olusmadigi.
   if (!features || !features.shape) {
@@ -738,6 +758,12 @@ function decideFromCandidates (ev, candidates, levels, cfg, ek) {
   } else {
     reasons.push('Benzer kayıt olmadığı için plan varsayılan ' + FALLBACK_TP1_ATR.toFixed(1) +
       ' ATR hedef ve ' + FALLBACK_SL_ATR.toFixed(1) + ' ATR zararla dolduruldu')
+  }
+
+  if (haberEngeli) {
+    reasons.push('Yüksek etkili veri penceresi (' + String(haber.code || 'veri') + ', ' +
+      (haber.deltaMin >= 0 ? Math.round(haber.deltaMin) + ' dk sonra' : Math.round(-haber.deltaMin) + ' dk önce') +
+      '), sinyal üretilmedi')
   }
 
   if (formRiskBlocked) {
@@ -812,6 +838,10 @@ function decideFromCandidates (ev, candidates, levels, cfg, ek) {
     nEff: etkinN,
     winRateLo: winRateLo,
     winRateHi: winRateHi,
+    // Karar anina en yakin yuksek etkili veri (takvim varsa). Kapi kapali
+    // olsa bile tasinir: arayuz uyari gosterir.
+    news: haber,
+    newsBlocked: haberEngeli,
     baseRate: havuzTabani,
     baseN: candidates && Number.isFinite(candidates.baseN) ? candidates.baseN : null,
     lift: lift,
@@ -839,9 +869,12 @@ function decideFromCandidates (ev, candidates, levels, cfg, ek) {
  * @param {Object[]} [prototypes] YOK SAYILIR; imza eski cagiranlar icin duruyor
  * @param {Object} [cfg]
  * @param {number|null} [beforeTime]
+ * @param {{news?:{code:string, deltaMin:number}|null}} [ek] Karar aninin ek
+ *        baglami. Su an yalnizca `news` okunur (yuksek etkili veri penceresi);
+ *        verilmezse ozellik kapali kalir.
  * @returns {Object} Signal
  */
-function evaluateTouch (touch, features, memory, prototypes, cfg, beforeTime) {
+function evaluateTouch (touch, features, memory, prototypes, cfg, beforeTime, ek) {
   const events = (memory && Array.isArray(memory.events)) ? memory.events : []
   const candidates = findCandidates(touch, features, memory, cfg, beforeTime)
   return decideFromCandidates(touch, candidates, undefined, cfg, {
@@ -850,6 +883,7 @@ function evaluateTouch (touch, features, memory, prototypes, cfg, beforeTime) {
     features: features || null,
     scanned: events.length,
     beforeTime: beforeTime,
+    news: ek && ek.news ? ek.news : null,
   })
 }
 

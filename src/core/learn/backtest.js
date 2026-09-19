@@ -70,6 +70,14 @@ const DEFAULT_BACKTEST_CFG = {
   // istatistikleri yanlis hesaplardi.
   evalFromTime: null,
   evalToTime: null,
+  // ALT KUME KANCASI (Y2 / Y3). Verilirse her degerlendirilen olay icin
+  // cagirilir ve dondurdugu ETIKET ozetteki `bySubset` kirilimina girer.
+  // Sinyal karari ETKILENMEZ, yalnizca raporlama boluner:
+  //   cfg.subsetOf = (ev) => 'veri ±30 dk' | 'normal'
+  // Boylece "yuksek etkili veri anlarinda sonuc farkli mi" ya da "ust zaman
+  // dilimi bolgesi yakinken sonuc farkli mi" sorusu ayni taban mantigiyla,
+  // tur bazinda ve isinma sonrasi donemde olculur.
+  subsetOf: null,
 }
 
 /**
@@ -295,6 +303,25 @@ function yuruyenIleriTest(memory, prototypes, cfg, onProgress, sinyalUret) {
     ['touch', { total: 0, fired: 0, wins: 0, losses: 0, pnlAtr: 0, baseN: 0, baseWins: 0, baseNetAtr: 0, timeouts: 0, timeoutPnlAtr: 0, nofill: 0 }],
   ])
   const kindOf = (e) => (e && e.kind === 'form' ? 'form' : 'touch')
+  // ALT KUME KIRILIMI: etiket -> tur -> sayaclar. Sinyal kararina girmez.
+  const altKumeKanca = typeof conf.subsetOf === 'function' ? conf.subsetOf : null
+  const altKumeMap = new Map()
+  function altKumeKaydi (etiket, kind) {
+    let tur = altKumeMap.get(etiket)
+    if (tur === undefined) {
+      tur = new Map()
+      altKumeMap.set(etiket, tur)
+    }
+    let kayit = tur.get(kind)
+    if (kayit === undefined) {
+      kayit = {
+        total: 0, fired: 0, wins: 0, pnlAtr: 0, pnlR: 0,
+        baseN: 0, baseWins: 0, baseNetAtr: 0,
+      }
+      tur.set(kind, kayit)
+    }
+    return kayit
+  }
   let slippageAtr = Number(conf.slippageAtr)
   if (!Number.isFinite(slippageAtr) || slippageAtr < 0) slippageAtr = 0
   const costCfg = { costPct: costPct, costUsd: costUsd, slippageAtr: slippageAtr }
@@ -379,8 +406,14 @@ function yuruyenIleriTest(memory, prototypes, cfg, onProgress, sinyalUret) {
       continue
     }
 
+    // Alt kume etiketi bir kez hesaplanir (kanca pahali olabilir: takvimde
+    // ikili arama). Karar aninin etiketi olculur, olay zamaninin degil.
+    const altKume = altKumeKanca ? String(altKumeKanca(ev) || 'normal') : null
+    const akKayit = altKume === null ? null : altKumeKaydi(altKume, kindOf(ev))
+
     kb.total++
     total++
+    if (akKayit) akKayit.total++
     // Komsular ya burada kNN ile hesaplanir (referans yol) ya da onbellekten
     // okunur. Karar mantigi her iki durumda ayni fonksiyondan gelir.
     const sig = typeof sinyalUret === 'function'
@@ -394,6 +427,11 @@ function yuruyenIleriTest(memory, prototypes, cfg, onProgress, sinyalUret) {
       kb.baseN++
       if (tabanSonuc.win) kb.baseWins++
       kb.baseNetAtr += tabanSonuc.pnlAtr
+      if (akKayit) {
+        akKayit.baseN++
+        if (tabanSonuc.win) akKayit.baseWins++
+        akKayit.baseNetAtr += tabanSonuc.pnlAtr
+      }
       const havuz = tabanHavuzu[kindOf(ev)]
       if (havuz) {
         havuz.win.push(tabanSonuc.win ? 1 : 0)
@@ -456,6 +494,13 @@ function yuruyenIleriTest(memory, prototypes, cfg, onProgress, sinyalUret) {
         if (cumR > peakR) peakR = cumR
         const ddR = peakR - cumR
         if (ddR > maxDrawdownR) maxDrawdownR = ddR
+
+        if (akKayit) {
+          akKayit.fired++
+          if (win) akKayit.wins++
+          akKayit.pnlAtr += pnlAtr
+          akKayit.pnlR += pnlR
+        }
 
         istatistikKayitlari.push({
           pred: Number(sig.winRate),
@@ -707,6 +752,41 @@ function yuruyenIleriTest(memory, prototypes, cfg, onProgress, sinyalUret) {
           lowSample: k.fired > 0 && k.fired < 30,
         }
       }),
+      // ALT KUME KIRILIMI (Y2 / Y3): etiket x tur. Taban AYNI ALT KUMENIN
+      // ayni turdeki tum olaylaridir; karisik taban alt kume karsilastirmasini
+      // anlamsiz kilardi (veri penceresindeki olaylar zaten farkli bir
+      // populasyon). Islem yoksa oranlar null doner.
+      bySubset: (function () {
+        if (altKumeMap.size === 0) return null
+        const out = []
+        for (const [etiket, turler] of altKumeMap.entries()) {
+          for (const [kind, k] of turler.entries()) {
+            const oran = k.fired > 0 ? k.wins / k.fired : null
+            const tabanOran = k.baseN > 0 ? k.baseWins / k.baseN : null
+            out.push({
+              subset: etiket,
+              kind: kind,
+              total: k.total,
+              fired: k.fired,
+              wins: k.wins,
+              winRate: oran,
+              winRateCI: k.fired > 0 ? stats.wilson(k.wins, k.fired) : null,
+              expectancyAtr: k.fired > 0 ? k.pnlAtr / k.fired : null,
+              expectancyR: k.fired > 0 ? k.pnlR / k.fired : null,
+              baseN: k.baseN,
+              baselineWinRate: tabanOran,
+              baselineExpectancyAtr: k.baseN > 0 ? k.baseNetAtr / k.baseN : null,
+              baselineWinRateCI: k.baseN > 0 ? stats.wilson(k.baseWins, k.baseN) : null,
+              edgePts: (oran === null || tabanOran === null) ? null : (oran - tabanOran) * 100,
+              lowSample: k.fired > 0 && k.fired < 30,
+            })
+          }
+        }
+        out.sort((a, b) => (a.subset === b.subset
+          ? (a.kind < b.kind ? -1 : 1)
+          : (a.subset < b.subset ? -1 : 1)))
+        return out
+      })(),
       // TABAN: tetiklenen islemlerin TUR KARISIMIYLA agirliklanmis, isinma
       // sonrasi donemden ve AYNI planla hesaplanmis oran. Karisik taban
       // (tum olaylar, tum turler, isinma dahil) ekranda +9 ile +13 puanlik

@@ -139,6 +139,14 @@ function candCachePath(tf, symbol) {
   return memoryPath(tf, symbol) + '.cands.bin'
 }
 
+/**
+ * Ekonomik takvim dosyasi (kullanici hazirlar, yoksa ozellik kapali kalir).
+ * Bicim ve gerekce: src/core/calendar.js
+ */
+function calendarPath() {
+  return require('../core/calendar').calendarFilePath(dataDir())
+}
+
 /** Gerekli klasorleri olusturur, olusan yollari dondurur. */
 function ensureDirs() {
   const user = core.ensureDir(userDataDir())
@@ -160,5 +168,6 @@ module.exports = {
   backtestPath,
   liveLogPath,
   candCachePath,
+  calendarPath,
   ensureDirs,
 }

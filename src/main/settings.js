@@ -206,6 +206,9 @@ const SINIRLAR = {
   'signalCfg.minExpectancy': [-1, 5],
   'signalCfg.priorStrength': [0, 200],
   'signalCfg.minLift': [0, 0.5],
+  'signalCfg.newsBlackoutMin': [0, 240],
+  'signalCfg.halfLifeYears': [0, 30],
+  'signalCfg.baseWindowYears': [0, 30],
   'signalCfg.tp1Pct': [1, 99],
   'signalCfg.tp2Pct': [1, 99],
   'signalCfg.slPct': [1, 99],
@@ -255,6 +258,11 @@ function sinirla(next, current) {
   for (const yol of Object.keys(SINIRLAR)) {
     const ham = getPath(out, yol)
     if (ham === undefined) continue
+    // `null` bu kod tabaninda "kapali / belirtilmemis" demektir ve gecerli bir
+    // degerdir (ornek: signalCfg.halfLifeYears). Number(null) sifir oldugu
+    // icin kirpma onu sessizce 0'a cevirip yamaya "degistirilmis alan" diye
+    // yaziyordu.
+    if (ham === null) continue
     const [alt, ust] = SINIRLAR[yol]
     const deger = typeof ham === 'number' ? ham : Number(ham)
     if (!Number.isFinite(deger)) {

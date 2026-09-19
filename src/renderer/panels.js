@@ -682,6 +682,19 @@ export function renderSignalDetail(el, signal, opts) {
   el.appendChild(kv('Durum', signal.fired ? 'Sinyal üretildi' : 'Eşikler geçilmedi',
     signal.fired ? 'up' : 'muted'))
 
+  // YUKSEK ETKILI VERI: kapi kapali olsa bile uyari gosterilir. Bolgeler bu
+  // anlarda daha hizli kiriliyor (olculdu, ama orneklem kucuk ve araliklar
+  // ortusuyor), yani bu bir kanit degil bir dikkat notudur.
+  if (signal.news && Number.isFinite(signal.news.deltaMin) && Math.abs(signal.news.deltaMin) <= 60) {
+    const dk = Math.round(signal.news.deltaMin)
+    const metin = 'Yüksek etkili veri: ' + String(signal.news.code || 'veri') + ' ' +
+      (dk >= 0 ? dk + ' dk sonra' : (-dk) + ' dk önce') +
+      (signal.newsBlocked ? ' (sinyal bu yüzden üretilmedi)' : '')
+    const uyari = uyariKutusu(metin)
+    uyari.style.color = 'var(--warn, ' + RENK.warn + ')'
+    el.appendChild(uyari)
+  }
+
   // KANIT DURUMU: bu turun katma degeri son olcumde kanitlandi mi. Bu satir
   // olmadan her sinyal ayni guvenle okunuyordu.
   if (signal.evidence) {
@@ -1392,6 +1405,17 @@ function ayarGruplari(saglayiciSecenekleri) {
         { yol: 'signalCfg.minLift', ad: 'En az katma değer', tip: 'sayi', adim: 0.01, min: 0, max: 0.5,
           not: 'Gösterilen oran, aynı türün taban oranından en az bu kadar yüksek ' +
             'olmalı. 0 kapatır. Ölçülmeden açılmamalı: bkz. scripts/search-params.mjs.' },
+        { yol: 'signalCfg.newsBlackoutMin', ad: 'Veri penceresi (dk)', tip: 'sayi', adim: 5, min: 0, max: 240,
+          not: 'Karar anı yüksek etkili bir veriye bu kadar yakınsa sinyal üretilmez. ' +
+            '0 kapatır. Ölçüldü: NFP penceresinde 15m dokunuş isabeti %15,3 (n=59), ' +
+            'diğer zamanlarda %28,1; ama örneklem küçük ve aralıklar örtüşüyor, yani ' +
+            'faydası kanıtlı değil. Takvim dosyası yoksa bu ayar etkisizdir: ' +
+            'veri klasöründe calendar/high_impact.csv gerekir.' },
+        { yol: 'signalCfg.halfLifeYears', ad: 'Eşleşme yarı ömrü (yıl)', tip: 'sayi', adim: 1, min: 0, max: 30,
+          not: 'Eski eşleşmeler bu yarı ömürle hafifler ve güven aralığı etkin örnekleme ' +
+            'göre hesaplanır. 0 kapatır. Ölçüldü: doğrulama diliminde kazanç 0,002 Brier, ' +
+            'yani ölçüm hatasının içinde. Kendi verinizde denemek için: ' +
+            'node scripts/search-params.mjs --ablation' },
       ],
       capraz: ulasilmazEsikUyarisi,
     },
@@ -1920,6 +1944,34 @@ export function renderBacktest(el, result, opts) {
     el.appendChild(tablo(
       ['Tür', 'Olay', 'Sinyal', 'Oran', 'Taban', 'Katkı', 'Beklenti', 'Taban bek.', 'Net katkı'],
       satirlar))
+  }
+
+  // ALT KUME KIRILIMI (yalnizca ekonomik takvim dosyasi varsa dolar).
+  // Her alt kumenin tabani AYNI ALT KUMENIN ayni turdeki tum olaylaridir;
+  // karisik taban veri penceresi karsilastirmasini anlamsiz kilardi.
+  const altKumeler = Array.isArray(s.bySubset) ? s.bySubset : []
+  if (altKumeler.length > 0) {
+    el.appendChild(bolumBasligi('Yüksek etkili veri penceresi'))
+    const akSatirlari = []
+    for (let i = 0; i < altKumeler.length; i++) {
+      const a = altKumeler[i]
+      akSatirlari.push([
+        a.subset + ' - ' + turAdi(a.kind),
+        tam(a.total), tam(a.fired),
+        Number.isFinite(a.winRate) ? formatPercent(a.winRate, 1) : '-',
+        a.winRateCI ? formatPercent(a.winRateCI.lo, 1) + ' - ' + formatPercent(a.winRateCI.hi, 1) : '-',
+        Number.isFinite(a.baselineWinRate) ? formatPercent(a.baselineWinRate, 1) : '-',
+        Number.isFinite(a.edgePts) ? (a.edgePts >= 0 ? '+' : '') + formatNumber(a.edgePts, 1) : '-',
+        Number.isFinite(a.expectancyAtr) ? formatNumber(a.expectancyAtr, 3) : '-',
+      ])
+    }
+    el.appendChild(tablo(
+      ['Alt küme', 'Olay', 'Sinyal', 'Oran', '%95 aralık', 'Taban', 'Katkı', 'Beklenti'],
+      akSatirlari))
+    el.appendChild(h('div', 'small muted',
+      'Karar anı bar kapanışıdır. Aralıklar örtüşüyorsa veri penceresinin sonucu ' +
+      'değiştirdiği söylenemez. Sinyal kapısı varsayılan olarak KAPALI: açmak için ' +
+      'Ayarlar\'da "Veri penceresi (dk)" alanını sıfırdan büyük yapın.'))
   }
 
   // Sermaye egrisi

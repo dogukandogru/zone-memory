@@ -1199,6 +1199,20 @@ handlers['engine:backtest'] = async function (payload, ctx) {
     }
   }
 
+  // EKONOMIK TAKVIM (Y2): dosya varsa testin alt kume kirilimi doldurulur.
+  // Sinyal karari ETKILENMEZ; kapi yalnizca signalCfg.newsBlackoutMin > 0
+  // iken devreye girer ve o ayar kullanicinindir. Takvim yoksa hicbir sey
+  // degismez ve ozette bySubset null kalir.
+  const takvimModul = core('calendar')
+  const takvim = takvimModul.loadCalendar(paths.calendarPath())
+  if (takvim) {
+    const tfSn = core('tf').tfSeconds(tf)
+    // Karar ani olayin BASLADIGI an degil, barin KAPANISIDIR.
+    cfg.subsetOf = (ev) => takvimModul.newsSubset(takvim, num(ev.time, 0) + tfSn)
+    log('Ekonomik takvim yuklendi: ' + takvim.count + ' kayit' +
+      (takvim.skipped > 0 ? ', ' + takvim.skipped + ' satir atlandi' : ''))
+  }
+
   ctx.progress(62, 'Geriye test basliyor')
   const res = bt.runBacktestFromCache(mem, cache, protos, cfg,
     (pct, msg) => ctx.progress(62 + num(pct, 0) * 0.3, msg))
@@ -1349,6 +1363,28 @@ handlers['engine:memory-delete'] = async function (payload) {
  * olaylari tasir; tekil `signal` / `touch` alanlari geriye uyum icin dizinin
  * sonuncusuyla doldurulur. Her olay canli sinyal gunlugune de yazilir.
  */
+/**
+ * Ekonomik takvimi surec basina BIR KEZ yukler.
+ *
+ * Canli dongu her 20 saniyede bir cagiriliyor; dosyayi her tikta okumak
+ * gereksiz disk erisimi olurdu. Kullanici takvimi degistirirse uygulamayi
+ * yeniden baslatmasi (ya da isciyi yeniden kurmasi) gerekir; dosya
+ * degisikligini izlemek bu ozellik icin fazla karmasik.
+ */
+let takvimDurumu = { yuklendi: false, cal: null }
+function takvimOnbellek () {
+  if (takvimDurumu.yuklendi) return takvimDurumu.cal
+  let cal = null
+  try {
+    cal = core('calendar').loadCalendar(paths.calendarPath())
+  } catch (err) {
+    cal = null
+  }
+  takvimDurumu = { yuklendi: true, cal: cal }
+  if (cal) log('Ekonomik takvim yuklendi: ' + cal.count + ' kayit')
+  return cal
+}
+
 handlers['engine:live-tick'] = async function (payload) {
   const tf = requireTf(payload.tf)
   const seriesMod = core('series')
@@ -1559,6 +1595,9 @@ handlers['engine:live-tick'] = async function (payload) {
         memMeta
       )
       const hafizaVar = !!(mem && mem.events && mem.events.length > 0)
+      // EKONOMIK TAKVIM (Y2): dosya yoksa null kalir ve hicbir sey degismez.
+      // Her tikta diskten okumak yerine surec boyunca bir kez yuklenir.
+      const canliTakvim = takvimOnbellek()
       // Hafiza farkli bir ayarla kurulduysa karsilastirma anlamsizdir: yeni
       // tanimla uretilen olay, eski tanimla etiketlenmis gecmisle olculur ve
       // bu hicbir yerde gorunmezdi.
@@ -1592,7 +1631,12 @@ handlers['engine:live-tick'] = async function (payload) {
             ozellikYok++
           } else {
             sig = core('learn/signal').evaluateTouch(
-              cand, feats, mem, protos, canliCfg.signalCfg, num(cand.time, fetchedAt)
+              cand, feats, mem, protos, canliCfg.signalCfg, num(cand.time, fetchedAt),
+              // Yuksek etkili veri: karar ani barin KAPANISIDIR. Takvim yoksa
+              // null gecer ve hicbir sey degismez.
+              { news: canliTakvim
+                ? core('calendar').nearestEvent(canliTakvim, num(cand.time, 0) + tfSec)
+                : null }
             )
             if (sig && basis !== null && basis !== 0 && Array.isArray(sig.reasons)) {
               sig.reasons.push('Vekil kaynak fiyati ' + basis.toFixed(2) + ' birim kaydirildi.')

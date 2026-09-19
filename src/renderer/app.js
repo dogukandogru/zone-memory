@@ -1976,13 +1976,23 @@ function canliSinyalEkle(s) {
 
   const yon = s.direction === 'SELL' ? 'SAT' : 'AL'
   const tur = s.kind === 'form' ? 'kutu oluşumu' : 'bölge dokunuşu'
+  // YUKSEK ETKILI VERI: kapi kapali olsa bile bildirimde gorunur. Bolgeler bu
+  // anlarda daha hizli kiriliyor; bu bir kanit degil, en riskli anda verilen
+  // bir dikkat notudur.
+  let haberNotu = ''
+  if (s.news && Number.isFinite(Number(s.news.deltaMin)) && Math.abs(Number(s.news.deltaMin)) <= 60) {
+    const dk = Math.round(Number(s.news.deltaMin))
+    haberNotu = ' | Yüksek etkili veri: ' + String(s.news.code || 'veri') + ' ' +
+      (dk >= 0 ? dk + ' dk sonra' : (-dk) + ' dk önce')
+  }
   if (s.fired) {
     bildir('Yeni sinyal: ' + yon + ' (' + tur + ') ' + formatPrice(s.price) +
       ', başarı ' + formatPercent(s.winRate, 0) +
       ', güven ' + formatPercent(s.confidence, 0) +
-      ', ' + formatDateTime(s.time))
+      ', ' + formatDateTime(s.time) + haberNotu)
   } else {
-    bildir('Olay kaydedildi (' + yon + ', ' + tur + '), eşikler geçilmedi: ' + formatDateTime(s.time))
+    bildir('Olay kaydedildi (' + yon + ', ' + tur + '), eşikler geçilmedi: ' +
+      formatDateTime(s.time) + haberNotu)
   }
 }
 

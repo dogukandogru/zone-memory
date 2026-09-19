@@ -1034,6 +1034,47 @@ tutulduğu için bu filtre yine bağlayıcı değildir.
 Güven puanı üç parçadan gelir: eşleşme sayısı (0,40), tutma oranının 0,5'ten
 uzaklığı (0,35) ve ortalama benzerliğin eşiği ne kadar aştığı (0,25).
 
+### 6.7.1 Ekonomik takvim (istersen)
+
+Yüksek etkili ABD verisi anlarında bölgeler daha hızlı kırılıyor: ölçüldü,
+yaklaşık NFP penceresinde 15m dokunuş isabeti %15,3 (n=59), diğer zamanlarda
+%28,1; bir bar içinde kırılma %79,7 ile %54,0. **Ama örneklem küçük ve güven
+aralıkları örtüşüyor, yani filtrenin faydası kanıtlı değil.** Bu yüzden özellik
+iki parçaya ayrıldı ve kapı varsayılan olarak kapalı.
+
+Takvimi kendiniz koyarsınız. Veri klasörünüzde (Ayarlar ekranının altında
+yazılı) şu dosyayı oluşturun:
+
+```
+calendar/high_impact.csv
+```
+
+```
+timeUtc,code,currency
+2024-07-05T12:30:00Z,NFP,USD
+2024-07-11T12:30:00Z,CPI,USD
+2024-07-31T18:00:00Z,FOMC,USD
+```
+
+Saatler UTC olmalı, `#` ile başlayan satırlar yorumdur, baş satır isteğe
+bağlıdır, bozuk satırlar atlanır ve kaç satırın atlandığı günlüğe yazılır.
+**Dosya yoksa hiçbir şey değişmez:** özellik sessizce kapalı kalır.
+
+Dosya varken:
+
+- **Test sekmesi** "Yüksek etkili veri penceresi" tablosunu gösterir: `veri ±30
+  dk`, `veri ±60 dk` ve `normal` alt kümeleri, tür bazında, her birinin kendi
+  tabanıyla. Aralıklar örtüşüyorsa pencerenin sonucu değiştirdiği söylenemez.
+- **Canlı mod** sinyal kartında ve bildirimde "Yüksek etkili veri: NFP 20 dk
+  sonra" uyarısı gösterir. Bu uyarı kapıdan bağımsızdır.
+- **Kapıyı açmak** isterseniz Ayarlar > Sinyal kararı > "Veri penceresi (dk)"
+  alanına sıfırdan büyük bir değer yazın. Açmadan önce kendi takviminizle Test
+  sekmesindeki alt küme tablosuna bakın: fark iki dönem yarısında da
+  tekrarlanmıyorsa kapı yalnızca örnek sayınızı azaltır.
+
+Özellik vektörüne yeni bir boyut **eklenmedi**. Tek ikili boyut kNN
+mesafesinde kaybolur ve mevcut bütün hafızaları geçersiz kılardı.
+
 ### 6.8 Yürüyen ileri test
 
 Hafızadaki her olay zaman sırasına konur ve her biri **yalnızca kendinden
