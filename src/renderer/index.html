@@ -116,6 +116,9 @@
           <span>D <b id="legendL">-</b></span>
           <span>K <b id="legendC">-</b></span>
           <span id="legendChange" class="muted">-</span>
+          <!-- U7: "o ana kadar" kipi aciksa grafik gecmise kilitlidir.
+               Rozet olmadan kullanici mumlarin neden durdugunu anlamaz. -->
+          <span id="legendAsOf" class="tag asof" hidden></span>
         </div>
         <div id="chartEmpty" class="chart-empty">
           Veri yok. Önce <b>Veri Çek</b>, sonra <b>Geçmişi Tara</b> düğmesini kullanın.
@@ -163,6 +166,10 @@
                 <option value="buy">Sadece AL</option>
                 <option value="sell">Sadece SAT</option>
               </select>
+              <label class="check mini" for="asOfToggle"
+                     title="Seçili sinyalde grafik ve bölgeler o anki durumuyla çizilir, sonrası gizlenir">
+                <input type="checkbox" id="asOfToggle" checked><span>O an</span>
+              </label>
               <button type="button" class="btn mini" id="signalRefreshBtn">Yenile</button>
             </span>
           </div>
@@ -322,8 +329,8 @@ SAG PANEL
                         her birinde data-panel="..."; etkin olana .active
                         (.panel gizli, .panel.active gorunur)
 
-  Sinyaller: #signalCount #signalFilter #signalRefreshBtn #signalList
-             #signalEmpty #signalDetail
+  Sinyaller: #signalCount #signalFilter #asOfToggle #signalRefreshBtn
+             #signalList #signalEmpty #signalDetail
   Bolgeler : #zoneCount #zoneFilter #zoneShowToggle #zoneList #zoneEmpty
              #zoneDetail
   Hafiza   : #memoryBuildBtn #memoryExtendBtn #memoryDeleteBtn

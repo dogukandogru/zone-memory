@@ -71,6 +71,8 @@ olay geldiginde ayni turdeki en benzer gecmis olaylarla karsilastirilip
 | Kalici gunluk dosyasi (`logs/zone-memory-YYYY-MM-DD.log`) | Hatalar yigin iziyle diske yaziliyor, 14 gun saklaniyor, menuden acilabiliyor. |
 | Canli oturum kimligi | Durdur/baslat ve zaman dilimi degisiminde eski turun sonucu kullanilmiyor. |
 | Masaustu bildirimi (`src/main/notify.js`) | Yalnizca tetiklenen, gecikmemis ve kanitli sinyallerde; tiklayinca sinyali aciyor. |
+| "O ana kadar goster" kipi (`#asOfToggle`) | Gecmis sinyal incelenirken ekran o andan sonrasini gostermiyor: sonraki mum, sonraki isaret ve kutularin bugunku hali gizli. |
+| Bolge omru arayuzde ayri durum | "Aktif" artik kirilmamis VE omru dolmamis demek; omru dolan kutu "Süresi doldu" yaziyor. |
 
 ## Duzeltilen hatalar (olcumu veya veriyi etkileyenler)
 
@@ -154,6 +156,15 @@ olay geldiginde ayni turdeki en benzer gecmis olaylarla karsilastirilip
   etiketiyle yazilabiliyordu.
 - **extendMemory hic cagrilmiyordu** ama belgeler artimli guncelleme vaat
   ediyordu; baglansa bar indeksleri kayardi.
+- **Gecmis sinyal, GELECEGIYLE birlikte cizilliyordu.** Sinyal aninda saglam
+  olan bir destek, haftalar sonra kirildigi icin kesikli ve solgun
+  gorunuyordu; ekrandaki mumlar da sinyalden sonrasini gosteriyordu.
+  Kullanici "zaten kirilacakmis" diye okuyup kendi degerlendirmesini gecmise
+  uyduruyordu. Olculemeyen ama karari dogrudan bozan bir ileriye bakma
+  bicimiydi.
+- **`Number(null)` SIFIR tuzagi dorduncu kez.** Bu kez kirilma ani tasimayan
+  kutular "1970'te kirilmis" sayiliyor ve her an icin kirik gorunuyordu.
+  Tuzak, onu yakalayan testle birlikte kodda adiyla yaziyor.
 
 ## Depoda yapilan tek seferlik islemler
 

@@ -77,6 +77,9 @@ const durum = {
   // isaretle gosterilir, boylece hangi ana gidildigi belli olur.
   vurguluOrnek: null,
   seciliBolgeId: null,
+  // U7: "o ana kadar" kipinde grafigin kilitlendigi an (UNIX saniye).
+  // null ise kisitlama yok, her sey son durumuyla cizilir.
+  asOf: null,
   hafizaOzeti: null,
   prototipler: [],
   testSonucu: null,
@@ -514,6 +517,93 @@ function bolgeleriCiz() {
   }
 }
 
+/* ------------------------------------------------------------------ */
+/* U7 - "O ana kadar goster" (gorsel ileriye bakma)                    */
+/* ------------------------------------------------------------------ */
+//
+// Gecmis bir sinyale tiklandiginda grafik, o sinyalden SONRAKI her seyi de
+// gosteriyordu: sonraki mumlar ve kutularin bugunku durumu. Sinyal aninda
+// saglam olan bir destek, iki hafta sonra kirildigi icin kesikli ciziliyordu.
+// Kullanici "zaten kirilacakmis" diye okuyup kendi degerlendirmesini gecmise
+// uyduruyordu. Bu kip, ekrani o anda gerceklen gorulebilecek bilgiyle
+// sinirlar. Kapatilinca sonuc gorunur, zaten inceleme icin o da gerekir.
+
+/** Kip acik mi (kutu isaretli). */
+function anaKadarAcikMi() {
+  const anahtar = el('asOfToggle')
+  return anahtar ? !!anahtar.checked : false
+}
+
+/**
+ * Verilen an icin kilit ANLAMLI mi.
+ *
+ * Gizlenecek bir gelecek yoksa kilit kurulmaz. Canli sinyal tam da son barda
+ * dogar: orada kilit kurmak yalnizca canli akisi durdururdu.
+ * @param {number} zaman
+ */
+function anaKadarGerekliMi(zaman) {
+  if (!(zaman > 0)) return false
+  const barlar = durum.bars
+  if (!Array.isArray(barlar) || barlar.length === 0) return false
+  return sayi(barlar[barlar.length - 1].time, 0) > zaman
+}
+
+/** Mumlari, varsa "o an" kisitiyla grafige basar. */
+function barlariGrafigeBas(barlar) {
+  const hepsi = Array.isArray(barlar) ? barlar : []
+  if (durum.asOf === null) {
+    grafik('setBars', hepsi)
+    return
+  }
+  const kirpik = []
+  for (let i = 0; i < hepsi.length; i++) {
+    if (hepsi[i] && sayi(hepsi[i].time, 0) <= durum.asOf) kirpik.push(hepsi[i])
+  }
+  // Hic bar kalmadiysa kisit anlamsizdir (yanlis zaman dilimi, bos pencere).
+  // Bos grafik gostermektense kisiti yok sayariz.
+  grafik('setBars', kirpik.length > 0 ? kirpik : hepsi)
+}
+
+/**
+ * "O an" degerini durumda, katmanda ve rozette ayarlar. Grafige DOKUNMAZ:
+ * mumlari zaten yeniden yukleyecek cagiranlar icin.
+ * @param {number|null} zaman UNIX saniye; null kisiti kaldirir
+ * @returns {number|null} yerlesen deger
+ */
+function anaKadarAyarla(zaman) {
+  const yeni = (zaman === null || !Number.isFinite(Number(zaman)) || Number(zaman) <= 0)
+    ? null
+    : Number(zaman)
+  durum.asOf = yeni
+  if (overlay && typeof overlay.setAsOf === 'function') {
+    try { overlay.setAsOf(yeni) } catch (err) { /* onemsiz */ }
+  }
+  anaKadarRozetiniTazele()
+  return yeni
+}
+
+/** "O an" degerini ayarlar ve grafigi de o anda yeniden cizer. */
+function anaKadarUygula(zaman) {
+  const onceki = durum.asOf
+  const yeni = anaKadarAyarla(zaman)
+  if (onceki === yeni) return
+  barlariGrafigeBas(durum.bars)
+  isaretleriCiz()
+}
+
+/** Grafik efsanesindeki "o an" rozetini yazar. */
+function anaKadarRozetiniTazele() {
+  const rozet = el('legendAsOf')
+  if (!rozet) return
+  if (durum.asOf === null) {
+    rozet.textContent = ''
+    goster(rozet, false)
+    return
+  }
+  rozet.textContent = 'o an: ' + formatDateTime(durum.asOf)
+  rozet.removeAttribute('hidden')
+}
+
 /** Sinyal isaretlerini grafige koyar. */
 function isaretleriCiz() {
   if (!view || typeof view.setMarkers !== 'function') return
@@ -524,7 +614,11 @@ function isaretleriCiz() {
   // ust uste yigilip yanlis bir gorunti verirdi.
   const barlar = durum.bars
   const ilk = Array.isArray(barlar) && barlar.length ? barlar[0].time : null
-  const son = Array.isArray(barlar) && barlar.length ? barlar[barlar.length - 1].time : null
+  let son = Array.isArray(barlar) && barlar.length ? barlar[barlar.length - 1].time : null
+  // "O ana kadar" kipinde grafikte o andan sonraki bar YOKTUR. Isaret
+  // sinirlanmazsa lightweight-charts sonraki sinyalleri son bara yaslar ve
+  // gizledigimiz gelecek, ok yigini olarak geri gelir.
+  if (durum.asOf !== null && son !== null && son > durum.asOf) son = durum.asOf
 
   const isaretler = []
   for (let i = 0; i < durum.signals.length; i++) {
@@ -796,7 +890,7 @@ async function gecmiseDogruGenislet(aralik) {
     try { lr = view.chart.timeScale().getVisibleLogicalRange() } catch (err) { lr = null }
 
     durum.bars = eski.concat(barlar)
-    grafik('setBars', durum.bars)
+    barlariGrafigeBas(durum.bars)
 
     if (lr && Number.isFinite(lr.from) && Number.isFinite(lr.to)) {
       try {
@@ -854,7 +948,7 @@ async function mumlariYukle() {
   durum.pencereliMumlar = false
   pencereDugmesiniTazele()
   goster(el('chartEmpty'), barlar.length === 0)
-  grafik('setBars', barlar)
+  barlariGrafigeBas(barlar)
   if (barlar.length > 0) {
     grafik('fitContent')
     efsaneyiYaz(null)
@@ -893,7 +987,7 @@ async function mumlariZamanEtrafindaYukle(hedefZaman) {
   durum.pencereliMumlar = true
   pencereDugmesiniTazele()
   goster(el('chartEmpty'), false)
-  grafik('setBars', barlar)
+  barlariGrafigeBas(barlar)
   return true
 }
 
@@ -1195,6 +1289,7 @@ async function tfDegistir(tf) {
   durum.tf = tf
   durum.seciliSinyalId = null
   durum.seciliBolgeId = null
+  anaKadarAyarla(null)
   durum.signals = []
   durum.zones = []
   // ONCEKI ZAMAN DILIMININ SAYILARI EKRANDA KALMASIN.
@@ -1423,6 +1518,9 @@ function csvDugmeleriniTazele() {
  */
 async function guncelMumlaraDon() {
   durum.pencereliMumlar = false
+  // Guncele donunce gecmise kilit de kalkar, aksi halde mumlar yine
+  // sinyal aninda dururdu.
+  anaKadarAyarla(null)
   await mumlariYukle()
   await bolgeleriYukle()
   isaretleriCiz()
@@ -1662,6 +1760,7 @@ function sinyalPaneliniCiz() {
       geriDugmesiEkle(n.ayrinti, 'Ayrıntıyı kapat', () => {
         durum.seciliSinyalId = null
         durum.vurguluOrnek = null
+        anaKadarUygula(null)
         planCizgileri(null)
         isaretleriCiz()
         sinyalPaneliniCiz()
@@ -1678,6 +1777,7 @@ function sinyalPaneliniCiz() {
     geriDugmesiEkle(n.liste, 'Sinyal listesine dön', () => {
       durum.seciliSinyalId = null
       durum.vurguluOrnek = null
+      anaKadarUygula(null)
       planCizgileri(null)
       isaretleriCiz()
       sinyalPaneliniCiz()
@@ -1701,14 +1801,21 @@ async function ornegeGit(m) {
 
   durum.vurguluOrnek = { time: zaman, success: !!m.success }
 
+  // Kip aciksa kilit ORNEGIN anina tasinir. Sinyalin anini birakmak,
+  // ornegin sonucunu da gostermek demekti ve rozet yanlis tarihi yazardi.
+  const onceki = durum.asOf
+  const anaKadar = anaKadarAyarla(anaKadarAcikMi() && anaKadarGerekliMi(zaman) ? zaman : null)
+
+  let yenidenYuklendi = false
   if (zamanPencereDisinda(zaman)) {
-    const yuklendi = await mumlariZamanEtrafindaYukle(zaman)
-    if (yuklendi) {
+    yenidenYuklendi = await mumlariZamanEtrafindaYukle(zaman)
+    if (yenidenYuklendi) {
       const barlar = durum.bars
       const to = barlar.length ? barlar[barlar.length - 1].time + tfSaniye(durum.tf) * 200 : undefined
       await bolgeleriYukle(barlar.length ? barlar[0].time : undefined, to)
     }
   }
+  if (!yenidenYuklendi && onceki !== anaKadar) barlariGrafigeBas(durum.bars)
 
   isaretleriCiz()
   if (view && typeof view.scrollToTime === 'function') {
@@ -1747,16 +1854,26 @@ async function sinyalSec(s) {
   durum.vurguluOrnek = null
   const zaman = sayi(s.time, 0)
 
+  // "O ana kadar" kisiti mumlar yuklenmeden ONCE kurulur: aksi halde pencere
+  // once tam cizilir, hemen ardindan kirpilir ve ekran titrer.
+  const onceki = durum.asOf
+  const anaKadar = anaKadarAyarla(anaKadarAcikMi() && anaKadarGerekliMi(zaman) ? zaman : null)
+
   // Sinyal yuklu mum penceresinin disindaysa once o tarihin etrafini yukle,
   // aksi halde grafik bos bir alana kayar.
+  let yenidenYuklendi = false
   if (zamanPencereDisinda(zaman)) {
-    const yuklendi = await mumlariZamanEtrafindaYukle(zaman)
-    if (yuklendi) {
+    yenidenYuklendi = await mumlariZamanEtrafindaYukle(zaman)
+    if (yenidenYuklendi) {
       const barlar = durum.bars
       const to = barlar.length ? barlar[barlar.length - 1].time + tfSaniye(durum.tf) * 200 : undefined
       await bolgeleriYukle(barlar.length ? barlar[0].time : undefined, to)
       isaretleriCiz()
     }
+  }
+  if (!yenidenYuklendi && onceki !== anaKadar) {
+    barlariGrafigeBas(durum.bars)
+    isaretleriCiz()
   }
 
   planCizgileri(s)
@@ -1779,10 +1896,16 @@ function bolgePaneliniCiz() {
   const liste = el('zoneList') || panelGovdesi('zones')
   if (!liste) return
   const suzgec = el('zoneFilter')
+  // "Aktif" suzgecinin omru dolan kutulari ayirabilmesi icin son bar gerekir.
+  const son = durum.asOf !== null
+    ? durum.asOf
+    : (durum.bars.length ? sayi(durum.bars[durum.bars.length - 1].time, 0) : 0)
+
   renderZones(liste, durum.zones, {
     onSelect: (z) => bolgeSec(z),
     selectedId: durum.seciliBolgeId,
     filter: suzgec && suzgec.value ? suzgec.value : 'all',
+    now: son > 0 ? son : null,
   })
   goster(el('zoneEmpty'), false)
 
@@ -1790,8 +1913,14 @@ function bolgePaneliniCiz() {
   if (rozet) {
     rozet.textContent = String(durum.zones.length)
     let kirik = 0
-    for (let i = 0; i < durum.zones.length; i++) if (durum.zones[i] && durum.zones[i].broken) kirik++
-    rozet.title = durum.zones.length + ' bölge, ' + kirik + ' kırılmış'
+    let bitti = 0
+    for (let i = 0; i < durum.zones.length; i++) {
+      const z = durum.zones[i]
+      if (!z) continue
+      if (z.broken) kirik++
+      else if (son > 0 && sayi(z.endTime, 0) < son) bitti++
+    }
+    rozet.title = durum.zones.length + ' bölge, ' + kirik + ' kırılmış, ' + bitti + ' süresi dolmuş'
   }
   if (durum.seciliBolgeId === null) goster(el('zoneDetail'), false)
 }
@@ -1844,15 +1973,19 @@ function bolgeAyrintisiniCiz(z, dokunuslar) {
 
   const baslik = document.createElement('h4')
   baslik.className = 'sec-title'
+  // "Aktif" yalnizca kirilmamis DEGIL, omru de dolmamis kutu demektir.
+  const sonBar = durum.bars.length ? sayi(durum.bars[durum.bars.length - 1].time, 0) : 0
+  const omruBitti = !z.broken && sonBar > 0 && sayi(z.endTime, 0) < sonBar
   baslik.textContent = (z.isSupport ? 'Destek bölgesi' : 'Direnç bölgesi') +
-    ' #' + formatNumber(z.id, 0) + (z.broken ? ' (kırıldı)' : ' (aktif)')
+    ' #' + formatNumber(z.id, 0) +
+    (z.broken ? ' (kırıldı)' : (omruBitti ? ' (süresi doldu)' : ' (aktif)'))
   kap.appendChild(baslik)
 
   const ciftler = [
     ['Aralık', formatPrice(z.bottom) + ' - ' + formatPrice(z.top)],
     ['Oluşum', formatDateTime(z.createdTime)],
     ['Pivot', formatDateTime(z.pivotTime)],
-    ['Bitiş', formatDateTime(z.endTime)],
+    [z.broken ? 'Kırılma' : 'Bitiş', formatDateTime(z.endTime)],
     ['Akış gücü', formatNumber(z.flow, 2) + ' / 10'],
     ['Doğuştaki akış', formatNumber(z.flowAtBirth, 2) + ' / 10'],
     ['Bant dışına taşma', formatNumber(z.bbDistAtr, 2) + ' ATR'],
@@ -2138,7 +2271,9 @@ function olaylariBagla() {
     // Onceden 2015 penceresinin yanina 2026 mumu ekleniyordu: fiyat olcegi
     // yaklasik 1.200'den 4.400'e sicriyor ve guncele donmenin tek yolu zaman
     // dilimi degistirmek oluyordu. Canli fiyat yine ust seritte gorunur.
-    if (durum.pencereliMumlar) {
+    // Ayni sebeple "o ana kadar" kipinde de eklenmez: gecmis bir ana kilitli
+    // grafige bugunun mumunu koymak kipin butun anlamini bozar.
+    if (durum.pencereliMumlar || durum.asOf !== null) {
       sonFiyatiYaz(bar)
       return
     }
@@ -2382,6 +2517,25 @@ function dugmeleriBagla() {
   const bolgeSuzgec = el('zoneFilter')
   if (bolgeSuzgec) bolgeSuzgec.addEventListener('change', () => bolgePaneliniCiz())
 
+  // U7: kip acilip kapandiginda secili sinyal icin hemen uygulanir.
+  const anaKadarKutu = el('asOfToggle')
+  if (anaKadarKutu) {
+    anaKadarKutu.addEventListener('change', () => {
+      const secili = durum.signals.find((x) => x && String(x.id) === String(durum.seciliSinyalId))
+      const ornek = durum.vurguluOrnek
+      const hedef = ornek ? sayi(ornek.time, 0) : (secili ? sayi(secili.time, 0) : 0)
+
+      anaKadarUygula(anaKadarKutu.checked && anaKadarGerekliMi(hedef) ? hedef : null)
+
+      // Kip kapatilinca grafik, yuklu pencerenin SAG UCUNA atliyordu: kullanici
+      // "sonrasini gorecegim" diye kutuyu kaldirinca sinyali ekrandan
+      // kaybediyordu. Gorunum sinyalin etrafinda kalir.
+      if (hedef > 0 && view && typeof view.scrollToTime === 'function') {
+        try { view.scrollToTime(hedef, { minSpan: 80, maxSpan: 900 }) } catch (err) { /* onemsiz */ }
+      }
+    })
+  }
+
   const bolgeGoster = el('zoneShowToggle')
   if (bolgeGoster) bolgeGoster.addEventListener('change', () => bolgeleriCiz())
 
@@ -2406,6 +2560,7 @@ function dugmeleriBagla() {
       durum.seciliBolgeId = null
       durum.seciliSinyalId = null
       durum.testSonucu = null
+      anaKadarAyarla(null)
       isaretleriCiz()
       bolgeleriCiz()
       planCizgileri(null)

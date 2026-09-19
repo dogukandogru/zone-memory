@@ -356,6 +356,10 @@ test('kirilma: kapanis taban - atr * breakAtrMult altina inince kutu kirilir', (
   assert.equal(r.zones[0].broken, true)
   assert.equal(r.zones[0].brokenBar, 270, 'Pine tek barda kirar, onay bari yoktur')
   assert.equal(r.zones[0].endBar, 270, 'kirilan kutu orada biter')
+  // U7: arayuz gecmis bir sinyali o anki durumuyla cizebilsin diye kirilma
+  // ANI da tasinir. Yalnizca bar indisi tasindiginda, farkli bir pencere
+  // yuklendiginde indis hicbir zamana karsilik gelmiyordu.
+  assert.equal(r.zones[0].brokenTime, T0 + 270 * ADIM)
   assert.equal(r.stats.zonesBroken, 1)
 })
 
@@ -365,6 +369,7 @@ test('kirilma: kapanis kutunun ustunde kaldigi surece kutu kirilmaz', () => {
   const r = runIndicator(series.fromArrays(d), {}, ADIM)
   assert.equal(r.zones[0].broken, false)
   assert.equal(r.zones[0].brokenBar, -1)
+  assert.equal(r.zones[0].brokenTime, null, 'kirilmamis kutuda kirilma ani yoktur')
 })
 
 test('kirilan kutu artik temas olayi uretmez', () => {

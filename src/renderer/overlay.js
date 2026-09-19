@@ -32,7 +32,10 @@
  *
  * CONTRACTS.md 19. bolum, createZoneOverlay disa acilan API korunmustur:
  *   setZones(zones), setHighlight(zoneId|null), redraw(), destroy(), onZoneClick(cb)
+ * U7 ile eklendi: setAsOf(zaman|null), getAsOf()
  */
+
+import { zoneBrokenAt, zoneSpanAt } from './zoneAsOf.mjs';
 
 const SUPPORT_RGB = '38, 166, 154';   // #26a69a
 const RESIST_RGB = '239, 83, 80';     // #ef5350
@@ -50,18 +53,11 @@ function isNum(v) {
   return typeof v === 'number' && Number.isFinite(v);
 }
 
-/** Bolgenin sag kenari icin gecerli zaman: kirildiysa kirilma ani, degilse bitis. */
-function zoneRightTime(zone) {
-  if (zone.broken && isNum(zone.brokenTime)) return zone.brokenTime;
-  if (isNum(zone.endTime)) return zone.endTime;
-  return isNum(zone.createdTime) ? zone.createdTime : NaN;
-}
-
 /**
  * Bolge katmani olusturur.
  * @param {object} chartView createChartView ciktisi
  * @param {HTMLElement} container Grafigin durdugu kap (yalnizca imza uyumu icin)
- * @returns {{setZones:Function,setHighlight:Function,redraw:Function,destroy:Function,onZoneClick:Function}}
+ * @returns {{setZones:Function,setHighlight:Function,setAsOf:Function,getAsOf:Function,redraw:Function,destroy:Function,onZoneClick:Function}}
  */
 export function createZoneOverlay(chartView, container) {
   if (!chartView) throw new Error('createZoneOverlay: chartView gerekli');
@@ -70,6 +66,8 @@ export function createZoneOverlay(chartView, container) {
   let zones = [];
   /** @type {number|null} */
   let highlightId = null;
+  /** Bolgelerin hangi ana gore cizilecegi (U7). null: son durum. */
+  let asOf = null;
   /** @type {Array<Function>} */
   const clickHandlers = [];
   /** Son cizimde olusan dikdortgenler, tiklama testi icin (pane koordinati). */
@@ -131,10 +129,12 @@ export function createZoneOverlay(chartView, container) {
       const z = zones[i];
       if (!z) continue;
 
-      const startT = +z.createdTime;
-      let endT = zoneRightTime(z);
-      if (!isNum(startT) || !isNum(endT)) continue;
-      if (endT < startT) endT = startT;
+      // O ana kadar goster: henuz dogmamis kutu cizilmez, sag kenar o anda
+      // durur ve kirilma o andan sonraysa kutu SAGLAM gorunur.
+      const aralik = zoneSpanAt(z, asOf);
+      if (!aralik) continue;
+      const startT = aralik.start;
+      const endT = aralik.end;
 
       // Gorunur (ve veri bulunan) araligin disindaki bolgeler hic cizilmez.
       if (endT < vFrom || startT > vTo) continue;
@@ -170,7 +170,7 @@ export function createZoneOverlay(chartView, container) {
         zone: z,
         id: z.id,
         isSupport: !!z.isSupport,
-        broken: !!z.broken,
+        broken: zoneBrokenAt(z, asOf),
         flow: isNum(+z.flow) ? +z.flow : NaN,
         strong: highlightId != null && z.id === highlightId,
         x1, x2, y1, y2,
@@ -325,6 +325,22 @@ export function createZoneOverlay(chartView, container) {
     redraw();
   }
 
+  /**
+   * Bolgeleri verilen ANA GORE cizer (U7).
+   * @param {number|null} zaman UNIX saniye; null ise kisitlama kalkar
+   */
+  function setAsOf(zaman) {
+    const yeni = (zaman === null || zaman === undefined || !isNum(+zaman)) ? null : +zaman;
+    if (yeni === asOf) return;
+    asOf = yeni;
+    redraw();
+  }
+
+  /** Su an gecerli "o an" degeri (test ve arayuz rozeti icin). */
+  function getAsOf() {
+    return asOf;
+  }
+
   /** @param {number|null} zoneId */
   function setHighlight(zoneId) {
     highlightId = zoneId == null ? null : zoneId;
@@ -359,5 +375,5 @@ export function createZoneOverlay(chartView, container) {
   // imza uyumlulugu ve ileride gerekebilecek DOM islemleri icin duruyor.
   void container;
 
-  return { setZones, setHighlight, redraw, destroy, onZoneClick, canvas: null };
+  return { setZones, setHighlight, setAsOf, getAsOf, redraw, destroy, onZoneClick, canvas: null };
 }

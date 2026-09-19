@@ -1008,7 +1008,7 @@ export function renderSignalDetail(el, signal, opts) {
  * Bolge listesini cizer.
  * @param {HTMLElement} el Liste kabi (ornek: #zoneList)
  * @param {Array<object>} zones
- * @param {{onSelect?:(z:object)=>void, selectedId?:*, filter?:string}} [opts]
+ * @param {{onSelect?:(z:object)=>void, selectedId?:*, filter?:string, now?:number}} [opts]
  */
 export function renderZones(el, zones, opts) {
   if (!el) return
@@ -1018,10 +1018,25 @@ export function renderZones(el, zones, opts) {
   const hepsi = Array.isArray(zones) ? zones.slice() : []
   hepsi.sort((a, b) => sayi(b && b.createdTime, 0) - sayi(a && a.createdTime, 0))
 
+  // U7: "Aktif" gercekten aktif olani gostersin.
+  //
+  // Onceden yalnizca `!broken` bakiliyordu, ama bir kutu kirilmadan da olur:
+  // Pine kutusu belirli bir bar sayisi yasar ve suresi dolunca artik
+  // fiyatla ilgisi kalmaz. Bunlar "Aktif" listesinde duruyordu ve kullanici
+  // aylar once sonlanmis bir destegi bugun gecerliymis gibi okuyordu.
+  const simdi = (o.now === null || o.now === undefined || !Number.isFinite(Number(o.now)))
+    ? null
+    : Number(o.now)
+  /** Kutunun omru, gorulen son bardan once dolduysa true. */
+  const suresiDoldu = (z) => (
+    !z.broken && simdi !== null &&
+    Number.isFinite(Number(z.endTime)) && Number(z.endTime) < simdi
+  )
+
   const suzgec = o.filter || 'all'
   const liste = hepsi.filter((z) => {
     if (!z) return false
-    if (suzgec === 'active') return !z.broken
+    if (suzgec === 'active') return !z.broken && !suresiDoldu(z)
     if (suzgec === 'broken') return !!z.broken
     if (suzgec === 'support') return !!z.isSupport
     if (suzgec === 'resistance') return !z.isSupport
@@ -1039,7 +1054,8 @@ export function renderZones(el, zones, opts) {
   for (let i = 0; i < adet; i++) {
     const z = liste[i]
     const destek = !!z.isSupport
-    const satir = h('div', 'row ' + (destek ? 'buy' : 'sell') + (z.broken ? ' dim' : '') +
+    const bitti = suresiDoldu(z)
+    const satir = h('div', 'row ' + (destek ? 'buy' : 'sell') + (z.broken || bitti ? ' dim' : '') +
       (o.selectedId !== undefined && o.selectedId !== null && String(z.id) === String(o.selectedId) ? ' selected' : ''))
 
     satir.appendChild(h('span', 'tag ' + (destek ? 'buy' : 'sell'), destek ? 'DESTEK' : 'DİRENÇ'))
@@ -1051,7 +1067,9 @@ export function renderZones(el, zones, opts) {
     satir.appendChild(orta)
 
     const sag = h('span', 'row-side')
-    sag.appendChild(h('span', z.broken ? 'muted' : (destek ? 'up' : 'down'), z.broken ? 'Kırıldı' : 'Aktif'))
+    const durumSinifi = (z.broken || bitti) ? 'muted' : (destek ? 'up' : 'down')
+    const durumMetni = z.broken ? 'Kırıldı' : (bitti ? 'Süresi doldu' : 'Aktif')
+    sag.appendChild(h('span', durumSinifi, durumMetni))
     sag.appendChild(h('span', 'row-sub', tam(z.touchCount) + ' dokunuş'))
     satir.appendChild(sag)
 

@@ -25,7 +25,8 @@ const IS_DEV = process.argv.includes('--dev')
  * `--shot-panel <ad>` ile once bir panel sekmesi acilir (signals, zones,
  * memory, settings, test), `--shot-wait <sn>` bekleme suresini uzatir,
  * `--shot-scroll son` (ya da piksel sayisi) panel govdesini kaydirir,
- * `--shot-click <secici>` once bir ogeye tiklar.
+ * `--shot-click <secici>` once bir ogeye tiklar,
+ * `--shot-script <dosya>` arayuzde bir JS dosyasi calistirip sonucunu bekler.
  */
 function argDegeri(ad) {
   const i = process.argv.indexOf(ad)
@@ -38,6 +39,12 @@ const SHOT_WAIT = Number(argDegeri('--shot-wait')) || 12
 const SHOT_SCROLL = argDegeri('--shot-scroll')
 /** `--shot-click <secici>` ekran goruntusunden once bir ogeye tiklar. */
 const SHOT_CLICK = argDegeri('--shot-click')
+/**
+ * `--shot-script <dosya>` arayuzde bir JS dosyasi calistirir ve sonucunu
+ * bekler. Tek tiklama yetmeyen akislar (once testi calistir, bitmesini
+ * bekle, sonra bir sinyal sec) baska turlu dogrulanamiyordu.
+ */
+const SHOT_SCRIPT = argDegeri('--shot-script')
 
 /** @type {BrowserWindow|null} */
 let mainWindow = null
@@ -149,6 +156,16 @@ function createWindow() {
               'if(e)e.click();return !!e})()'
             )
             await new Promise((r) => setTimeout(r, 1200))
+          }
+
+          if (SHOT_SCRIPT && mainWindow) {
+            const kod = require('fs').readFileSync(SHOT_SCRIPT, 'utf8')
+            const sonuc = await mainWindow.webContents.executeJavaScript(
+              '(async function(){' + kod + '})()', true
+            )
+            if (sonuc !== undefined) {
+              process.stdout.write('shot-script: ' + JSON.stringify(sonuc) + '\n')
+            }
           }
 
           // Panel govdesini kaydirmak: uzun panellerde ekranin altinda kalan

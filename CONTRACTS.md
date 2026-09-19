@@ -187,6 +187,7 @@ src/renderer/styles.css           A10
 src/renderer/app.js               A10
 src/renderer/chart.js             A10
 src/renderer/overlay.js           A10
+src/renderer/zoneAsOf.mjs         A10
 src/renderer/panels.js            A10
 src/renderer/tradingview.html     A10
 scripts/import-legacy.mjs         A11
@@ -1431,12 +1432,23 @@ Duzen:
   `https://s.tradingview.com/widgetembed/?symbol=OANDA%3AXAUUSD&interval=15&theme=dark`).
   Bu sekmede kendi cizimlerimiz GORUNMEZ, kullaniciya bu not gosterilir.
 
-`overlay.js` gorevi: grafigin uzerine mutlak konumlu bir `<canvas>` koyar,
-`series.priceToCoordinate()` ve `chart.timeScale().timeToCoordinate()` ile
-bolgeleri dikdortgen olarak cizer. Yalnizca gorunur araliktaki bolgeler cizilir.
-`subscribeVisibleLogicalRangeChange` ve `ResizeObserver` ile yeniden cizim yapar.
-Destek yesil, direnc kirmizi, kirilan bolge soluk ve kesik cerceveli.
-Bolgeye tiklaninca o bolgenin olay gecmisi sag panelde acilir.
+`overlay.js` gorevi: bolgeleri dikdortgen olarak cizer. Cizim, grafigin KENDI
+gecisinde `series.attachPrimitive()` eklentisi olarak yapilir (ayri bir canvas
+DEGIL; gerekcesi dosyanin basinda yazili). Yalnizca gorunur ve veri bulunan
+araliktaki bolgeler cizilir. Destek yesil, direnc kirmizi, kirilan bolge soluk
+ve kesik cerceveli. Bolgeye tiklaninca o bolgenin olay gecmisi sag panelde acilir.
+Disa acilan API: `setZones`, `setHighlight`, `setAsOf`, `getAsOf`, `redraw`,
+`destroy`, `onZoneClick`.
+
+GORSEL ILERIYE BAKMA (U7). Gecmis bir sinyal incelenirken ekran, o sinyalden
+SONRASINI gostermez: `overlay.setAsOf(zaman)` kurulunca o andan sonra dogan
+kutu hic cizilmez, sag kenar o anda durur ve kirilmasi o andan sonra olan kutu
+SAGLAM gorunur. Ayni anda grafige o andan sonraki mum da basilmaz ve o andan
+sonraki sinyal isareti konmaz. Kural saf olarak `src/renderer/zoneAsOf.mjs`
+icinde (`zoneSpanAt`, `zoneBrokenAt`), testi `test/zoneAsOf.test.js`. Kip
+`#asOfToggle` ile kapatilir, aciksa grafik efsanesinde `#legendAsOf` rozeti
+kilitli ani yazar. Bolge listesinde "Aktif" yalnizca kirilmamis VE omru
+dolmamis kutu demektir; omru dolan kutu "Süresi doldu" yazar.
 
 Sinyal isaretleri: `series.setMarkers` ile BUY icin altta yukari ok (`arrowUp`),
 SELL icin ustte asagi ok. Etikette olay turu oneki ve basari orani yazar:

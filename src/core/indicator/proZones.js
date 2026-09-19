@@ -520,6 +520,10 @@ function runIndicator (s, params, tfSec, onProgress) {
       bbDistAtr: z.bbDistAtr,
       broken: z.broken,
       brokenBar: z.broken ? z.brokenBar : -1,
+      // U7: kirilma ANI. Arayuz gecmis bir sinyali incelerken bolgeyi o anki
+      // durumuyla cizebilsin diye gerekli: kutu daha sonra kirildiysa, sinyal
+      // aninda kirik gostermek ileriye bakmaktir.
+      brokenTime: z.broken ? barTime(z.brokenBar) : null,
       touchCount: z.touchCount,
     })
   }

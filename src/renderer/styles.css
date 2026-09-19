@@ -481,6 +481,8 @@ canvas.zone-overlay {
 .tag.buy { color: var(--up); border-color: #1f4d49; background: #16302e; }
 .tag.sell { color: var(--down); border-color: #55323a; background: #2a1d22; }
 .tag.off { color: var(--text-dim); }
+/* "O ana kadar" rozeti: grafigin gecmise kilitli oldugunu belli eder. */
+.tag.asof { color: var(--warn); border-color: #5a4520; background: #33280f; }
 
 /* -------------------------- Istatistik kutulari --------------------- */
 .stat-grid {
