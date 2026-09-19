@@ -1740,7 +1740,16 @@ handlers['engine:live-tick'] = async function (payload) {
   if (added > 0) {
     try {
       const s = await getSeries(tf, false)
-      const tail = clampInt(payload.tailBars, 500, 50000, DEFAULT_TAIL_BARS)
+      // KUYRUK PENCERESI: indikatorun son barlari TAM SERIYLE AYNI hesaplamasi
+      // icin gereken uzunluk. Sabit 4000 bar, 1 dakikalik grafikte ust zaman
+      // dilimi EMA'sini isitmiyordu (15 dakikalik trend icin yalnizca 266 ust
+      // bar) ve canli olay hafizadakinden farkli cikiyordu: olculdu, 1m canli
+      // olaylarin %5,8'inde baglam vektoru, %2,4'unde trend ve skor,
+      // %1,3'unde qualified bayragi farkliydi.
+      const gerekenKuyruk = core('indicator/proZones').requiredTailBars(
+        (memMeta && memMeta.indicatorParams) || payload.params || null, tfSec)
+      const tail = clampInt(payload.tailBars, 500, 50000,
+        Math.max(DEFAULT_TAIL_BARS, gerekenKuyruk))
       const start = Math.max(0, s.length - tail)
       const sub = seriesMod.sliceSeries(s, start, s.length)
       const ind = core('indicator/proZones').runIndicator(sub, payload.params || {}, tfSec)

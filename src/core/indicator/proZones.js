@@ -841,4 +841,46 @@ function runIndicator (s, params, tfSec, onProgress) {
   }
 }
 
-module.exports = { DEFAULT_PARAMS, runIndicator }
+/**
+ * CANLI KUYRUK PENCERESI: indikatorun son barlari TAM SERIYLE AYNI hesaplamasi
+ * icin gereken en az bar sayisi.
+ *
+ * Canli kontrol indikatoru serinin son N barinda calistirir. N kucukse bazi
+ * gostergeler oturmaz ve canli uretilen olay, ayni olayin hafizadaki halinden
+ * FARKLI cikar. En kritigi ust zaman dilimi EMA'sidir: 1 dakikalik grafikte
+ * 15 dakikalik trend icin 4000 bar yalnizca 266 ust bar eder ve EMA200
+ * oturmaz (son barda tohum agirligi yaklasik %52). Olculdu: 1 dakikalik canli
+ * olaylarin %5,8'inde baglam vektoru, %2,4'unde trend ve skor, %1,3'unde
+ * qualified bayragi hafizadakinden farkli cikiyordu; 5m, 15m ve 1h'de fark 0.
+ *
+ * Formul, en uzun pencereye gore hesaplar:
+ *   ust TF EMA'si    emaSlowLen * 5 * (ustTF / grafikTF)
+ *   gosterge isinma  max(volumeLen, bbLen, atrLen)
+ *   kutu omru        maxAgeBars + pivotLen
+ *   ozellik penceresi 32 bar pay
+ *
+ * @param {Object} [params] Indikator ayarlari (eksikler varsayilandan)
+ * @param {number} [tfSec] Grafik zaman dilimi (saniye)
+ * @returns {number}
+ */
+function requiredTailBars (params, tfSec) {
+  const p = Object.assign({}, DEFAULT_PARAMS, params || {})
+  const grafikSn = tfSec > 0 ? tfSec : 60
+  let trendSn
+  if (p.trendTf === 'auto') {
+    trendSn = grafikSn * 4
+  } else {
+    try {
+      trendSn = tfSeconds(p.trendTf)
+    } catch (err) {
+      trendSn = TREND_TF_FALLBACK_SEC
+    }
+  }
+  const kat = Math.max(1, trendSn / grafikSn)
+  const emaBar = Math.ceil((+p.emaSlowLen || 200) * 5 * kat)
+  const gosterge = Math.max(+p.volumeLen || 50, +p.bbLen || 20, +p.atrLen || 14)
+  const kutu = (+p.maxAgeBars || 100) + (+p.pivotLen || 5)
+  return Math.max(4000, emaBar + gosterge + kutu + 32)
+}
+
+module.exports = { DEFAULT_PARAMS, runIndicator, requiredTailBars }

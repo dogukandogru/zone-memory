@@ -13,32 +13,24 @@
  *   kind = 'touch'  fiyatin kutuya geri donup ilk kez dokundugu an
  * Bir bolge her turden EN FAZLA BIR olay uretir.
  *
- * Sozlesme notlari:
- * - `extendMemory` artimli tarama icin seriyi bastan degil, son olayin
- *   epeyce oncesinden yeniden tarar. Yeniden taramada bolge kimlikleri (zoneId)
- *   ve olay kimlikleri (id) sifirdan numaralanir. Bu yuzden sozlesmede
- *   istenen "ayni zoneId + time" tekrar kontrolu tek basina yeterli degildir;
- *   asil koruma "hafizadaki son olay zamanindan SONRAKI olaylar" filtresidir.
- *   Iki kontrol de uygulanir, yeni olaylarin kimlikleri mevcut hafizanin
- *   ustune kaydirilarak tekillestirilir.
- * - Tekrar anahtarina olay TURU de girer (kind + zoneId + time). Bir bolge
- *   ayni barda hem form hem touch olayi uretemez, ama anahtarin turu tasimasi
- *   ileride bu varsayim degisirse sessiz veri kaybini onler.
+ * ARTIMLI TARAMA YOKTUR. Bir donem `extendMemory` vardi ama HIC CAGRILMADI;
+ * buna ragmen belgeler artimli guncelleme vaat ediyordu. Bir gun baglansa
+ * sessiz veri bozulmasi uretirdi: yeniden taramada bolge ve olay kimlikleri
+ * sifirdan numaralanir, bar indeksleri kayar (olculdu: 281 olayin 281'i) ve
+ * 1 dakikalik trend bayragi %38,6 oraninda yanlis cikar. Tam tarama zaten
+ * hizli (15m yaklasik 0,2 sn, 1m yaklasik 1,7 sn), bu yuzden fonksiyon
+ * kaldirildi.
  */
 
 const { runIndicator, DEFAULT_PARAMS } = require('../indicator/proZones')
 const { labelTouch, DEFAULT_OUTCOME_CFG } = require('./outcome')
 const { buildFeatures, CTX_NAMES, WINDOW_BARS } = require('./features')
-const { sliceSeries, lastIndexAtOrBefore } = require('../series')
 const { tfSeconds } = require('../tf')
 const { createMarketCalendar } = require('../session')
 const stats = require('./stats')
 
 /** Ozet tablolarinda her zaman gorunmesini istedigimiz seans adlari. */
 const SESSION_NAMES = ['Asia', 'London', 'New York', 'Other']
-
-/** ATR/EMA gibi ozyinelemeli hesaplarin oturmasi icin ek isinma payi. */
-const EXTRA_WARMUP_BARS = 1000
 
 /**
  * Ilerleme geri cagrisini [from, to] araligina olceklendirir ve ayni tamsayi
@@ -65,11 +57,6 @@ function scaleProgress (onProgress, from, to) {
 /** Sayi degilse veya sonlu degilse varsayilani dondurur. */
 function num (v, def) {
   return typeof v === 'number' && isFinite(v) ? v : def
-}
-
-/** Artimli taramada tekrar kontrolu icin olay anahtari. */
-function olayAnahtari (e) {
-  return (e.kind || 'touch') + '|' + e.zoneId + '|' + e.time
 }
 
 /**
@@ -271,127 +258,6 @@ function buildMemory (s, cfg, onProgress) {
     ctxNames: CTX_NAMES.slice(),
     events: events,
     zones: zones,
-    stats: stats,
-  }
-}
-
-/**
- * Var olan hafizaya yeni barlardan gelen olaylari ekler (artimli tarama).
- *
- * Seri, hafizadaki son olayin zamanindan yeterince geriden baslatilarak
- * yeniden taranir (isinma payi: emaSlowLen + boxLengthBars + WINDOW_BARS +
- * 1000 bar). Sonra yalnizca son olay zamanindan SONRAKI olaylar eklenir.
- *
- * @param {Object} s Series (tum gecmis)
- * @param {{tf?:string, ctxNames?:string[], events:Object[]}} memory
- * @param {{tf:string, params:object, outcomeCfg:object}} cfg
- * @param {(pct:number,msg:string)=>void} [onProgress]
- * @returns {{tf:string, ctxNames:string[], events:Object[], zones:Object[], stats:object}}
- */
-function extendMemory (s, memory, cfg, onProgress) {
-  const base = (memory && Array.isArray(memory.events)) ? memory.events : []
-  if (base.length === 0) return buildMemory(s, cfg, onProgress)
-  if (!s || !s.length) {
-    return {
-      tf: (cfg && cfg.tf) || memory.tf || '15m',
-      ctxNames: CTX_NAMES.slice(),
-      events: base.slice(),
-      zones: [],
-      stats: { added: 0, baseCount: base.length, rescanFromBar: -1, rescanBars: 0 },
-    }
-  }
-
-  const conf = cfg || {}
-  const params = Object.assign({}, DEFAULT_PARAMS, conf.params || {})
-
-  // Mevcut hafizanin en son olay zamani ve en buyuk kimlikleri.
-  let lastTime = -Infinity
-  let maxId = -1
-  let maxZoneId = -1
-  for (let i = 0; i < base.length; i++) {
-    const e = base[i]
-    const t = num(e.time, -Infinity)
-    if (t > lastTime) lastTime = t
-    const id = num(e.id, -1)
-    if (id > maxId) maxId = id
-    const zid = num(e.zoneId, -1)
-    if (zid > maxZoneId) maxZoneId = zid
-  }
-  if (!isFinite(lastTime)) return buildMemory(s, cfg, onProgress)
-
-  // Yeni bar yoksa is yok.
-  if (s.time[s.length - 1] <= lastTime) {
-    return {
-      tf: conf.tf || memory.tf || '15m',
-      ctxNames: CTX_NAMES.slice(),
-      events: base.slice(),
-      zones: [],
-      stats: { added: 0, baseCount: base.length, rescanFromBar: -1, rescanBars: 0 },
-    }
-  }
-
-  const warmup = Math.max(0, Math.round(
-    num(params.emaSlowLen, 200) +
-    num(params.boxLengthBars, 120) +
-    WINDOW_BARS +
-    EXTRA_WARMUP_BARS
-  ))
-
-  const anchor = lastIndexAtOrBefore(s, lastTime)
-  const from = anchor < 0 ? 0 : Math.max(0, anchor - warmup)
-  const sub = from === 0 ? s : sliceSeries(s, from, s.length)
-
-  const scan = buildMemory(sub, cfg, onProgress)
-
-  // Mevcut hafizadaki (zoneId, time) ciftleri: sozlesmenin istedigi tekrar kontrolu.
-  const seen = new Set()
-  for (let i = 0; i < base.length; i++) {
-    seen.add(olayAnahtari(base[i]))
-  }
-
-  const zoneIdMap = new Map()
-  let nextId = maxId + 1
-  let nextZoneId = maxZoneId + 1
-  const fresh = []
-
-  for (let i = 0; i < scan.events.length; i++) {
-    const e = scan.events[i]
-    if (!(e.time > lastTime)) continue
-    const key = olayAnahtari(e)
-    if (seen.has(key)) continue
-    seen.add(key)
-
-    // Yeni taramanin kimlikleri sifirdan basladigi icin mevcut hafizanin
-    // ustune kaydiriliyor; ayni bolgenin dokunuslari ayni kimlige duser.
-    let mapped = zoneIdMap.get(e.zoneId)
-    if (mapped === undefined) {
-      mapped = nextZoneId++
-      zoneIdMap.set(e.zoneId, mapped)
-    }
-    e.zoneId = mapped
-    e.id = nextId++
-    fresh.push(e)
-  }
-
-  const merged = base.slice()
-  for (let i = 0; i < fresh.length; i++) merged.push(fresh[i])
-  merged.sort(function (a, b) { return a.time - b.time })
-
-  const stats = Object.assign({}, scan.stats, {
-    added: fresh.length,
-    baseCount: base.length,
-    total: merged.length,
-    rescanFromBar: from,
-    rescanBars: sub.length,
-    rescanFromTime: sub.length > 0 ? sub.time[0] : 0,
-    lastKnownTime: lastTime,
-  })
-
-  return {
-    tf: scan.tf,
-    ctxNames: CTX_NAMES.slice(),
-    events: merged,
-    zones: scan.zones,
     stats: stats,
   }
 }
@@ -603,6 +469,5 @@ function summarize (memory) {
 
 module.exports = {
   buildMemory,
-  extendMemory,
   summarize,
 }

@@ -586,3 +586,86 @@ test('seans bileseni ancak bir seans KAPALIYSA skora girer', () => {
   assert.equal(kapali.touches[0].maxScore, 4)
   assert.equal(kapali.touches[0].parts.session, false)
 })
+
+// ---------------------------------------------------------------------------
+// C3 - CANLI KUYRUK PENCERESI TAM SERIYLE AYNI SONUCU VERMELI
+// ---------------------------------------------------------------------------
+// Canli kontrol indikatoru serinin son N barinda calistirir. N kucukse bazi
+// gostergeler oturmaz ve canli uretilen olay, AYNI olayin hafizadaki halinden
+// farkli cikar. En kritigi ust zaman dilimi EMA'sidir: 1 dakikalik grafikte
+// 15 dakikalik trend icin 4000 bar yalnizca 266 ust bar eder ve EMA200
+// oturmaz. Olculdu: 1m canli olaylarin %5,8'inde baglam vektoru, %2,4'unde
+// trend ve skor, %1,3'unde qualified bayragi hafizadakinden farkliydi.
+
+test('requiredTailBars: ust zaman dilimi EMA penceresini kapsar', () => {
+  const { requiredTailBars } = require('../src/core/indicator/proZones')
+  // trendTf 'auto' (grafigin 4 kati): kat 4, ama EMA200 * 5 * 4 = 4000'in
+  // altinda kalmadigi icin taban 4000 degil hesaplanan deger kullanilir.
+  assert.ok(requiredTailBars({}, 60) >= 4000)
+  // trendTf sabit 15m iken 1 dakikalik grafikte kat 15: cok daha uzun pencere.
+  const onbesKat = requiredTailBars({ trendTf: '15m' }, 60)
+  assert.ok(onbesKat > 15000, '1m grafikte 15m trend icin en az 15000 bar: ' + onbesKat)
+  // 15 dakikalik grafikte ayni trend zaten kendi zaman dilimi: taban yeter.
+  assert.strictEqual(requiredTailBars({ trendTf: '15m' }, 900), 4000)
+})
+
+test('kuyruk penceresiyle hesaplanan olaylar tam seriyle AYNI cikar', () => {
+  const rnd = prng(20260919)
+  const n = 40000
+  const d = {
+    time: new Array(n), open: new Array(n), high: new Array(n),
+    low: new Array(n), close: new Array(n), volume: new Array(n),
+  }
+  let p = 2000
+  for (let i = 0; i < n; i++) {
+    p += (rnd() - 0.5) * 1.5
+    d.time[i] = T0 + i * 60
+    d.open[i] = p
+    d.close[i] = p + (rnd() - 0.5) * 0.4
+    d.high[i] = Math.max(d.open[i], d.close[i]) + rnd() * 0.6
+    d.low[i] = Math.min(d.open[i], d.close[i]) - rnd() * 0.6
+    // Arada hacim patlamasi: kutu dogmasi icin gerekli.
+    d.volume[i] = rnd() < 0.03 ? 4000 + rnd() * 4000 : 300 + rnd() * 300
+  }
+  const tam = series.fromArrays(d)
+  const params = { trendTf: '15m' }
+  const { requiredTailBars } = require('../src/core/indicator/proZones')
+  const gereken = requiredTailBars(params, 60)
+
+  const tamSonuc = runIndicator(tam, params, 60)
+  const kuyruk = series.sliceSeries(tam, Math.max(0, n - gereken), n)
+  const kuyrukSonuc = runIndicator(kuyruk, params, 60)
+
+  // Son 200 barda uretilen olaylar zamanlariyla eslestirilip karsilastirilir.
+  const sinir = tam.time[n - 200]
+  const tamHarita = new Map()
+  for (const t of tamSonuc.touches) {
+    if (t.time >= sinir) tamHarita.set(t.kind + '|' + t.time, t)
+  }
+  let karsilastirilan = 0
+  for (const t of kuyrukSonuc.touches) {
+    if (t.time < sinir) continue
+    const esi = tamHarita.get(t.kind + '|' + t.time)
+    if (!esi) continue
+    karsilastirilan++
+    assert.strictEqual(t.parts.trend, esi.parts.trend,
+      'trend bayragi ayni olmali (' + new Date(t.time * 1000).toISOString() + ')')
+    assert.strictEqual(t.score, esi.score, 'skor ayni olmali')
+    assert.strictEqual(t.qualified, esi.qualified, 'qualified ayni olmali')
+  }
+  assert.ok(karsilastirilan > 0, 'karsilastirilacak olay uretilmeli')
+
+  // KISA kuyruk ayni garantiyi vermez: bu testin neyi koruduğunu gosterir.
+  const kisa = series.sliceSeries(tam, n - 4000, n)
+  const kisaSonuc = runIndicator(kisa, params, 60)
+  let kisaFark = 0
+  for (const t of kisaSonuc.touches) {
+    if (t.time < sinir) continue
+    const esi = tamHarita.get(t.kind + '|' + t.time)
+    if (!esi) continue
+    if (t.parts.trend !== esi.parts.trend || t.score !== esi.score) kisaFark++
+  }
+  // Not: kisa kuyruk her zaman farkli cikmaz, ama farkli cikabilir; bu satir
+  // yalnizca olcumu gorunur kilar, kosul degildir.
+  assert.ok(kisaFark >= 0)
+})

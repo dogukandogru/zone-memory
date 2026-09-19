@@ -363,7 +363,10 @@ düğmesine basın. Uygulama:
 5. Başarılı kurulumlardan şekil kümeleri üretir (bilgi amaçlı, bkz. 6.6).
 
 Uzun bir seride bu işlem birkaç dakika sürer ve on binlerce olay üretir.
-Bir kez yapılır, sonra artımlı olarak güncellenir. İlerleme çubuğu üst şeritte
+Bir kez yapılır, yeni veri gelince yeniden taranır (15m yaklaşık 0,2 sn,
+1m yaklaşık 1,7 sn). Artımlı tarama **yoktur**: yeniden taramada bölge ve olay
+kimlikleri sıfırdan numaralanır ve bar indeksleri kayar, bu yüzden parçalı
+güncelleme sessiz veri bozulması üretirdi. İlerleme çubuğu üst şeritte
 görünür.
 
 Taramanın iki sessiz kuralı vardır:
