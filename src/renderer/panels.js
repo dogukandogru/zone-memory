@@ -672,7 +672,6 @@ export function renderSignalDetail(el, signal, opts) {
   }
 
   const alis = signal.direction !== 'SELL'
-  const yonSinifi = alis ? 'up' : 'down'
 
   // BASLIK: sinyal uretilmediyse bunu sakla.
   const baslikSonek = signal.fired === false ? ' (sinyal üretilmedi)' : ''
@@ -1864,7 +1863,12 @@ export function renderBacktest(el, result, opts) {
     el.appendChild(uyari)
   }
 
-  el.appendChild(bolumBasligi('Özet (' + tam(s.total) + ' olay değerlendirildi)'))
+  // Basligta ZAMAN DILIMI ve olcum zamani: hangi tf'ye ait oldugu ekranda
+  // yazmadigi icin kullanici baska bir dilimin sayilarina bakabiliyordu.
+  el.appendChild(bolumBasligi('Özet' +
+    (r.tf ? ': ' + String(r.tf) : '') +
+    (Number.isFinite(Number(r.olcumZamani)) ? ', ' + formatDateTime(r.olcumZamani) : '') +
+    ' (' + tam(s.total) + ' olay değerlendirildi)'))
 
   // Orneklem yetersizse katki rakami yaniltir; sayinin yerine uyari gosterilir.
   if (s.warning) {

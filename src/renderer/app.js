@@ -614,8 +614,14 @@ function planBitisZamani(s, zaman) {
       if (t < zaman) { idx = mid; lo = mid + 1 } else hi = mid - 1
     }
     if (idx >= 0) {
-      const hedef = Math.min(idx + kacBar, barlar.length - 1)
-      return barlar[hedef].time
+      const hedefIdx = idx + kacBar
+      if (hedefIdx <= barlar.length - 1) return barlar[hedefIdx].time
+      // HEDEF SON BARIN OTESINDE: CANLI sinyalde bu normaldir, plan daha
+      // bitmedi. Son bara kirpmak cizgileri 18 piksellik bir cikintiya
+      // ceviriyordu ve yeni barlarla uzamiyordu. Kalan sureyi bar adimiyla
+      // ileri tasiriz; grafik zaten son barin otesini cizebiliyor.
+      const fazla = hedefIdx - (barlar.length - 1)
+      return barlar[barlar.length - 1].time + fazla * adim
     }
   }
   return zaman + kacBar * adim
@@ -639,7 +645,10 @@ function planCizgileri(s) {
     // TP2 artik null olabilir (yeterli sayida tutmus benzer kayit yoksa).
     // Number(null) sifir oldugu icin asagidaki `price !== 0` suzgeci bu
     // durumda cizgiyi elemis olur; yine de niyet burada yazili olsun.
-    { price: sayi(s.tp2, NaN), color: RENK.up, title: 'TP2', width: 1, dashed: true },
+    // TP2 OLCULMUS BIR HEDEF DEGIL: yalnizca tutmus komsularin gittigi yolun
+    // yuzdeligi. TP1 ile ayni stilde cizilince ayni guvenilirlikte
+    // gorunuyordu; artik gri ve baslikta "olculmedi" yaziyor.
+    { price: sayi(s.tp2, NaN), color: RENK.dim, title: 'TP2 (ölçülmedi)', width: 1, dash: [2, 4] },
     { price: sayi(s.sl, NaN), color: RENK.down, title: 'SL', width: 1, dashed: true },
   ].filter((c) => Number.isFinite(c.price) && c.price !== 0)
 
@@ -701,12 +710,20 @@ function efsaneyiYaz(bar) {
     dEl.textContent = degisimMetni
     dEl.className = artiMi ? 'up' : 'down'
   }
-  const fEl = el('lastPrice')
-  if (fEl) fEl.textContent = formatPrice(kaynak.close)
-  const cEl = el('lastChange')
-  if (cEl) {
-    cEl.textContent = degisimMetni
-    cEl.className = 'last-change ' + (artiMi ? 'up' : 'down')
+  // UST SERITTEKI SON FIYAT, NISANGAH BARINI DEGIL CANLI FIYATI GOSTERIR.
+  //
+  // Efsane kutusu (sol ust) fareyle gezilen barin OHLC'sini yazar; ust
+  // seritteki "son fiyat" ise piyasanin su anki fiyatidir. `bar` verilmisse
+  // (yani fare bir barin uzerindeyse) ust serit GUNCELLENMEZ, yoksa gecmise
+  // bakarken ust seritte 2015 fiyati gorunuyordu.
+  if (!bar) {
+    const fEl = el('lastPrice')
+    if (fEl) fEl.textContent = formatPrice(kaynak.close)
+    const cEl = el('lastChange')
+    if (cEl) {
+      cEl.textContent = degisimMetni
+      cEl.className = 'last-change ' + (artiMi ? 'up' : 'down')
+    }
   }
 }
 
@@ -835,6 +852,7 @@ async function mumlariYukle() {
   const barlar = barlariNormalle(ham)
   durum.bars = barlar
   durum.pencereliMumlar = false
+  pencereDugmesiniTazele()
   goster(el('chartEmpty'), barlar.length === 0)
   grafik('setBars', barlar)
   if (barlar.length > 0) {
@@ -873,6 +891,7 @@ async function mumlariZamanEtrafindaYukle(hedefZaman) {
   durum.bars = barlar
   // Grafik artik son mumlari degil, gecmiste bir pencereyi gosteriyor.
   durum.pencereliMumlar = true
+  pencereDugmesiniTazele()
   goster(el('chartEmpty'), false)
   grafik('setBars', barlar)
   return true
@@ -1178,6 +1197,15 @@ async function tfDegistir(tf) {
   durum.seciliBolgeId = null
   durum.signals = []
   durum.zones = []
+  // ONCEKI ZAMAN DILIMININ SAYILARI EKRANDA KALMASIN.
+  //
+  // Test sonucu, hafiza ozeti ve sekil kumeleri tf degisince oldugu gibi
+  // duruyordu; basligta tf yazmadigi icin kullanici 1 dakikaligin sayilarini
+  // 15 dakikaliga ait sanip karar verebiliyordu.
+  durum.testSonucu = null
+  durum.hafizaOzeti = null
+  durum.prototipler = []
+  durum.canliGunluk = null
   tfDugmeleriniIsaretle()
   planCizgileri(null)
   tvKaynagiGuncelle()
@@ -1365,6 +1393,43 @@ function canliAnahtariniIsaretle() {
     }
   }
   canliDurumuYaz()
+}
+
+/**
+ * Gecmis pencereden GUNCEL mumlara doner.
+ *
+ * Onceden guncele donmenin tek yolu zaman dilimi degistirmekti.
+ */
+async function guncelMumlaraDon() {
+  durum.pencereliMumlar = false
+  await mumlariYukle()
+  await bolgeleriYukle()
+  isaretleriCiz()
+  pencereDugmesiniTazele()
+}
+
+/** "Guncele don" dugmesini pencere durumuna gore gosterir. */
+function pencereDugmesiniTazele() {
+  goster(el('goLatestBtn'), !!durum.pencereliMumlar)
+}
+
+/**
+ * Ust seritteki son fiyat ve degisim alanlarini canli bardan yazar.
+ *
+ * Gecmis bir pencereye bakilirken grafige canli mum eklenmez ama kullanici
+ * guncel fiyati gormeye devam etmeli.
+ */
+function sonFiyatiYaz(bar) {
+  if (!bar) return
+  const fiyatEl = el('lastPrice')
+  if (fiyatEl) fiyatEl.textContent = formatPrice(bar.close)
+  const degisimEl = el('lastChange')
+  if (degisimEl && Number.isFinite(Number(bar.open)) && Number(bar.open) !== 0) {
+    const fark = Number(bar.close) - Number(bar.open)
+    const yuzde = (fark / Number(bar.open)) * 100
+    degisimEl.textContent = (fark >= 0 ? '+' : '') + formatNumber(yuzde, 2) + '%'
+    degisimEl.className = fark >= 0 ? 'up' : 'down'
+  }
 }
 
 /** Canli takibi baslatir. */
@@ -1998,7 +2063,10 @@ async function testCalistir() {
         cfgPatch: durum.ayarYamasiKayitli || null,
       },
     })
-    durum.testSonucu = sonuc
+    // Sonuc HANGI zaman dilimine ve NE ZAMAN ait oldugunu tasisin: test
+    // sururken tf degistirilebiliyor ve panel eski sonucu yeni tf'ye aitmis
+    // gibi gosteriyordu.
+    durum.testSonucu = Object.assign({ tf: durum.tf, olcumZamani: Math.floor(Date.now() / 1000) }, sonuc)
     // Geriye test sinyal listesini de URETIR ve diske yazar. Yeniden okunmazsa
     // Sinyaller sekmesi taramadan kalma bos listeyi gostermeye devam eder ve
     // kullanici "testi calistirdim ama sinyal gelmedi" diye bakar.
@@ -2037,9 +2105,23 @@ function olaylariBagla() {
     if (gelenTf && gelenTf !== durum.tf) return
     const bar = barNesnesi(veri.bar || veri.candle || veri)
     if (!bar) return
+    // GECMIS BIR PENCEREYE BAKILIYORSA CANLI MUM GRAFIGE EKLENMEZ.
+    //
+    // Onceden 2015 penceresinin yanina 2026 mumu ekleniyordu: fiyat olcegi
+    // yaklasik 1.200'den 4.400'e sicriyor ve guncele donmenin tek yolu zaman
+    // dilimi degistirmek oluyordu. Canli fiyat yine ust seritte gorunur.
+    if (durum.pencereliMumlar) {
+      sonFiyatiYaz(bar)
+      return
+    }
     grafik('updateBar', bar)
     sonBariGuncelle(bar)
     efsaneyiYaz(null)
+    // Secili canli sinyalin plan cizgileri yeni barla birlikte uzasin.
+    if (durum.seciliSinyalId !== null) {
+      const secili = durum.signals.find((x) => x && String(x.id) === String(durum.seciliSinyalId))
+      if (secili && sayi(secili.barsToOutcome, -1) < 0) planCizgileri(secili)
+    }
   })
 
   window.api.on('live:signal', (veri) => {
@@ -2246,6 +2328,9 @@ function dugmeleriBagla() {
 
   const sync = el('syncBtn')
   if (sync) sync.addEventListener('click', () => veriCek())
+
+  const guncele = el('goLatestBtn')
+  if (guncele) guncele.addEventListener('click', () => guncelMumlaraDon())
 
   const iptal = el('cancelBtn')
   if (iptal) {

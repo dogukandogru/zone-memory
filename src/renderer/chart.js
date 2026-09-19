@@ -445,9 +445,14 @@ export function createChartView(container) {
 
     // Bitis koordinati. Hesaplanamazsa panelin TAMAMINI boyamak yanlistir
     // (duzeltilmek istenen hatanin ta kendisi); asgari genislige duseriz.
+    //
+    // SON BARA KIRPMA YOK: canli bir sinyalde plan henuz bitmemistir ve
+    // `plan.endTime` son barin otesinde olur. Kirpinca cizgiler 18 piksellik
+    // bir cikintiya donusuyor ve yeni barlarla uzamiyordu. `timeToLogical`
+    // zaten son barin otesini hesaplayabiliyor.
     let xSon = null;
     if (plan.endTime != null) {
-      const bit = timeToX(Math.min(plan.endTime, dr.to));
+      const bit = timeToX(plan.endTime);
       if (isNum(bit)) xSon = bit;
     }
     if (!isNum(xSon) || xSon <= xBas) xSon = xBas + MIN_PLAN_PX;
@@ -479,7 +484,9 @@ export function createChartView(container) {
 
       ctx.strokeStyle = lv.color;
       ctx.lineWidth = isNum(+lv.width) && +lv.width > 0 ? +lv.width : 1;
-      ctx.setLineDash(lv.dashed ? [5, 4] : []);
+      // `dash` dizisi verilirse o kullanilir: olculmemis bir hedefi (TP2)
+      // olculmus olandan (TP1) gorsel olarak ayirmak icin gerekli.
+      ctx.setLineDash(Array.isArray(lv.dash) ? lv.dash : (lv.dashed ? [5, 4] : []));
       ctx.beginPath();
       ctx.moveTo(x1, y + 0.5);
       ctx.lineTo(x2, y + 0.5);

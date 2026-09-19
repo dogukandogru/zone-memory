@@ -70,6 +70,10 @@
     </div>
 
     <div class="tb-group">
+      <!-- Gecmis bir pencereye bakilirken gorunur: grafigi guncel mumlara
+           dondurur. Onceden guncele donmenin tek yolu zaman dilimi
+           degistirmekti. -->
+      <button type="button" class="btn" id="goLatestBtn" hidden title="Grafiği güncel mumlara döndür">Güncele dön</button>
       <button type="button" class="btn" id="syncBtn" title="Seçili kaynaktan eksik geçmişi indir">Veri Çek</button>
       <button type="button" class="btn btn-primary" id="scanBtn" title="Tüm geçmişi tarayıp hafızayı kur">Geçmişi Tara</button>
       <button type="button" class="btn btn-ghost" id="cancelBtn" hidden>Durdur</button>
@@ -288,6 +292,7 @@ ANA ALAN
   #chart                createChartView(#chart) kutusu
   #chartLegend          sol ust efsane kutusu
   #legendSymbol #legendTf #legendO #legendH #legendL #legendC #legendChange
+  #goLatestBtn          gecmis pencereden guncel mumlara donus
   #chartEmpty           veri yokken gosterilen kutu
   #chartLoading         yuklenirken gosterilen kutu
   #tvPanel              TradingView gorunumu (baslangicta hidden)
