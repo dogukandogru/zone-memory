@@ -1075,6 +1075,35 @@ Dosya varken:
 Özellik vektörüne yeni bir boyut **eklenmedi**. Tek ikili boyut kNN
 mesafesinde kaybolur ve mevcut bütün hafızaları geçersiz kılardı.
 
+### 6.7.2 Üst zaman dilimi bölgesi (ölçüm, sinyale katılmaz)
+
+15m olayına 4h bölgesini eklemek (1m'ye 15m, 5m'ye 1h) cazip görünüyor ama
+**zamanlaması kolayca sızdırıyor.** `zones.json` kaydındaki `createdTime` barın
+**açılışıdır** ve `top` / `bottom` kutunun **nihai** sınırlarıdır; ikisini
+kullanmak henüz onaylanmamış bir kutuyu ve henüz oluşmamış birleşme
+sınırlarını görmek demektir.
+
+Bu yüzden indikatör `recordTimeline` seçeneğiyle **kutu durumu aralıkları**
+üretir: her aralık "bu kutu, bu sınırlarla, bu zaman aralığında biliniyordu"
+demektir. Aralık doğum ya da birleşme barının **kapanışında** açılır, kırılma,
+yaşlanma veya `maxZones` çıkarma barının kapanışında kapanır.
+
+Ölçüldü (15m olayları, 4h bölgeleri, oluşum türü, `taban %42,8`):
+
+| Zamanlama | Aynı yön yakın | Olay | Net / işlem |
+| --- | --- | --- | --- |
+| **naif** (bar açılışı + nihai sınırlar) | %45,6 [39,6, 51,6] | 598 | +0,083 |
+| **doğru** (bar kapanışı + o anki sınırlar) | %30,3 [20,6, 42,2] | 147 | -0,557 |
+
+Yani naif zamanlama **+3,2 puanlık olmayan bir katkı** gösteriyor; doğru
+zamanlamayla aynı ölçüm **-12,5 puan**. Dönem ikiye bölündüğünde işaret
+tekrarlıyor (ilk yarı %29,6, ikinci yarı %30,8) ama her yarının %95 aralığı
+tabanı hâlâ içeriyor, yani ters yönlü bir kapı da kanıtlanmış değil.
+
+Bu nedenle özellik **sinyale bağlanmadı**: Test sekmesinde alt küme tablosu
+olarak, canlı sinyal kartında "4h bölgesi: aynı yön yakın - bilgi, sinyale
+katılmaz" satırı olarak görünür. Özellik vektörüne de dokunulmadı.
+
 ### 6.8 Yürüyen ileri test
 
 Hafızadaki her olay zaman sırasına konur ve her biri **yalnızca kendinden

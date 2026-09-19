@@ -682,6 +682,16 @@ export function renderSignalDetail(el, signal, opts) {
   el.appendChild(kv('Durum', signal.fired ? 'Sinyal üretildi' : 'Eşikler geçilmedi',
     signal.fired ? 'up' : 'muted'))
 
+  // UST ZAMAN DILIMI BAGLAMI: BILGI, sinyale katilmaz. Olculdu (15m olaylari,
+  // 4h bolgeleri, dogru zamanlamayla): ayni yonlu ust bolge yakinindaki olusum
+  // olaylari %30,3 tutuyor, tabani %42,8. Yani katki yok, hatta ters yonde;
+  // bu yuzden satir bir tavsiye degil bir gozlem olarak duruyor.
+  if (signal.htf && signal.htf.state) {
+    el.appendChild(kv(String(signal.htf.tf || 'Üst TF') + ' bölgesi',
+      String(signal.htf.state) + (signal.htf.inside ? ' (bölge içinde)' : '') +
+      ' - bilgi, sinyale katılmaz', 'muted'))
+  }
+
   // YUKSEK ETKILI VERI: kapi kapali olsa bile uyari gosterilir. Bolgeler bu
   // anlarda daha hizli kiriliyor (olculdu, ama orneklem kucuk ve araliklar
   // ortusuyor), yani bu bir kanit degil bir dikkat notudur.
@@ -1949,29 +1959,40 @@ export function renderBacktest(el, result, opts) {
   // ALT KUME KIRILIMI (yalnizca ekonomik takvim dosyasi varsa dolar).
   // Her alt kumenin tabani AYNI ALT KUMENIN ayni turdeki tum olaylaridir;
   // karisik taban veri penceresi karsilastirmasini anlamsiz kilardi.
+  // ALT KUME KIRILIMLARI. Her boyut (veri penceresi, ust zaman dilimi bolgesi)
+  // kendi icinde tum olaylari boler ve KENDI tabaniyla karsilastirilir.
   const altKumeler = Array.isArray(s.bySubset) ? s.bySubset : []
   if (altKumeler.length > 0) {
-    el.appendChild(bolumBasligi('Yüksek etkili veri penceresi'))
-    const akSatirlari = []
-    for (let i = 0; i < altKumeler.length; i++) {
-      const a = altKumeler[i]
-      akSatirlari.push([
-        a.subset + ' - ' + turAdi(a.kind),
-        tam(a.total), tam(a.fired),
-        Number.isFinite(a.winRate) ? formatPercent(a.winRate, 1) : '-',
-        a.winRateCI ? formatPercent(a.winRateCI.lo, 1) + ' - ' + formatPercent(a.winRateCI.hi, 1) : '-',
-        Number.isFinite(a.baselineWinRate) ? formatPercent(a.baselineWinRate, 1) : '-',
-        Number.isFinite(a.edgePts) ? (a.edgePts >= 0 ? '+' : '') + formatNumber(a.edgePts, 1) : '-',
-        Number.isFinite(a.expectancyAtr) ? formatNumber(a.expectancyAtr, 3) : '-',
-      ])
+    const boyutlar = []
+    const boyutMap = new Map()
+    for (const a of altKumeler) {
+      const ad = a.dim || 'Alt küme'
+      if (!boyutMap.has(ad)) { boyutMap.set(ad, []); boyutlar.push(ad) }
+      boyutMap.get(ad).push(a)
     }
-    el.appendChild(tablo(
-      ['Alt küme', 'Olay', 'Sinyal', 'Oran', '%95 aralık', 'Taban', 'Katkı', 'Beklenti'],
-      akSatirlari))
+    for (const ad of boyutlar) {
+      el.appendChild(bolumBasligi(ad))
+      const akSatirlari = []
+      for (const a of boyutMap.get(ad)) {
+        akSatirlari.push([
+          (a.label || a.subset) + ' - ' + turAdi(a.kind),
+          tam(a.total), tam(a.fired),
+          Number.isFinite(a.winRate) ? formatPercent(a.winRate, 1) : '-',
+          a.winRateCI ? formatPercent(a.winRateCI.lo, 1) + ' - ' + formatPercent(a.winRateCI.hi, 1) : '-',
+          Number.isFinite(a.baselineWinRate) ? formatPercent(a.baselineWinRate, 1) : '-',
+          Number.isFinite(a.edgePts) ? (a.edgePts >= 0 ? '+' : '') + formatNumber(a.edgePts, 1) : '-',
+          Number.isFinite(a.expectancyAtr) ? formatNumber(a.expectancyAtr, 3) : '-',
+        ])
+      }
+      el.appendChild(tablo(
+        ['Alt küme', 'Olay', 'Sinyal', 'Oran', '%95 aralık', 'Taban', 'Katkı', 'Beklenti'],
+        akSatirlari))
+    }
     el.appendChild(h('div', 'small muted',
-      'Karar anı bar kapanışıdır. Aralıklar örtüşüyorsa veri penceresinin sonucu ' +
-      'değiştirdiği söylenemez. Sinyal kapısı varsayılan olarak KAPALI: açmak için ' +
-      'Ayarlar\'da "Veri penceresi (dk)" alanını sıfırdan büyük yapın.'))
+      'Karar anı bar kapanışıdır ve her alt kümenin tabanı KENDİ alt kümesinin ' +
+      'aynı türdeki tüm olaylarıdır. Aralıklar örtüşüyorsa o alt kümenin sonucu ' +
+      'değiştirdiği söylenemez. Bu kırılımlar sinyal kararına girmez; veri ' +
+      'penceresi kapısını açmak için Ayarlar > Sinyal kararı > "Veri penceresi (dk)".'))
   }
 
   // Sermaye egrisi

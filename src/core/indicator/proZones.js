@@ -84,6 +84,9 @@ const DEFAULT_PARAMS = {
   zoneAtrMult: 0.35,
   mergeAtrMult: 0.55,
   maxZones: 24,
+  // KUTU DURUMU ARALIKLARINI KAYDET (Y3). Varsayilan kapali: yalnizca ust
+  // zaman dilimi baglami olculurken gerekiyor ve bellekte yer tutuyor.
+  recordTimeline: false,
   maxAgeBars: 100,
   touchCooldown: 12,
   boxLengthBars: 100,
@@ -432,8 +435,54 @@ function runIndicator (s, params, tfSec, onProgress) {
   /** Bar seri disina tasarsa zamani zaman dilimi adimiyla tahmin edilir. */
   const barTime = (bar) => (bar < n ? time[bar] : lastTime + (bar - (n - 1)) * step)
 
+  // ------------------------------------------------------------------------
+  // ZAMAN CIZELGESI (Y3, `p.recordTimeline` ile acilir)
+  // ------------------------------------------------------------------------
+  // Ust zaman dilimi bolgesini bir alt zaman dilimi olayina eklemek isteyen
+  // her hesap, "o an bu kutu BILINIYOR MUYDU" sorusunu dogru cevaplamak
+  // zorundadir. zones.json'daki `createdTime` barin ACILISIDIR ve `top` /
+  // `bottom` kutunun NIHAI sinirlaridir; ikisini kullanmak ileriye bakmaktir.
+  // Olculdu: naif zamanlamayla 5m formda "aktif 1h kutusu yakini" %53,0'a
+  // karsi %45,8 gorunuyor (+7 puan), dogru zamanlamayla %48,1'e karsi %46,1
+  // ve araliklar ortusuyor.
+  //
+  // Bu yuzden cizelge ARALIK tutar: bir kutu durumu ancak `knownFrom`
+  // (dogum ya da birlesme barinin KAPANISI) ile `knownTo` (kirilma, yaslanma
+  // ya da maxZones cikarma barinin kapanisi) arasinda o sinirlarla bilinir.
+  // Birlesmede eski aralik kapanir, yeni sinirlarla yenisi acilir.
+  const timeline = p.recordTimeline ? [] : null
+  /** Bir barin KAPANIS zamani. */
+  const barKapanis = (bar) => (bar < n ? time[bar] : lastTime) + step
+  /** zoneId -> acik cizelge kaydinin indeksi. */
+  const cizelgeAcik = timeline ? new Map() : null
+
+  /** Kutunun o anki sinirlariyla yeni bir cizelge araligi acar. */
+  const cizelgeAc = (z, bar) => {
+    if (!timeline) return
+    cizelgeAcik.set(z.id, timeline.length)
+    timeline.push({
+      zoneId: z.id,
+      isSupport: z.isSupport,
+      top: z.top,
+      bottom: z.bottom,
+      knownFrom: barKapanis(bar),
+      knownTo: null,
+    })
+  }
+
+  /** Acik araligi kapatir (kutu takipten dustu ya da sinirlari degisti). */
+  const cizelgeKapat = (zoneId, bar) => {
+    if (!timeline) return
+    const idx = cizelgeAcik.get(zoneId)
+    if (idx === undefined) return
+    const kayit = timeline[idx]
+    if (kayit && kayit.knownTo === null) kayit.knownTo = barKapanis(bar)
+    cizelgeAcik.delete(zoneId)
+  }
+
   /** Takipten dusen kutuyu cikti listesine yazar. */
   const emitZone = (z, lastBar) => {
+    cizelgeKapat(z.id, lastBar)
     const right = Math.min(lastBar, z.pivotBar + boxLengthBars)
     zones.push({
       id: z.id,
@@ -626,10 +675,18 @@ function runIndicator (s, params, tfSec, onProgress) {
 
         const boosted = z.flow + score * 0.25
         z.flow = boosted > FLOW_MAX ? FLOW_MAX : boosted
+        const sinirDegisti = top > z.top || bottom < z.bottom
         if (top > z.top) z.top = top
         if (bottom < z.bottom) z.bottom = bottom
         z.mergeCount++
         merged = true
+        // Sinirlar degistiyse cizelgede eski aralik kapanir ve yeni
+        // sinirlarla yenisi acilir; eski karar anlari eski sinirlari gormeye
+        // devam eder.
+        if (sinirDegisti) {
+          cizelgeKapat(z.id, i)
+          cizelgeAc(z, i)
+        }
       }
     }
     if (merged) {
@@ -658,6 +715,7 @@ function runIndicator (s, params, tfSec, onProgress) {
       brokenBar: -1,
     }
     live.push(zone)
+    cizelgeAc(zone, i)
     emitEvent('form', zone, i)
   }
 
@@ -776,6 +834,9 @@ function runIndicator (s, params, tfSec, onProgress) {
       localHour,
       localDow,
     },
+    // Ust zaman dilimi baglami icin kutu durumu araliklari (Y3). Yalnizca
+    // `p.recordTimeline` verildiyse dolu, aksi halde null.
+    timeline: timeline,
     stats,
   }
 }

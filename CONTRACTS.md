@@ -799,6 +799,18 @@ module.exports = {
 }
 ```
 
+`runIndicator` ciktisina `timeline` alani EKLENDI (Y3): `p.recordTimeline`
+verilmediyse `null`, verildiyse kutu durumu ARALIKLARI dizisi:
+`{zoneId, isSupport, top, bottom, knownFrom, knownTo}`. `knownFrom` dogum ya da
+birlesme barinin KAPANISI, `knownTo` kirilma / yaslanma / maxZones cikarma
+barinin kapanisidir (hala etkinse `null`). Birlesmede eski aralik kapanir ve
+yeni sinirlarla yenisi acilir. Bu aralıklar `learn/htfContext.js` tarafindan
+"o karar aninda bu kutu bu sinirlarla biliniyor muydu" sorusunu ileriye
+bakmadan cevaplamak icin kullanilir; `zones.json`'daki `createdTime` (bar
+acilisi) ve nihai `top` / `bottom` bu is icin KULLANILAMAZ (olculdu: naif
+zamanlama +3,2 puanlik olmayan bir katki gosteriyor, dogru zamanlamayla ayni
+olcum -12,5 puan).
+
 `stats` icinde en az: `bars, zonesCreated, zonesMerged, totalEvents, formEvents,
 touchEvents, formStored, touchStored, firstTouches, qualified, labeled,
 respected, broken, timeout, stored, noFeatures, noLabel, noLabelHorizon,

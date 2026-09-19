@@ -334,6 +334,14 @@ function toSeries(raw) {
 // Veri erisimi
 // ---------------------------------------------------------------------------
 
+/**
+ * UST ZAMAN DILIMI ESLESMESI (Y3 olcumu icin).
+ *
+ * Her alt zaman dilimine, kabaca dort katindaki bir ust dilim eslenir. Bu
+ * eslesme yalnizca OLCUM icindir; sinyal kararina girmez.
+ */
+const UST_TF_ESLESME = { '1m': '15m', '5m': '1h', '15m': '4h', '30m': '4h', '1h': '4h' }
+
 /** Depodan (gerekirse yeniden ornekleyerek) tam seriyi okur. */
 async function loadSeriesFromStore(tf) {
   const dir = paths.dataDir()
@@ -1199,6 +1207,56 @@ handlers['engine:backtest'] = async function (payload, ctx) {
     }
   }
 
+  // UST ZAMAN DILIMI BAGLAMI (Y3): olcum. Ust zaman diliminin serisi depoda
+  // varsa indikator ORADA yeniden kosulur ve kutu durumu araliklari (zaman
+  // cizelgesi) cikarilir. Cizelge, "o karar aninda bu kutu bu sinirlarla
+  // BILINIYOR MUYDU" sorusunu ileriye bakmadan cevaplar; zones.json'daki
+  // createdTime (bar acilisi) ve nihai sinirlar KULLANILMAZ.
+  //
+  // Sinyal karari ETKILENMEZ: bu yalnizca alt kume kirilimidir. Olculdu, naif
+  // zamanlamayla gorunen +7 puanlik fark dogru zamanlamayla kayboluyor.
+  const altKumeKancalari = []
+  try {
+    const ustTf = UST_TF_ESLESME[tf]
+    if (ustTf) {
+      const ustSeri = await loadSeriesFromStore(ustTf)
+      if (ustSeri && ustSeri.length > 200) {
+        const ustSn = core('tf').tfSeconds(ustTf)
+        const ustInd = core('indicator/proZones').runIndicator(
+          ustSeri,
+          Object.assign({}, (memMeta && memMeta.indicatorParams) || {}, { recordTimeline: true }),
+          ustSn
+        )
+        const htf = core('learn/htfContext')
+        const dizin = htf.buildHtfIndex(ustInd.timeline)
+        const ustAtr = ustInd.context && ustInd.context.atr ? ustInd.context.atr : null
+        const ustZaman = ustSeri.time
+        const tfSn = core('tf').tfSeconds(tf)
+        // Karar anindaki ust TF ATR'si: o ana kadar KAPANMIS son ust bar.
+        const ustAtrBul = (tSec) => {
+          if (!ustAtr || !ustZaman) return 0
+          let lo = 0
+          let hi = ustZaman.length - 1
+          let son = -1
+          while (lo <= hi) {
+            const mid = (lo + hi) >> 1
+            if (ustZaman[mid] + ustSn <= tSec) { son = mid; lo = mid + 1 } else hi = mid - 1
+          }
+          return son >= 0 ? num(ustAtr[son], 0) : 0
+        }
+        altKumeKancalari.push((ev) => {
+          const karar = num(ev.time, 0) + tfSn
+          const durum = htf.htfAt(dizin, karar, num(ev.price, 0),
+            ev.direction === 'SELL' ? 'SELL' : 'BUY', { atr: ustAtrBul(karar), nearAtr: 0.5 })
+          return 'Üst TF bölgesi (' + ustTf + '): ' + htf.htfSubset(durum)
+        })
+        log('Ust zaman dilimi baglami hazir: ' + ustTf + ', ' + dizin.rows.length + ' kutu araligi')
+      }
+    }
+  } catch (err) {
+    log('Ust zaman dilimi baglami kurulamadi: ' + (err && err.message ? err.message : String(err)))
+  }
+
   // EKONOMIK TAKVIM (Y2): dosya varsa testin alt kume kirilimi doldurulur.
   // Sinyal karari ETKILENMEZ; kapi yalnizca signalCfg.newsBlackoutMin > 0
   // iken devreye girer ve o ayar kullanicinindir. Takvim yoksa hicbir sey
@@ -1208,9 +1266,15 @@ handlers['engine:backtest'] = async function (payload, ctx) {
   if (takvim) {
     const tfSn = core('tf').tfSeconds(tf)
     // Karar ani olayin BASLADIGI an degil, barin KAPANISIDIR.
-    cfg.subsetOf = (ev) => takvimModul.newsSubset(takvim, num(ev.time, 0) + tfSn)
+    altKumeKancalari.push((ev) =>
+      'Veri penceresi: ' + takvimModul.newsSubset(takvim, num(ev.time, 0) + tfSn))
     log('Ekonomik takvim yuklendi: ' + takvim.count + ' kayit' +
       (takvim.skipped > 0 ? ', ' + takvim.skipped + ' satir atlandi' : ''))
+  }
+
+  // Her boyut kendi icinde tum olaylari boler; kanca etiket DIZISI doner.
+  if (altKumeKancalari.length > 0) {
+    cfg.subsetOf = (ev) => altKumeKancalari.map((f) => f(ev))
   }
 
   ctx.progress(62, 'Geriye test basliyor')
@@ -1383,6 +1447,66 @@ function takvimOnbellek () {
   takvimDurumu = { yuklendi: true, cal: cal }
   if (cal) log('Ekonomik takvim yuklendi: ' + cal.count + ' kayit')
   return cal
+}
+
+/**
+ * UST ZAMAN DILIMI BAGLAMI (Y3) - CANLI ICIN ONBELLEK.
+ *
+ * Indikatoru ust dilimde kosmak ucuzdur (olculdu: 28.000 bar / 4h icin 0,09
+ * sn) ama her tikta yapmak gereksiz. Dizin, ust dilimde YENI BIR BAR
+ * KAPANDIGINDA yeniden kurulur.
+ *
+ * Bu baglam SINYAL KARARINA GIRMEZ; yalnizca ayrinti ekraninda bilgi satiri
+ * olarak gosterilir. Olculdu (15m olaylari, 4h bolgeleri, dogru zamanlama):
+ * ayni yonlu ust bolge yakinindaki olusum olaylari %30,3 tutuyor, tabani
+ * %42,8; yani katki YOK, hatta ters yonde. Naif zamanlamayla (bar acilisi +
+ * nihai sinirlar) ayni olcum +3,2 puan POZITIF gorunuyordu.
+ */
+const htfDurumu = { tf: null, ustTf: null, sonUstBar: 0, dizin: null, atrBul: null }
+
+async function htfBaglamiHazirla (tf, indicatorParams) {
+  const ustTf = UST_TF_ESLESME[tf]
+  if (!ustTf) return null
+  let ustSeri
+  try {
+    ustSeri = await loadSeriesFromStore(ustTf)
+  } catch (err) {
+    return null
+  }
+  if (!ustSeri || ustSeri.length < 200) return null
+  const sonBar = ustSeri.time[ustSeri.length - 1]
+  if (htfDurumu.tf === tf && htfDurumu.ustTf === ustTf && htfDurumu.sonUstBar === sonBar) {
+    return htfDurumu
+  }
+  const ustSn = core('tf').tfSeconds(ustTf)
+  let ind
+  try {
+    ind = core('indicator/proZones').runIndicator(
+      ustSeri, Object.assign({}, indicatorParams || {}, { recordTimeline: true }), ustSn)
+  } catch (err) {
+    return null
+  }
+  const htf = core('learn/htfContext')
+  const dizin = htf.buildHtfIndex(ind.timeline)
+  const atr = ind.context && ind.context.atr ? ind.context.atr : null
+  const zaman = ustSeri.time
+  const atrBul = (tSec) => {
+    if (!atr) return 0
+    let lo = 0
+    let hi = zaman.length - 1
+    let son = -1
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1
+      if (zaman[mid] + ustSn <= tSec) { son = mid; lo = mid + 1 } else hi = mid - 1
+    }
+    return son >= 0 ? num(atr[son], 0) : 0
+  }
+  htfDurumu.tf = tf
+  htfDurumu.ustTf = ustTf
+  htfDurumu.sonUstBar = sonBar
+  htfDurumu.dizin = dizin
+  htfDurumu.atrBul = atrBul
+  return htfDurumu
 }
 
 handlers['engine:live-tick'] = async function (payload) {
@@ -1598,6 +1722,9 @@ handlers['engine:live-tick'] = async function (payload) {
       // EKONOMIK TAKVIM (Y2): dosya yoksa null kalir ve hicbir sey degismez.
       // Her tikta diskten okumak yerine surec boyunca bir kez yuklenir.
       const canliTakvim = takvimOnbellek()
+      // UST ZAMAN DILIMI BAGLAMI (Y3): yalnizca bilgi satiri, karara girmez.
+      const canliHtf = await htfBaglamiHazirla(
+        tf, memMeta && memMeta.indicatorParams ? memMeta.indicatorParams : null)
       // Hafiza farkli bir ayarla kurulduysa karsilastirma anlamsizdir: yeni
       // tanimla uretilen olay, eski tanimla etiketlenmis gecmisle olculur ve
       // bu hicbir yerde gorunmezdi.
@@ -1640,6 +1767,19 @@ handlers['engine:live-tick'] = async function (payload) {
             )
             if (sig && basis !== null && basis !== 0 && Array.isArray(sig.reasons)) {
               sig.reasons.push('Vekil kaynak fiyati ' + basis.toFixed(2) + ' birim kaydirildi.')
+            }
+            // UST ZAMAN DILIMI BAGLAMI: bilgi, sinyale KATILMAZ.
+            if (sig && canliHtf && canliHtf.dizin) {
+              const htfMod = core('learn/htfContext')
+              const karar = num(cand.time, 0) + tfSec
+              const durum = htfMod.htfAt(canliHtf.dizin, karar, num(cand.price, 0),
+                cand.direction === 'SELL' ? 'SELL' : 'BUY',
+                { atr: canliHtf.atrBul(karar), nearAtr: 0.5 })
+              sig.htf = {
+                tf: canliHtf.ustTf,
+                state: htfMod.htfSubset(durum),
+                inside: durum.sameInside || durum.oppositeInside,
+              }
             }
           }
         }

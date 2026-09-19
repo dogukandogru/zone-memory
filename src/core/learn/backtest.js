@@ -71,12 +71,18 @@ const DEFAULT_BACKTEST_CFG = {
   evalFromTime: null,
   evalToTime: null,
   // ALT KUME KANCASI (Y2 / Y3). Verilirse her degerlendirilen olay icin
-  // cagirilir ve dondurdugu ETIKET ozetteki `bySubset` kirilimina girer.
-  // Sinyal karari ETKILENMEZ, yalnizca raporlama boluner:
-  //   cfg.subsetOf = (ev) => 'veri ±30 dk' | 'normal'
-  // Boylece "yuksek etkili veri anlarinda sonuc farkli mi" ya da "ust zaman
-  // dilimi bolgesi yakinken sonuc farkli mi" sorusu ayni taban mantigiyla,
-  // tur bazinda ve isinma sonrasi donemde olculur.
+  // cagirilir ve dondurdugu ETIKET(LER) ozetteki `bySubset` kirilimina girer.
+  // Sinyal karari ETKILENMEZ, yalnizca raporlama boluner.
+  //
+  // Tek etiket ya da etiket dizisi donebilir; dizi COK BOYUTLU olcum demektir
+  // ve her boyut kendi icinde tum olaylari boler:
+  //   cfg.subsetOf = (ev) => ['Veri penceresi: veri ±30 dk',
+  //                           'Üst TF bölgesi: aynı yön yakın']
+  // Etiketteki 'Boyut: deger' bicimi arayuzde gruplamak icindir.
+  //
+  // Boylece "yuksek etkili veri anlarinda sonuc farkli mi" ve "ust zaman
+  // dilimi bolgesi yakinken sonuc farkli mi" sorulari AYNI kosuda, ayni taban
+  // mantigiyla, tur bazinda ve isinma sonrasi donemde olculur.
   subsetOf: null,
 }
 
@@ -408,12 +414,22 @@ function yuruyenIleriTest(memory, prototypes, cfg, onProgress, sinyalUret) {
 
     // Alt kume etiketi bir kez hesaplanir (kanca pahali olabilir: takvimde
     // ikili arama). Karar aninin etiketi olculur, olay zamaninin degil.
-    const altKume = altKumeKanca ? String(altKumeKanca(ev) || 'normal') : null
-    const akKayit = altKume === null ? null : altKumeKaydi(altKume, kindOf(ev))
+    // Kanca tek etiket ya da etiket dizisi donebilir (cok boyutlu olcum).
+    let akKayitlar = null
+    if (altKumeKanca) {
+      const ham = altKumeKanca(ev)
+      const etiketler = Array.isArray(ham) ? ham : [ham]
+      akKayitlar = []
+      for (const e of etiketler) {
+        if (e === null || e === undefined || e === '') continue
+        akKayitlar.push(altKumeKaydi(String(e), kindOf(ev)))
+      }
+      if (akKayitlar.length === 0) akKayitlar = null
+    }
 
     kb.total++
     total++
-    if (akKayit) akKayit.total++
+    if (akKayitlar) for (const a of akKayitlar) a.total++
     // Komsular ya burada kNN ile hesaplanir (referans yol) ya da onbellekten
     // okunur. Karar mantigi her iki durumda ayni fonksiyondan gelir.
     const sig = typeof sinyalUret === 'function'
@@ -427,10 +443,12 @@ function yuruyenIleriTest(memory, prototypes, cfg, onProgress, sinyalUret) {
       kb.baseN++
       if (tabanSonuc.win) kb.baseWins++
       kb.baseNetAtr += tabanSonuc.pnlAtr
-      if (akKayit) {
-        akKayit.baseN++
-        if (tabanSonuc.win) akKayit.baseWins++
-        akKayit.baseNetAtr += tabanSonuc.pnlAtr
+      if (akKayitlar) {
+        for (const a of akKayitlar) {
+          a.baseN++
+          if (tabanSonuc.win) a.baseWins++
+          a.baseNetAtr += tabanSonuc.pnlAtr
+        }
       }
       const havuz = tabanHavuzu[kindOf(ev)]
       if (havuz) {
@@ -495,11 +513,13 @@ function yuruyenIleriTest(memory, prototypes, cfg, onProgress, sinyalUret) {
         const ddR = peakR - cumR
         if (ddR > maxDrawdownR) maxDrawdownR = ddR
 
-        if (akKayit) {
-          akKayit.fired++
-          if (win) akKayit.wins++
-          akKayit.pnlAtr += pnlAtr
-          akKayit.pnlR += pnlR
+        if (akKayitlar) {
+          for (const a of akKayitlar) {
+            a.fired++
+            if (win) a.wins++
+            a.pnlAtr += pnlAtr
+            a.pnlR += pnlR
+          }
         }
 
         istatistikKayitlari.push({
@@ -763,8 +783,12 @@ function yuruyenIleriTest(memory, prototypes, cfg, onProgress, sinyalUret) {
           for (const [kind, k] of turler.entries()) {
             const oran = k.fired > 0 ? k.wins / k.fired : null
             const tabanOran = k.baseN > 0 ? k.baseWins / k.baseN : null
+            // 'Boyut: deger' bicimi arayuzde gruplamak icin ayristirilir.
+            const ayirici = etiket.indexOf(': ')
             out.push({
               subset: etiket,
+              dim: ayirici > 0 ? etiket.slice(0, ayirici) : '',
+              label: ayirici > 0 ? etiket.slice(ayirici + 2) : etiket,
               kind: kind,
               total: k.total,
               fired: k.fired,
