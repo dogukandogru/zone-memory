@@ -219,6 +219,58 @@ function brier (kayitlar, taban) {
   }
 }
 
+/**
+ * AUC (ROC egrisi altindaki alan): tahmin, kazananlari kaybedenlerden
+ * AYIRABILIYOR MU.
+ *
+ * Kalibrasyondan farkli bir soruyu olcer. Kalibrasyon "%60 dedigimizde
+ * gercekten %60 mi oluyor" diye sorar; AUC "rastgele bir kazanana verdigimiz
+ * puan, rastgele bir kaybedene verdigimizden yuksek mi" diye sorar. Bir
+ * tahmin tamamen yanlis kalibre olup yine de mukemmel ayirt edebilir, ya da
+ * kusursuz kalibre olup hicbir sey ayirt etmeyebilir (0.5).
+ *
+ * Benzerlik agirliklarini secerken dogru olcut budur: esiklerden bagimsizdir,
+ * bu yuzden "hangi agirlik daha cok islem uretti" yanilgisina dusmez.
+ *
+ * Esit puanlar yarim sayilir (Mann-Whitney U ile ayni tanim).
+ *
+ * @param {Array<{pred:number, win:boolean}>} kayitlar
+ * @returns {{auc:number, nWin:number, nLoss:number}|null} Iki siniftan biri
+ *   yoksa null (AUC tanimsizdir).
+ */
+function auc (kayitlar) {
+  const kazanan = []
+  const kaybeden = []
+  for (const kayit of kayitlar || []) {
+    const p = Number(kayit.pred)
+    if (!Number.isFinite(p)) continue
+    if (kayit.win) kazanan.push(p)
+    else kaybeden.push(p)
+  }
+  if (kazanan.length === 0 || kaybeden.length === 0) return null
+
+  // Siralama tabanli hesap: tum puanlari birlikte siralayip kazananlarin
+  // ortalama sirasindan U istatistigi cikarilir. Cift dongu (n * m) buyuk
+  // orneklemde saniyeler suruyordu.
+  const hepsi = kazanan.concat(kaybeden).slice().sort((a, b) => a - b)
+  const sira = new Map()
+  let i = 0
+  while (i < hepsi.length) {
+    let j = i
+    while (j + 1 < hepsi.length && hepsi[j + 1] === hepsi[i]) j++
+    // Esit puanlarin hepsine ortalama sira verilir (1 tabanli).
+    const ortalama = (i + j) / 2 + 1
+    sira.set(hepsi[i], ortalama)
+    i = j + 1
+  }
+  let siraToplam = 0
+  for (const p of kazanan) siraToplam += sira.get(p)
+  const n = kazanan.length
+  const m = kaybeden.length
+  const u = siraToplam - (n * (n + 1)) / 2
+  return { auc: u / (n * m), nWin: n, nLoss: m }
+}
+
 module.exports = {
   mulberry32,
   wilson,
@@ -227,4 +279,5 @@ module.exports = {
   permutationP,
   calibration,
   brier,
+  auc,
 }

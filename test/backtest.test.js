@@ -594,6 +594,43 @@ test('istatistik: bilinen girdilerde Wilson ve binom degerleri', () => {
   assert.equal(stats.permutationP([0, 0, 0, 0], 2, 0.5, { reps: 50 }), 0)
 })
 
+test('istatistik: AUC ayirt etme gucunu olcer, kalibrasyonu olcmez', () => {
+  const stats = require('../src/core/learn/stats')
+  // Kusursuz ayirma: her kazananin puani her kaybedenden yuksek.
+  const tam = stats.auc([
+    { pred: 0.9, win: true }, { pred: 0.8, win: true },
+    { pred: 0.3, win: false }, { pred: 0.2, win: false },
+  ])
+  assert.equal(tam.auc, 1)
+  assert.equal(tam.nWin, 2)
+  assert.equal(tam.nLoss, 2)
+
+  // Tam ters siralama: 0.
+  assert.equal(stats.auc([
+    { pred: 0.1, win: true }, { pred: 0.9, win: false },
+  ]).auc, 0)
+
+  // Hepsi ayni puan: esitlikler yarim sayilir, 0.5 cikar.
+  assert.equal(stats.auc([
+    { pred: 0.5, win: true }, { pred: 0.5, win: true },
+    { pred: 0.5, win: false }, { pred: 0.5, win: false },
+  ]).auc, 0.5)
+
+  // KALIBRASYONDAN BAGIMSIZ: puanlarin tamamini kaydirmak AUC'yi degistirmez,
+  // Brier'i degistirir. Agirlik secmek icin dogru olcut budur.
+  const kayit = [
+    { pred: 0.55, win: true }, { pred: 0.54, win: true },
+    { pred: 0.53, win: false }, { pred: 0.52, win: false },
+  ]
+  const kaydirilmis = kayit.map((k) => ({ pred: k.pred - 0.3, win: k.win }))
+  assert.equal(stats.auc(kayit).auc, stats.auc(kaydirilmis).auc)
+  assert.notEqual(stats.brier(kayit, 0.5).model, stats.brier(kaydirilmis, 0.5).model)
+
+  // Tek sinif varsa AUC tanimsizdir.
+  assert.equal(stats.auc([{ pred: 0.6, win: true }]), null)
+  assert.equal(stats.auc([]), null)
+})
+
 // ---------------------------------------------------------------------------
 // A2 - KOMSU ONBELLEGI (src/core/learn/candcache.js)
 // ---------------------------------------------------------------------------
