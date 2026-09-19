@@ -216,6 +216,28 @@ async function dispatch(cmd, payload) {
   }
 }
 
+/**
+ * Istegin ana cerceveden ve yerel arayuzden geldigini dogrular.
+ *
+ * Gomulu TradingView cercevesi ya da uzak bir sayfa bu kanali kullanamamali.
+ *
+ * @param {import('electron').IpcMainInvokeEvent} event
+ * @returns {boolean}
+ */
+function gecerliGonderen(event) {
+  try {
+    const cerceve = event.senderFrame
+    // Eski Electron surumlerinde alan olmayabilir; o zaman engellemeyiz,
+    // cunku uygulamayi tumuyle kullanilmaz hale getirmek daha kotu olur.
+    if (!cerceve) return true
+    if (cerceve.parent) return false
+    const url = String(cerceve.url || '')
+    return url.startsWith('file://') && url.indexOf('/renderer/index.html') !== -1
+  } catch (err) {
+    return true
+  }
+}
+
 /** IPC dinleyicilerini kurar. Yalnizca bir kez calisir. */
 function register(win) {
   if (win) setWindow(win)
@@ -230,6 +252,17 @@ function register(win) {
   })
 
   ipcMain.handle('api:call', async (event, msg) => {
+    // GONDEREN DOGRULAMASI. Bu kanal API anahtarlarini okuyabilen, hafiza ve
+    // veri dosyalarini silebilen komutlar tasiyor; yalnizca ANA CERCEVEDEKI
+    // yerel index.html'den gelen istekler kabul edilir.
+    if (!gecerliGonderen(event)) {
+      logfile.write({
+        level: 'hata',
+        source: 'guvenlik',
+        message: 'Beklenmeyen kaynaktan api:call reddedildi',
+      })
+      return { ok: false, error: 'Bu istek kabul edilmedi.' }
+    }
     const cmd = msg && msg.cmd ? String(msg.cmd) : ''
     const payload = msg && msg.payload ? msg.payload : {}
     if (kapaniyor) return { ok: false, error: 'Uygulama kapanıyor.' }

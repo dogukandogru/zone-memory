@@ -144,3 +144,34 @@ test('eski bicimli dosya gocurulur: esikler korunur, signalCfg.outcomeCfg atilir
   // Goc diske de yazilir.
   assert.strictEqual(diskten(dir).settingsVersion, settings.SETTINGS_VERSION)
 })
+
+// ---------------------------------------------------------------------------
+// C8 - PROTOTIP KIRLETMESI
+// ---------------------------------------------------------------------------
+// Ayar anahtari renderer'dan geliyor. `setPath('__proto__.x', 1)` ana surecte
+// Object.prototype'a yaziyordu ve bu, uygulamanin TAMAMININ davranisini
+// degistirebilirdi.
+//
+// Not: korumanin ilk yazimi da ayni tuzaga dusmustu. Yasakli anahtarlar
+// `{ __proto__: 1 }` nesne degismeziyle tutulunca kendi ozelligi olusmuyor,
+// nesnenin PROTOTIPI ayarlaniyor ve kontrol `__proto__`u hic yakalamiyor.
+
+test('__proto__ ve constructor anahtarlari Object.prototype\'a yazamaz', () => {
+  const { settings } = tazeAyarlar()
+  {
+    settings.set('__proto__.kotu', 1)
+    settings.set('constructor.prototype.kotu2', 2)
+    settings.save(JSON.parse('{"__proto__":{"kotu3":3}}'))
+    settings.save(JSON.parse('{"signalCfg":{"__proto__":{"kotu4":4}}}'))
+
+    const bos = {}
+    assert.strictEqual(bos.kotu, undefined, '__proto__.x yazilmamali')
+    assert.strictEqual(bos.kotu2, undefined, 'constructor.prototype.x yazilmamali')
+    assert.strictEqual(bos.kotu3, undefined, 'yamadaki __proto__ yazilmamali')
+    assert.strictEqual(bos.kotu4, undefined, 'ic ice __proto__ yazilmamali')
+
+    // Normal ayarlar etkilenmemeli.
+    settings.set('timeframe', '1h')
+    assert.strictEqual(settings.get('timeframe'), '1h')
+  }
+})

@@ -101,6 +101,8 @@ function deepMerge(base, patch) {
   const out = deepClone(base)
   if (!isPlainObject(patch)) return out
   for (const key of Object.keys(patch)) {
+    // Prototip kirletmesi: yama renderer'dan geliyor.
+    if (!anahtarGuvenliMi(key)) continue
     const pv = patch[key]
     if (pv === undefined) continue
     if (isPlainObject(pv) && isPlainObject(out[key])) {
@@ -124,9 +126,29 @@ function getPath(obj, key) {
   return cur
 }
 
+/**
+ * PROTOTIP KIRLETMESINE KAPALI ANAHTARLAR.
+ *
+ * `setPath('__proto__.x', 1)` ana surecte Object.prototype'a yaziyordu ve
+ * bu, uygulamanin tamaminin davranisini degistirebilirdi. Anahtar renderer'dan
+ * geldigi icin bu kapi acik birakilamaz.
+ */
+// DIKKAT: bu listeyi NESNE DEGISMEZI olarak yazmak ise yaramaz.
+// `{ __proto__: 1 }` kendi ozelligi olusturmaz, nesnenin PROTOTIPINI ayarlar
+// (ya da deger nesne degilse sessizce yok sayilir), yani `hasOwnProperty`
+// kontrolu `__proto__`u hic yakalamaz. Ilk yazimda tam olarak bu oldu ve
+// koruma calismadi. Dizi kullaniliyor.
+const YASAKLI_ANAHTARLAR = ['__proto__', 'constructor', 'prototype']
+function anahtarGuvenliMi(k) {
+  return YASAKLI_ANAHTARLAR.indexOf(String(k)) === -1
+}
+
 /** Nokta ile ayrilmis yola deger yazar, ara nesneleri olusturur. */
 function setPath(obj, key, val) {
   const parts = String(key).split('.')
+  for (const p of parts) {
+    if (!anahtarGuvenliMi(p)) return obj
+  }
   let cur = obj
   for (let i = 0; i < parts.length - 1; i++) {
     const p = parts[i]

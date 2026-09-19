@@ -55,7 +55,10 @@ function createWindow() {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      // Kum havuzu ACIK. preload yalnizca contextBridge ve ipcRenderer
+      // kullaniyor, yani kum havuzuyla uyumlu. Kapali birakmak, arayuz
+      // surecine sizan bir kodun Node yeteneklerine ulasmasi demekti.
+      sandbox: true,
       preload: path.join(__dirname, 'preload.js'),
       spellcheck: false,
     },
@@ -74,6 +77,33 @@ function createWindow() {
   mainWindow.on('focus', () => {
     notify.okundu()
   })
+
+  // UZAK BIR SAYFAYA GEZINME ENGELLENIR.
+  //
+  // Ana pencereye uzak bir sayfa yuklenirse `window.api` uzerinden API
+  // anahtarlari okunabilir, hafiza ve veri dosyalari silinebilir, sinyal
+  // esikleri degistirilebilirdi. Yalnizca yerel index.html'e izin var;
+  // http(s) adresleri varsayilan tarayiciya gonderilir.
+  const gezinmeyiDenetle = (olay, hedef) => {
+    let url = null
+    try {
+      url = new URL(hedef)
+    } catch (err) {
+      olay.preventDefault()
+      return
+    }
+    const yerelMi = url.protocol === 'file:' && url.pathname.endsWith('/renderer/index.html')
+    if (yerelMi) return
+    olay.preventDefault()
+    logfile.write({
+      level: 'hata',
+      source: 'guvenlik',
+      message: 'Engellenen gezinme: ' + hedef,
+    })
+    if (url.protocol === 'http:' || url.protocol === 'https:') shell.openExternal(hedef)
+  }
+  mainWindow.webContents.on('will-navigate', gezinmeyiDenetle)
+  mainWindow.webContents.on('will-redirect', gezinmeyiDenetle)
 
   // Arayuz sureci cokerse ekran bosalir ve hicbir iz kalmazdi.
   mainWindow.webContents.on('render-process-gone', (olay, ayrinti) => {
@@ -215,7 +245,10 @@ function buildMenu() {
     submenu: [
       { label: 'Yenile', role: 'reload' },
       { label: 'Zorla Yenile', role: 'forceReload' },
-      { label: 'Gelistirici Araclari', role: 'toggleDevTools' },
+      // Paketli surumde gelistirici araclari menude GORUNMEZ: musteriye
+      // giden yapida arayuz surecine kod yapistirmayi kolaylastirmanin
+      // gerekcesi yok. Gelistirmede (--dev) yerinde kalir.
+      ...(app.isPackaged ? [] : [{ label: 'Gelistirici Araclari', role: 'toggleDevTools' }]),
       { type: 'separator' },
       { label: 'Gercek Boyut', role: 'resetZoom' },
       { label: 'Yakinlastir', role: 'zoomIn' },
@@ -300,6 +333,14 @@ if (!gotLock) {
     paths.ensureDirs()
     // Eski gunlukleri temizle ve klasoru kur.
     logfile.init()
+    // Kamera, mikrofon, konum gibi izinler bu uygulamada HIC gerekmiyor;
+    // varsayilan olarak hepsi reddedilir.
+    try {
+      const { session } = require('electron')
+      session.defaultSession.setPermissionRequestHandler((wc, izin, cb) => cb(false))
+    } catch (err) {
+      // Oturum kurulamadiysa varsayilan davranis surer.
+    }
     // Bildirime tiklaninca pencere one gelsin (macOS'ta pencere kapaliysa
     // yeniden olusturulur).
     notify.init({ showWindow: pencereyiGoster })

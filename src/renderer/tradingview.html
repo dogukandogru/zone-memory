@@ -91,7 +91,12 @@
   </div>
 
   <div id="frameBox">
-    <iframe id="tvWidget" title="TradingView XAUUSD" referrerpolicy="origin" allowtransparency="true" scrolling="no"></iframe>
+    <!-- UZAK ICERIK KUM HAVUZUNDA: TradingView sayfasi bu belgenin DOM'una
+         ya da ust pencereye erisememeli. allow-same-origin gerekli, cunku
+         widget kendi kaynagindaki depolamayi kullaniyor. -->
+    <iframe id="tvWidget" title="TradingView XAUUSD" referrerpolicy="origin"
+            sandbox="allow-scripts allow-same-origin allow-popups"
+            allowtransparency="true" scrolling="no"></iframe>
     <div id="fallback">
       TradingView grafiği yüklenemedi. İnternet bağlantısını kontrol edip
       <b>Yeniden yükle</b> düğmesine basın.

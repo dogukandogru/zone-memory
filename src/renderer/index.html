@@ -4,12 +4,18 @@
   <meta charset="utf-8">
   <!--
     CSP: yerel dosyalar disinda kaynak yuklenmez. TradingView gomulu grafigi
-    icin yalnizca frame-src'e izin verilir. lightweight-charts yerel bir
-    <script src> ile geldiginden script-src 'self' yeterlidir; 'unsafe-inline'
-    panels.js'in calisma aninda ekledigi <style> blogu ve tradingview.html
-    icindeki kucuk yardimci betik icin birakilmistir.
+    icin yalnizca frame-src'e izin verilir.
+
+    script-src'te 'unsafe-inline' YOK: bu sayfada satir ici betik yok
+    (lightweight-charts ve app.js ayri <script src> ile geliyor) ve satir ici
+    betige izin vermek, arayuze sizan bir metnin calistirilabilmesi demekti.
+    Onceki yorum bunu "tradingview.html icindeki yardimci betik icin" diye
+    aciklıyordu, ama o AYRI BIR BELGEDIR ve kendi CSP'sine tabidir.
+
+    style-src'te 'unsafe-inline' KALIYOR: panels.js ve chart.js oge
+    stillerini (element.style) calisma aninda yaziyor.
   -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; frame-src 'self' https://s.tradingview.com https://www.tradingview.com; media-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; frame-src 'self' https://s.tradingview.com https://www.tradingview.com; media-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="color-scheme" content="dark">
   <title>Zone Memory - XAUUSD</title>
   <link rel="stylesheet" href="styles.css">
