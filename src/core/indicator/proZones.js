@@ -114,10 +114,25 @@ const DEFAULT_PARAMS = {
 
   // --- Baglam (Pine'da yok, ozellik vektoru ve skor icin) ---
   useHtfTrend: true,
-  trendTf: '15m',
+  // TREND ZAMAN DILIMI: 'auto' = grafigin dort kati.
+  //
+  // Bir donem sabit '15m' idi ve 15m grafikte bilesen kendi zaman diliminin
+  // EMA'sini soruyordu, yani "ust zaman dilimi trendi" adi yanilticiydi.
+  trendTf: 'auto',
   emaFastLen: 50,
   emaSlowLen: 200,
-  sessionTz: 'Europe/Istanbul',
+  // SEANS SAAT DILIMI: Europe/Athens.
+  //
+  // Kullanicinin saati Istanbul, ama seans ve saat OZELLIKLERI icin Istanbul
+  // yanlis bir referans: Turkiye 2016 Eylul'unde yaz saatini birakti, bu
+  // yuzden Londra'nin 08:00 acilisi 2016 oncesi yerel 10:00, sonrasinda
+  // kislari yerel 11:00 oluyordu. kNN ayni piyasa anini iki farkli saat
+  // olarak goruyordu. Atina AB kuralini kesintisiz surdurdugu icin ayni an
+  // butun tarihte ayni yerel saate denk gelir (olculdu: Londra 08:00 ->
+  // 2012, 2017 ve 2024'te her zaman yerel 10).
+  //
+  // Ekranda gorunen saatler DEGISMEDI, onlar hala Istanbul saatidir.
+  sessionTz: 'Europe/Athens',
   hardSessionGate: false,
   useAsia: true,
   useLondon: true,
@@ -164,10 +179,17 @@ function emptyContext (n) {
 function fillHtfTrend (s, p, tfSec, bullTrend, bearTrend) {
   const n = s.length
   let trendSec
-  try {
-    trendSec = tfSeconds(p.trendTf)
-  } catch (err) {
-    trendSec = TREND_TF_FALLBACK_SEC
+  // 'auto': grafik zaman diliminin DORT KATI. Bir donem varsayilan sabit
+  // '15m' idi ve 15m grafikte "ust zaman dilimi trendi" aslinda AYNI zaman
+  // dilimi oluyordu, yani bilesen kendi grafiginin EMA'sini soruyordu.
+  if (p.trendTf === 'auto') {
+    trendSec = tfSec * 4
+  } else {
+    try {
+      trendSec = tfSeconds(p.trendTf)
+    } catch (err) {
+      trendSec = TREND_TF_FALLBACK_SEC
+    }
   }
 
   if (!(trendSec > tfSec)) {
@@ -393,6 +415,10 @@ function runIndicator (s, params, tfSec, onProgress) {
   const minVolRatio = p.minVolRatio
   const minFlowToShow = p.minFlowToShow
   const hardSessionGate = !!p.hardSessionGate
+  // Seans bileseni ancak AYIRT EDICIYSE skora girer: dort seans da acikken
+  // her olayda 1 cikar ve yalnizca maxScore'u sisirir (bkz. emitEvent).
+  const seansSkoruSayilir = !!p.useSessionScore &&
+    !(p.useAsia && p.useLondon && p.useNewYork && p.useOther)
 
   /** @type {Array<Object>} canli kutular, olusum sirasinda */
   let live = []
@@ -458,7 +484,12 @@ function runIndicator (s, params, tfSec, onProgress) {
     let maxScore = 0
     if (p.useFlowScore) { maxScore++; if (flowOk) score++ }
     if (p.useTrendScore) { maxScore++; if (trendOk) score++ }
-    if (p.useSessionScore) { maxScore++; if (sessionAllowed) score++ }
+    // SEANS BILESENI: dort seansin hepsi acikken bu bilesen HER OLAYDA 1'dir,
+    // yani skora hicbir sey katmaz ama maxScore'u bir artirir. Etkisi sessizdi:
+    // "5 bilesenden 3'u" diye okunan minScoreForSignal=3 esigi, gercekte
+    // "4 bilesenden 2'si" oluyordu. Artik bilesen ancak en az bir seans
+    // KAPALIYSA sayiliyor.
+    if (seansSkoruSayilir) { maxScore++; if (sessionAllowed) score++ }
     if (p.useRejectionScore) { maxScore++; if (rejectOk) score++ }
     if (p.useVolumeScore) { maxScore++; if (volOk) score++ }
     if (maxScore === 0) maxScore = 1
@@ -528,7 +559,9 @@ function runIndicator (s, params, tfSec, onProgress) {
       parts: {
         flow: flowOk,
         trend: p.useTrendScore ? trendOk : false,
-        session: p.useSessionScore ? sessionAllowed : false,
+        // Bilesen skora girmiyorsa parca da false yazilir; features.js
+        // pSession degerini buradan okur.
+        session: seansSkoruSayilir ? sessionAllowed : false,
         rejection: p.useRejectionScore ? rejectOk : false,
         volume: p.useVolumeScore ? volOk : false,
       },

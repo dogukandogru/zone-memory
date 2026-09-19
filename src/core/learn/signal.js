@@ -330,8 +330,13 @@ function decideFromCandidates (ev, candidates, levels, cfg, ek) {
 
   const maxScore = num(t.maxScore, 0)
   if (maxScore > 0) {
-    reasons.push('Olay skoru ' + Math.round(num(t.score, 0)) + '/' + Math.round(maxScore) +
-      (t.qualified ? ', indikatör eşiğini geçti' : ', indikatör eşiğini geçmedi'))
+    // Skor SINYAL KARARINA GIRMEZ, yalnizca indikatorun kendi etiketidir.
+    // Olculdu: esigi gecen olaylar gecmeyenlerden daha iyi degil (15m
+    // dokunusta %15,9'a karsi %20,8), bu yuzden cumle bir kalite iddiasi
+    // tasimiyor.
+    reasons.push('İndikatör skoru ' + Math.round(num(t.score, 0)) + '/' + Math.round(maxScore) +
+      (t.qualified ? ', indikatör eşiği geçildi' : ', indikatör eşiği geçilmedi') +
+      ' (bilgi amaçlı, sinyal kararına girmez)')
   }
 
   // ATR yoksa plan fiyata cevrilemez; bolge genisligi makul bir vekildir.

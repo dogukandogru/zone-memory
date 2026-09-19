@@ -3,7 +3,7 @@
 /**
  * Seans hesaplari (CONTRACTS.md bolum 8).
  *
- * Seans, Europe/Istanbul yerel saatine gore belirlenir. 6 milyon bar icin bar
+ * Seans, Europe/Athens yerel saatine gore belirlenir. 6 milyon bar icin bar
  * basina Intl.DateTimeFormat cagirmak kabul edilemez, bu yuzden ofset GUN
  * bazinda onbelleklenir: bir UTC gunu icin ofset bir kez hesaplanir ve o gunun
  * tum barlarina uygulanir.
@@ -15,7 +15,10 @@
  */
 
 const SESSIONS = ['Asia', 'London', 'New York', 'Other']
-const DEFAULT_TZ = 'Europe/Istanbul'
+// Seans siniflandirmasinin varsayilan saat dilimi. Istanbul DEGIL: Turkiye
+// 2016'da yaz saatini biraktigi icin ayni piyasa ani yillar arasinda farkli
+// yerel saate dusuyordu (bkz. indicator/proZones.js sessionTz notu).
+const DEFAULT_TZ = 'Europe/Athens'
 const DAY = 86400
 
 // Saat dilimi basina bicimlendirici onbellegi: Intl nesnesi kurmak pahalidir.
@@ -198,7 +201,7 @@ function sessionIndexOfHour (h) {
 /**
  * Her bar icin yerel saat (0..23).
  * @param {Float64Array|number[]} timeArr UNIX saniye (UTC)
- * @param {string} [tz] varsayilan Europe/Istanbul
+ * @param {string} [tz] varsayilan Europe/Athens
  * @returns {Uint8Array}
  */
 function localHourArray (timeArr, tz) {

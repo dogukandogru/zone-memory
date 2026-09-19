@@ -474,6 +474,16 @@ function sonucBilgisi(s) {
   }
 }
 
+/** Skor bilesenlerinin okunabilir adlari. */
+const PARCA_ADLARI = {
+  flow: 'akış gücü',
+  trend: 'üst TF trendi',
+  session: 'seans',
+  rejection: 'fitil reddi',
+  volume: 'hacim',
+  qualified: 'eşiği geçti (bileşik)',
+}
+
 /** outcome etiketinin okunabilir hali. */
 function outcomeAdi(outcome) {
   if (outcome === 'respect') return 'Bölge tuttu'
@@ -960,6 +970,41 @@ export function renderMemory(el, summary, prototypes) {
     ? tablo(['Tür', 'Toplam', 'Saygı', 'Kırılım', 'Oran'], turSatirlari)
     : h('div', 'small muted', 'Tür dağılımı yok.'))
 
+  // SKOR BILESENLERI: her bilesen gercekten ayirt ediyor mu.
+  //
+  // Skor "eşik geçti" etiketini uretiyor ama bilesenlerin ayirt edip etmedigi
+  // hic olculmemisti. Tablo her bilesen icin bilesenin DOGRU oldugu ve
+  // OLMADIGI olaylarin oranini yan yana koyar; son sutun iki %95 araliginin
+  // ortusup ortusmedigini soyler.
+  const parcalar = s.byPart || null
+  if (parcalar) {
+    el.appendChild(bolumBasligi('Skor bileşenleri (gerçekten ayırt ediyor mu)'))
+    const parcaSatirlari = []
+    for (const tur of ['form', 'touch']) {
+      const grup = parcalar[tur]
+      if (!grup) continue
+      for (const ad of Object.keys(grup)) {
+        const g = grup[ad]
+        if (!g || !g.evet || !g.hayir) continue
+        if (g.evet.total === 0 || g.hayir.total === 0) continue
+        parcaSatirlari.push([
+          turAdi(tur) + ' - ' + (PARCA_ADLARI[ad] || ad),
+          tam(g.evet.total) + ' / ' + formatPercent(g.evet.winRate, 1),
+          tam(g.hayir.total) + ' / ' + formatPercent(g.hayir.winRate, 1),
+          (Number.isFinite(g.diffPts) ? (g.diffPts >= 0 ? '+' : '') + formatNumber(g.diffPts, 1) : '-') + ' puan',
+          g.separates ? (g.diffPts >= 0 ? 'ayırt ediyor' : 'TERS YÖNDE ayırt ediyor') : 'fark yok',
+        ])
+      }
+    }
+    el.appendChild(parcaSatirlari.length
+      ? tablo(['Bileşen', 'Var (n / oran)', 'Yok (n / oran)', 'Fark', 'Sonuç'], parcaSatirlari)
+      : h('div', 'small muted', 'Bileşen kırılımı yok, hafızayı yeniden tarayın.'))
+    el.appendChild(h('div', 'small muted',
+      'Son sütun iki %95 Wilson aralığının örtüşüp örtüşmediğine bakar. "Fark yok" o bileşenin ' +
+      'bir şey söylemediği anlamına gelir. "Ters yönde" ise bileşen doğru olduğunda sonucun ' +
+      'daha KÖTÜ olduğu ölçülmüş demektir. Skor sinyal kararına girmez, bilgi amaçlıdır.'))
+  }
+
   // Seans dagilimi
   el.appendChild(bolumBasligi('Seans dağılımı'))
   const seanslar = s.bySession || {}
@@ -1132,6 +1177,37 @@ function yoldanSil(nesne, yol) {
 }
 
 /**
+ * Trend zaman dilimi grafikten buyuk degilse uyarir.
+ *
+ * `fillHtfTrend` bu durumda sessizce grafik zaman dilimine duser: 15m grafikte
+ * trendTf de 15m ise "ust zaman dilimi trendi" bileseni aslinda AYNI zaman
+ * diliminin EMA'sini sorar. Bir donem varsayilan sabit '15m' oldugu icin bu
+ * sessizce boyle calisiyordu.
+ *
+ * @param {(yol:string)=>*} oku
+ * @returns {string}
+ */
+function trendTfUyarisi(oku) {
+  const trend = oku('indicatorParams.trendTf')
+  if (!trend || trend === 'auto') return ''
+  const grafik = oku('timeframe')
+  if (!grafik) return ''
+  const sn = (tf) => {
+    const m = String(tf).match(/^(\d+)([mhd])$/)
+    if (!m) return NaN
+    const k = m[2] === 'm' ? 60 : (m[2] === 'h' ? 3600 : 86400)
+    return Number(m[1]) * k
+  }
+  const t = sn(trend)
+  const g = sn(grafik)
+  if (!Number.isFinite(t) || !Number.isFinite(g)) return ''
+  if (t > g) return ''
+  return 'Trend zaman dilimi (' + trend + ') grafiğin zaman diliminden (' + grafik +
+    ') büyük değil. Bu durumda "üst zaman dilimi trendi" bileşeni kendi grafiğinin ' +
+    'EMA\'sını sorar, yani adı yanıltıcı olur. "auto" seçeneği grafiğin 4 katını kullanır.'
+}
+
+/**
  * Esik birlesimi hic sinyal uretemiyorsa uyarir.
  *
  * Kalibrasyon (onsel) gosterilen orani havuz tabanina dogru ceker: az
@@ -1242,9 +1318,13 @@ function ayarGruplari(saglayiciSecenekleri) {
         { yol: 'indicatorParams.wickMinRatio', ad: 'Fitil reddi oranı', tip: 'sayi', adim: 0.05, min: 0, max: 1,
           not: 'Olay barının fitili bar aralığının bu kadarını kaplarsa red bileşeni sayılır.' },
         { yol: 'indicatorParams.trendTf', ad: 'Trend zaman dilimi', tip: 'secim',
-          secenekler: TF_SECENEKLERI.map((t) => ({ deger: t, ad: t })),
-          not: 'Üst zaman dilimi trend süzgeci, büyük seçilirse seri yeniden örneklenir. Kutu oluşumunu etkilemez, yalnızca skora girer.' },
+          secenekler: [{ deger: 'auto', ad: 'auto (grafiğin 4 katı)' }]
+            .concat(TF_SECENEKLERI.map((t) => ({ deger: t, ad: t }))),
+          not: 'Üst zaman dilimi trend süzgeci. Grafiğin zaman diliminden BÜYÜK olmalı: ' +
+            'eşit ya da küçük seçilirse bileşen kendi grafiğinin EMA\'sını sorar ve ' +
+            '"üst zaman dilimi trendi" adı yanıltıcı olur. Kutu oluşumunu etkilemez, yalnızca skora girer.' },
       ],
+      capraz: trendTfUyarisi,
     },
     {
       baslik: 'Seans seçimleri',

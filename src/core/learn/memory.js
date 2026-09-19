@@ -32,6 +32,7 @@ const { buildFeatures, CTX_NAMES, WINDOW_BARS } = require('./features')
 const { sliceSeries, lastIndexAtOrBefore } = require('../series')
 const { tfSeconds } = require('../tf')
 const { createMarketCalendar } = require('../session')
+const stats = require('./stats')
 
 /** Ozet tablolarinda her zaman gorunmesini istedigimiz seans adlari. */
 const SESSION_NAMES = ['Asia', 'London', 'New York', 'Other']
@@ -418,6 +419,56 @@ function closeBucket (b) {
 }
 
 /**
+ * SKOR BILESENLERININ KIRILIMI
+ * ---------------------------------------------------------------------------
+ * Skor "sinyal" ve "nitelikli" etiketlerini belirliyor ama bilesenlerin
+ * gercekten ayirt edip etmedigi hic olculmemisti. Burada her bilesen icin
+ * bilesenin DOGRU oldugu ve OLMADIGI olaylar ayri sayilir; arayuz iki kovanin
+ * oranini ve guven araligini yan yana gosterir. Aralar ortusuyorsa o bilesen
+ * bir sey soylemiyor demektir; ters yondeyse (olculdu: hacim bileseni kenar
+ * girisli dokunuslarda %26,4'e karsi %36,1) zarar veriyor demektir.
+ */
+const SKOR_PARCALARI = ['flow', 'trend', 'session', 'rejection', 'volume']
+
+/** Bilesen kovalari: parca -> {evet, hayir}. */
+function emptyParts () {
+  const out = {}
+  for (const ad of SKOR_PARCALARI) out[ad] = { evet: emptyBucket(), hayir: emptyBucket() }
+  // `qualified` bilesen degil sonuctur, ama ayni soruyu sorar: nitelikli
+  // sayilan olaylar gercekten daha iyi mi.
+  out.qualified = { evet: emptyBucket(), hayir: emptyBucket() }
+  return out
+}
+
+/** Bir olayi bilesen kovalarina isler. */
+function pushParts (hedef, ev) {
+  const parts = ev && ev.parts ? ev.parts : null
+  for (const ad of SKOR_PARCALARI) {
+    if (!parts) continue
+    const deger = parts[ad] === true
+    pushBucket(hedef[ad][deger ? 'evet' : 'hayir'], ev)
+  }
+  pushBucket(hedef.qualified[ev.qualified === true ? 'evet' : 'hayir'], ev)
+}
+
+/** Bilesen kovalarinin oranlarini ve %95 araliklarini kapatir. */
+function closeParts (hedef) {
+  for (const ad of Object.keys(hedef)) {
+    for (const kova of ['evet', 'hayir']) {
+      const b = closeBucket(hedef[ad][kova])
+      b.ci = stats.wilson(b.success, b.total)
+    }
+    const e = hedef[ad].evet
+    const h = hedef[ad].hayir
+    hedef[ad].diffPts = (e.total > 0 && h.total > 0) ? (e.winRate - h.winRate) * 100 : null
+    // AYIRT EDICI MI: iki aralik ortusmuyorsa evet. Ortusuyorsa gozlenen fark
+    // orneklem gurultusuyle aciklanabilir.
+    hedef[ad].separates = !!(e.ci && h.ci && (e.ci.lo > h.ci.hi || h.ci.lo > e.ci.hi))
+  }
+  return hedef
+}
+
+/**
  * Hafiza ozeti: toplam, etiketlenmis, basarili, basarisiz, timeout,
  * yon dagilimi, seans dagilimi, yillara gore kirilim, ortalama mfeAtr/maeAtr
  * ve ham basari orani.
@@ -448,6 +499,9 @@ function summarize (memory) {
   // Olay turu kirilimi: kutu olusumu ile bolgeye geri donus ayri kurulumlardir,
   // ham basari oranlarinin da ayri okunmasi gerekir.
   const byKind = { form: emptyBucket(), touch: emptyBucket() }
+  // Bilesen kirilimi TUR BAZINDA: iki turun taban orani cok farkli oldugu icin
+  // karisik sayilar bir bilesenin etkisini gizliyor.
+  const byPart = { form: emptyParts(), touch: emptyParts() }
   const bySession = {}
   for (let i = 0; i < SESSION_NAMES.length; i++) bySession[SESSION_NAMES[i]] = emptyBucket()
   const yearMap = new Map()
@@ -482,7 +536,9 @@ function summarize (memory) {
     const dir = ev.direction === 'SELL' ? 'SELL' : 'BUY'
     pushBucket(byDirection[dir], ev)
 
-    pushBucket(byKind[ev.kind === 'form' ? 'form' : 'touch'], ev)
+    const turAd = ev.kind === 'form' ? 'form' : 'touch'
+    pushBucket(byKind[turAd], ev)
+    pushParts(byPart[turAd], ev)
 
     const ses = typeof ev.session === 'string' && ev.session ? ev.session : 'Other'
     if (!bySession[ses]) bySession[ses] = emptyBucket()
@@ -506,6 +562,8 @@ function summarize (memory) {
   closeBucket(byDirection.SELL)
   closeBucket(byKind.form)
   closeBucket(byKind.touch)
+  closeParts(byPart.form)
+  closeParts(byPart.touch)
   const sessionKeys = Object.keys(bySession)
   for (let i = 0; i < sessionKeys.length; i++) closeBucket(bySession[sessionKeys[i]])
 
@@ -536,6 +594,8 @@ function summarize (memory) {
     lastTime: lastTime,
     byDirection: byDirection,
     byKind: byKind,
+    // Skor bilesenlerinin tur bazinda ayirt etme gucu (bkz. closeParts).
+    byPart: byPart,
     bySession: bySession,
     byYear: byYear,
   }

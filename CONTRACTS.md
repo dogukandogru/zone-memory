@@ -787,7 +787,13 @@ module.exports = {
   extendMemory(s, memory, cfg, onProgress),
   /**
    * Hafiza ozeti: toplam, basarili, basarisiz; yon, OLAY TURU (byKind),
-   * seans dagilimi ve yillara gore kirilim.
+   * SKOR BILESENLERI (byPart), seans dagilimi ve yillara gore kirilim.
+   *
+   * `byPart`: tur -> bilesen -> {evet, hayir, diffPts, separates}. Her bilesen
+   * icin bilesenin DOGRU oldugu ve OLMADIGI olaylar ayri sayilir, iki kovanin
+   * %95 Wilson araligi hesaplanir ve araliklar ortusmuyorsa `separates` true
+   * olur. Bilesenler: flow, trend, session, rejection, volume ve bilesik
+   * `qualified`. Olculdu: hicbiri dogru yonde ayirt etmiyor (bkz. README 6.2).
    */
   summarize(memory),
 }

@@ -1704,9 +1704,13 @@ function bolgeAyrintisiniCiz(z, dokunuslar) {
       const skor = document.createElement('span')
       skor.textContent = formatNumber(t.score, 0) + '/' + formatNumber(t.maxScore, 0)
       sag.appendChild(skor)
+      // "Sinyal" / "Kayit" YAZMIYOR: olculdu, indikator esigini gecen olaylar
+      // gecmeyenlerden DAHA IYI degil, hatta daha kotu (15m dokunusta %15,9'a
+      // karsi %20,8). Etiket artik yalnizca esigin gecildigini soyluyor,
+      // kalite iddiasi tasimiyor; sinyal karari kNN esikleriyle verilir.
       const nitelik = document.createElement('span')
-      nitelik.className = 'row-sub ' + (t.qualified ? 'up' : 'muted')
-      nitelik.textContent = t.qualified ? 'Sinyal' : 'Kayıt'
+      nitelik.className = 'row-sub muted'
+      nitelik.textContent = t.qualified ? 'eşik geçti' : 'eşik altı'
       sag.appendChild(nitelik)
       satir.appendChild(sag)
 

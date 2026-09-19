@@ -163,6 +163,26 @@ function indikatorAyariniGocur(parsed) {
 }
 
 /**
+ * Kayitli `Europe/Istanbul` seans saat dilimini `Europe/Athens`e tasir.
+ *
+ * Neden: Turkiye 2016 Eylul'unde yaz saatini birakti, bu yuzden Londra'nin
+ * 08:00 acilisi 2016 oncesi yerel 10:00, sonrasinda kislari yerel 11:00
+ * oluyordu ve kNN ayni piyasa anini iki farkli saat olarak goruyordu. Eski
+ * ayar dosyasinda bu deger acikca yaziliysa gocurulur; kullanici baska bir
+ * saat dilimi sectiyse dokunulmaz.
+ *
+ * @param {Object} parsed
+ * @returns {Object}
+ */
+function seansSaatiniGocur(parsed) {
+  if (!isPlainObject(parsed) || !isPlainObject(parsed.indicatorParams)) return parsed
+  if (parsed.indicatorParams.sessionTz !== 'Europe/Istanbul') return parsed
+  const out = deepClone(parsed)
+  out.indicatorParams.sessionTz = 'Europe/Athens'
+  return out
+}
+
+/**
  * SAYISAL AYAR SINIRLARI
  * ---------------------------------------------------------------------------
  * Arayuzdeki min/max yalnizca HTML ozniteligidir, tarayici bunu zorlamaz ve
@@ -340,7 +360,7 @@ function yamayiUret(birlesik, oncekiYama, gelenYama) {
  * @returns {{yama:object, gocuruldu:boolean}}
  */
 function ayarGocu(parsed) {
-  const ham = indikatorAyariniGocur(parsed || {})
+  const ham = seansSaatiniGocur(indikatorAyariniGocur(parsed || {}))
   if (num(ham.settingsVersion) === SETTINGS_VERSION) {
     const yama = deepClone(ham)
     delete yama.settingsVersion

@@ -78,24 +78,43 @@ Yöntem:
 - Dokunuş olaylarında giriş gerçekçidir: karar bar kapanışında verilir, emir
   bir sonraki bardan itibaren bölge kenarına konur, dolmazsa işlem yazılmaz.
 
+Tablo **kutudan çıkan varsayılan eşiklerle** üretildi (benzerlik 0,80, en az
+eşleşme 15, en az tutma %62, kalibrasyon önseli 20). Tekrar üretmek için:
+`node scripts/measure-all.mjs`.
+
 | TF | olay | işlem | isabet [%95 aralık] | taban | katkı | p | net/işlem [%95 aralık] | sonuç |
 |---|---|---|---|---|---|---|---|---|
-| 1m | 41.260 | 3.705 | %50,6 [49,0, 52,2] | %49,4 | +1,2 puan | 0,15 | -0,229 [-0,294, -0,155] | kanıtlanmadı |
-| 5m | 13.680 | 990 | %47,7 [44,6, 50,8] | %45,9 | +1,8 puan | 0,28 | -0,084 [-0,211, +0,043] | kanıtlanmadı |
-| 15m | 5.781 | 124 | %39,5 [31,4, 48,3] | %39,3 | +0,3 puan | 1,00 | -0,167 [-0,518, +0,188] | kanıtlanmadı |
-| 1h | 1.471 | 122 | %54,1 [45,3, 62,7] | %47,9 | +6,2 puan | 0,18 | +0,103 [-0,250, +0,445] | kanıtlanmadı |
-| 4h | 490 | 0 | - | - | - | - | - | yetersiz hafıza |
+| 1m | 41.446 | 282 | %49,6 [43,9, 55,4] | %49,5 | +0,2 puan | 1,00 | -0,247 [-0,491, -0,014] | kanıtlanmadı |
+| 5m | 13.729 | 733 | %44,9 [41,3, 48,5] | %45,9 | -1,1 puan | 0,58 | -0,209 [-0,361, -0,051] | kanıtlanmadı |
+| 15m | 5.801 | 22 | %40,9 [23,3, 61,3] | %39,4 | +1,5 puan | 1,00 | -0,104 [-0,870, +0,702] | kanıtlanmadı |
+| 1h | 1.481 | 86 | %48,8 [38,6, 59,2] | %47,8 | +1,0 puan | 0,91 | -0,128 [-0,570, +0,279] | kanıtlanmadı |
+| 4h | 491 | 0 | - | - | - | - | - | yetersiz hafıza |
 
 **Bu tablo nasıl okunur.** Bakılacak sayı, işaret değil **aralığın tamamıdır**.
-1h'de net beklenti pozitif görünüyor (+0,103 ATR) ama %95 aralığı sıfırı
-içeriyor ve tabandan farkın p değeri 0,18: bu sonuç şansla açıklanabilir, yani
-henüz bir katma değer kanıtı değildir. 1 dakikalıkta durum daha net: aralık
-tamamen negatif, yani işlem maliyeti brüt edimi yiyor.
+Hiçbir zaman diliminde katkı tabandan ayırt edilemiyor (p değerleri 0,58 ile
+1,00 arası) ve 1m ile 5m'de net beklentinin aralığı tamamen negatif, yani işlem
+maliyeti brüt edimi yiyor.
+
+**Bir ders:** Bu tablonun daha eski bir sürümünde 1h satırı +6,2 puan katkı ve
++0,103 ATR net gösteriyordu. O sayı bir düzeltmeye dayanamadı: seans ve saat
+özellikleri Istanbul yerine Atina saatine taşınıp "üst zaman dilimi trendi"
+gerçekten üst zaman diliminden hesaplanınca (bkz. 6.2) aynı ölçüm +1,0 puana
+indi. Yüz civarı işlemde görünen bir fark, özellik tanımındaki bir değişikliğe
+dayanmıyorsa gürültüdür.
 
 Kısaca: **sistem şu an hiçbir zaman diliminde kanıtlanmış bir katma değer
 üretmiyor.** Fikrin çalışmadığı anlamına gelmez, ölçümün dürüst hâli budur.
 `src/core/learn/presets.js` içindeki hazır ayarlar hâlâ eski indikatörden
-gelir ve yeniden aranmalıdır (parametre arama aracı planda A1 maddesidir).
+gelir. Eşikleri kendiniz arayabilirsiniz:
+
+```
+node scripts/search-params.mjs --tf 15m      # eşik ızgarası, seçim + doğrulama dilimi
+node scripts/weight-study.mjs --tf 15m       # benzerlik ağırlıkları, AUC ile
+```
+
+İkisi de dönemi ikiye böler: ızgara **geçmiş** dilimde denenir, seçilen ayar
+yalnızca **sonraki** dilimde raporlanır. Bugüne kadar hiçbir ayar doğrulama
+diliminde sıfırın üstünde bir alt sınır vermedi.
 
 Zaman dilimini değiştirdiğinizde uygulama o zaman dilimi için kayıtlı hazır
 ayarı uygular (`src/core/learn/presets.js`). Sıra şudur: çekirdek varsayılanı,
@@ -695,10 +714,52 @@ cevapsız kalıyordu.
 
 **Skor.** Kutu oluşumunun kapısı (hacim + Bollinger) kesin olduğu için o iki
 kriter her kutuda doğrudur ve skor bileşeni olarak bilgi taşımaz. Bu yüzden skor
-olayın **olduğu barda** değişen beş şeyi ölçer: akış gücü, üst zaman dilimi
-trendi, seans, fitil reddi ve o barın hacim gücü. `minScoreForSignal` (3) eşiğini
-geçen olay "nitelikli" sayılır. Skor bir kapı değildir; niteliksiz olaylar da
-hafızaya girer, çünkü benzerlik motoru tüm olayları korpus olarak kullanır.
+olayın **olduğu barda** değişen şeyleri ölçer: akış gücü, üst zaman dilimi
+trendi, seans, fitil reddi ve o barın hacim gücü.
+
+**Skor sinyal kararına girmez ve ölçülen tahmin gücü yoktur.** Hafıza
+panelindeki "Skor bileşenleri" tablosu her bileşen için bileşenin doğru olduğu
+ve olmadığı olayların oranını yan yana gösterir. Bugünkü ölçüm (hafıza
+dosyaları, 19 Eylül 2026):
+
+| Tür | Bileşen | Var | Yok | Fark | Sonuç |
+| --- | --- | --- | --- | --- | --- |
+| oluşum (15m) | hepsi | - | - | -2,7 ile +0,7 puan | hiçbiri ayırt etmiyor |
+| dokunuş (15m) | fitil reddi | %11,1 (n=352) | %19,9 | -8,9 puan | ters yönde ayırıyor |
+| dokunuş (15m) | hacim | %17,9 (n=2.249) | %23,2 | -5,3 puan | ters yönde ayırıyor |
+| dokunuş (15m) | akış, trend, eşiği geçti | - | - | -3,0 ile -0,6 puan | fark yok |
+| dokunuş (1h) | fitil reddi | %7,0 (n=86) | %19,2 | -12,2 puan | ters yönde ayırıyor |
+
+Yani skorun hiçbir bileşeni doğru yönde ayırt etmiyor; fitil reddi ve hacim
+dokunuş olaylarında **ters** yönde ayırıyor. Bu yüzden arayüz artık "Sinyal /
+Kayıt" yazmıyor, yalnızca "eşik geçti / eşik altı" diyor; sinyal kararı
+`Sinyal kararı` bölümündeki kNN eşikleriyle verilir.
+
+Bileşenlerin `use...Score` varsayılanları buna rağmen **kapatılmadı**. Nedeni
+şu: bu bayraklar hem skoru hem de özellik vektöründeki `pFlow` ... `pVolume`
+boyutlarını besliyor. Bir bayrağı kapatmak ilgili boyutu sıfırlar, yani ters
+yönlü ama **gerçek** olan bir bilgiyi benzerlik motorundan da siler. Skor zaten
+sinyal kararına girmediği için kapatmanın tek etkisi bilgi kaybı olurdu.
+
+İki bileşen ayrıca düzeltildi:
+
+- **Seans bileşeni**, dört seansın hepsi açıkken her olayda 1 çıkıyordu, yani
+  hiçbir şey ayırt etmiyor ama `maxScore`'u bir artırıyordu: "5 bileşenden 3'ü"
+  diye okunan eşik gerçekte "4 bileşenden 2'si" oluyordu. Artık bileşen ancak
+  en az bir seans **kapalıysa** sayılıyor.
+- **Üst zaman dilimi trendi** için `trendTf` varsayılanı `auto` (grafiğin 4
+  katı). Eskiden sabit `15m` olduğu için 15m grafikte bileşen kendi zaman
+  diliminin EMA'sını soruyordu.
+
+Skor bir kapı değildir; niteliksiz olaylar da hafızaya girer, çünkü benzerlik
+motoru tüm olayları korpus olarak kullanır.
+
+**Seans saat dilimi.** Seans ve saat özellikleri `Europe/Athens` yerel saatine
+göre hesaplanır (ekranda görünen saatler yine Istanbul saatidir). Nedeni:
+Türkiye 2016 Eylül'ünde yaz saatini bıraktı, bu yüzden Londra'nın 08:00 açılışı
+2016 öncesi yerel 10:00, sonrasında kışları yerel 11:00 oluyordu ve kNN aynı
+piyasa anını iki farklı saat olarak görüyordu. Atina AB kuralını kesintisiz
+sürdürdüğü için aynı an bütün tarihte aynı yerel saate düşer.
 
 ### 6.3 Sonuç etiketleme
 

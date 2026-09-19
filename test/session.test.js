@@ -201,3 +201,31 @@ test('piyasa takvimi: bir haftada acik saatler makul araliktadir', () => {
   // Haftada 5 gun x 23 saat = 115 saatin biraz altinda (hafta sonu kapali).
   assert.ok(acikSayi > 100 && acikSayi < 120, 'haftalik acik saat sayisi: ' + acikSayi)
 })
+
+// ---------------------------------------------------------------------------
+// S6 - VARSAYILAN SAAT DILIMI: AYNI PIYASA ANI HER ZAMAN AYNI YEREL SAAT
+// ---------------------------------------------------------------------------
+// Turkiye 2016 Eylul'unde yaz saatini birakti. Varsayilan Europe/Istanbul
+// oldugu surece Londra'nin 08:00 acilisi 2016 oncesi yerel 10:00, sonrasinda
+// kislari yerel 11:00 oluyordu; kNN ayni piyasa anini iki farkli saat olarak
+// goruyordu. Varsayilan Europe/Athens (kesintisiz AB kurali) bunu duzeltir.
+
+test('varsayilan saat diliminde Londra acilisi her yil ayni yerel saate duser', () => {
+  const durumlar = [
+    { ad: '2012 kis', utc: Date.UTC(2012, 0, 15, 8) / 1000 },
+    { ad: '2012 yaz', utc: Date.UTC(2012, 6, 15, 7) / 1000 },
+    { ad: '2017 kis', utc: Date.UTC(2017, 0, 15, 8) / 1000 },
+    { ad: '2017 yaz', utc: Date.UTC(2017, 6, 15, 7) / 1000 },
+    { ad: '2024 kis', utc: Date.UTC(2024, 0, 15, 8) / 1000 },
+    { ad: '2024 yaz', utc: Date.UTC(2024, 6, 15, 7) / 1000 },
+  ]
+  for (const d of durumlar) {
+    const h = localHourArray(Float64Array.from([d.utc]))[0]
+    assert.equal(h, 10, d.ad + ': Londra 08:00 yerel 10 olmali, bulunan ' + h)
+  }
+
+  // Eski varsayilan (Istanbul) 2016 SONRASI kislarda 11 verir: testin neyi
+  // yakaladigi burada yazili.
+  const istanbulKis = localHourArray(Float64Array.from([Date.UTC(2024, 0, 15, 8) / 1000]), 'Europe/Istanbul')[0]
+  assert.equal(istanbulKis, 11, 'Istanbul 2024 kisinda 11 verir (bu yuzden varsayilan degil)')
+})

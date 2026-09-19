@@ -293,7 +293,12 @@ test('olay sozlesmesi: skor bilesenleri ve alanlar her olayda dolu', () => {
     for (const anahtar of ['flow', 'trend', 'session', 'rejection', 'volume']) {
       assert.equal(typeof t.parts[anahtar], 'boolean', anahtar + ' bayragi eksik')
     }
-    assert.equal(t.maxScore, 5, 'varsayilanda bes skor bileseni acik')
+    // SEANS BILESENI: dort seansin hepsi acikken her olayda 1 cikar, yani
+    // hicbir sey ayirt etmez; bu yuzden skora GIRMEZ ve maxScore dorttur.
+    // Eskiden bes sayiliyordu ve "5 bilesenden 3'u" diye okunan esik
+    // gercekte "4 bilesenden 2'si" oluyordu.
+    assert.equal(t.maxScore, 4, 'tum seanslar acikken seans bileseni sayilmaz')
+    assert.equal(t.parts.session, false, 'sayilmayan bilesen parca olarak da false')
     assert.ok(t.score >= 0 && t.score <= t.maxScore)
     assert.equal(typeof t.qualified, 'boolean')
     assert.equal(typeof t.strong, 'boolean')
@@ -558,4 +563,26 @@ test('onProgress: en fazla 100 kez, 0..100 arasi artan yuzde ile cagrilir', () =
     if (i > 0) assert.ok(cagrilar[i] > cagrilar[i - 1], 'yuzde artmali')
   }
   assert.equal(cagrilar[cagrilar.length - 1], 100)
+})
+
+test('seans bileseni ancak bir seans KAPALIYSA skora girer', () => {
+  const d = taslak(340, () => 100)
+  dipEkle(d, 250, 5, 20000)
+  dipEkle(d, 300, 4.95)
+  const seri = series.fromArrays(d)
+
+  // Hepsi acik: bilesen ayirt edici degil, skora girmez.
+  const hepsi = runIndicator(seri, {}, ADIM)
+  assert.ok(hepsi.touches.length > 0)
+  assert.equal(hepsi.touches[0].maxScore, 4)
+
+  // Asya kapali: bilesen artik ayirt edici, skora girer.
+  const asyaKapali = runIndicator(seri, { useAsia: false }, ADIM)
+  assert.ok(asyaKapali.touches.length > 0)
+  assert.equal(asyaKapali.touches[0].maxScore, 5)
+
+  // Bilesen tumuyle kapatildiysa seans durumu ne olursa olsun sayilmaz.
+  const kapali = runIndicator(seri, { useAsia: false, useSessionScore: false }, ADIM)
+  assert.equal(kapali.touches[0].maxScore, 4)
+  assert.equal(kapali.touches[0].parts.session, false)
 })
