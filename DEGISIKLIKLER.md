@@ -56,6 +56,21 @@ olay geldiginde ayni turdeki en benzer gecmis olaylarla karsilastirilip
 | Ust zaman dilimi baglami (`learn/htfContext.js`) | Indikator kutu durumu ARALIKLARI uretir; "o an bu kutu bu sinirlarla biliniyor muydu" sorusu ileriye bakmadan cevaplanir. Olcum amacli, sinyale katilmaz. |
 | Cok boyutlu alt kume kirilimi (`cfg.subsetOf`) | Ayni kosuda birden fazla boyut (veri penceresi, ust TF bolgesi) her biri kendi tabaniyla olculur. |
 | Ulasilmaz esik uyarisi | "En az eslesme 5 + onsel 20 + en az tutma %60" gibi hic sinyal uretemeyen birlesimler Ayarlar'da yaziyla bildirilir. |
+| Hacim oran eslestirmesi (`loader.hacimOranEslemesi`) | Vekil kaynagin hacim ORANI dagilimi spot seriye tasinir. Sabit olcek kutu kapisini hic degistirmiyordu. |
+| Basis kalite olcumu (`loader.basisOlcumu`) | Ortak bar sayisi ve medyan mutlak sapma; tutmazsa bar yazilmaz. |
+| Hacim rejimi korumasi | Canlida kutu kapisi referansin 1,5 katini asarsa sinyal uretilmez. |
+| Kuyruk dosyali depo (`<ad>.bin.tail.bin`) | Bar ekleme 354 ms yerine 3,8 ms; ana dosya bayt bayt ayni kaliyor. |
+| Depo yazim kilidi ve dogrulamasi | Dosya yolu bazli mutex, surec kimlikli gecici ad, boyut ve zaman denetimi, rename sonrasi fsync. |
+| Artimli HistData indirmesi (`onChunk`) | Her ay geldikce depoya yaziliyor; tek ag hatasi saatleri kaybettirmiyor. |
+| Turetilmis dosya kaynak izi (`<ad>.bin.meta.json`) | Zaman dilimi dosyalari 1 dakikalikla ayrisirsa kendiliginden tazeleniyor. |
+| Canli yalnizca 1 dakikalige yaziyor | Grafik zaman dilimi ondan turetiliyor, dosyalar ayrisamiyor. |
+| Seans capali kova secenegi (`resample(..., {capa:'seans'})`) | 4 saatlik ve gunluk kovalar New York acilisindan sayilabiliyor (varsayilan kapali). |
+| API anahtari ana surecte ekleniyor | Veri Cek artik Polygon ve Twelve Data ile calisiyor; anahtar renderer'a hic gitmiyor ve URL yerine baslikta gidiyor. |
+| Canli kuyruk penceresi (`requiredTailBars`) | Ust zaman dilimi EMA'si isiniyor, canli olay hafizadakiyle ayni cikiyor. |
+| Canli saglik gostergesi | Uc renk, "son veri 35 sn once" metni ve ayrintili ipucu; piyasa kapaliyken uyari vermiyor. |
+| Kalici gunluk dosyasi (`logs/zone-memory-YYYY-MM-DD.log`) | Hatalar yigin iziyle diske yaziliyor, 14 gun saklaniyor, menuden acilabiliyor. |
+| Canli oturum kimligi | Durdur/baslat ve zaman dilimi degisiminde eski turun sonucu kullanilmiyor. |
+| Masaustu bildirimi (`src/main/notify.js`) | Yalnizca tetiklenen, gecikmemis ve kanitli sinyallerde; tiklayinca sinyali aciyor. |
 
 ## Duzeltilen hatalar (olcumu veya veriyi etkileyenler)
 
@@ -122,6 +137,23 @@ olay geldiginde ayni turdeki en benzer gecmis olaylarla karsilastirilip
   olarak goruyordu. Artik Europe/Athens (ekrandaki saatler degismedi).
 - **Onbellekli test yolu havuz tabanini tasimiyordu**, bu yuzden kalibrasyon
   iki yolda farkli cikiyordu.
+- **Vekil kaynagin hacim dagilimi duzeltilmiyordu.** Kutu kapisi bir ORANDIR
+  (hacim / SMA50), sabit bir olcekle carpmak onu hic degistirmez. Olculdu:
+  ham PAXG'de kapi %12,27 oraninda aciliyor, spot referansinda %3,13.
+- **Canli 1 barlik ekleme 293 MB dosyayi bastan yaziyordu** (354 ms, gunde
+  yaklasik 400 GB disk yazimi).
+- **Veri Cek API anahtarini hic almiyordu**: Polygon ve Twelve Data secilince
+  senkron her zaman "anahtar gerekli" hatasi veriyordu.
+- **Turetilmis zaman dilimi dosyalari 1 dakikalikla ayrisiyordu** (5m 323 bar
+  geride, 15m'de 181 fazla / 95 eksik bar) ve yukleyici bunu hic fark
+  etmiyordu.
+- **Canli gosterge hata durumunda da yesil kaliyordu**: "sinyal yok" ile
+  "akis olmus" ayirt edilemiyordu.
+- **Canli tik iki await noktasinda yaris durumuna aciykti**: durdur/baslat ya
+  da zaman dilimi degisiminde eski turun barlari yeni zaman diliminin
+  etiketiyle yazilabiliyordu.
+- **extendMemory hic cagrilmiyordu** ama belgeler artimli guncelleme vaat
+  ediyordu; baglansa bar indeksleri kayardi.
 
 ## Depoda yapilan tek seferlik islemler
 
