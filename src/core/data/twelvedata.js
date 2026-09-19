@@ -14,6 +14,9 @@
 const { fromArrays, sanitize, resample, emptySeries } = require('../series')
 const { httpJson, sleep, kaynakZamanDilimi, bildir } = require('./provider')
 
+/** 429 yanitinda kac kez beklenip tekrar denenecegi. */
+const MAX_HIZ_SINIRI_DENEMESI = 3
+
 const ETIKET = 'Twelve Data'
 const SEMBOL = 'XAU/USD'
 const TEMEL = 'https://api.twelvedata.com/time_series'
@@ -95,6 +98,8 @@ async function fetchCandles(opts) {
   // Hacimli bar sayaci: forex/metal serilerinde hacim hic gelmeyebilir ve o
   // donemde indikatorun hacim kapisi hic acilmaz (yani kutu olusmaz).
   let hacimliBar = 0
+  // Hiz siniri denemesi: gunluk kota dolduysa beklemek acmaz.
+  let hizSiniriDenemesi = 0
   bildir(o.onProgress, 0, ETIKET + ': ' + kod + ' mumlari indiriliyor')
 
   while (imlec <= to) {
@@ -105,15 +110,32 @@ async function fetchCandles(opts) {
       '&start_date=' + encodeURIComponent(utcMetin(imlec)) +
       '&end_date=' + encodeURIComponent(utcMetin(to)) +
       '&outputsize=' + CIKTI_BOYU +
-      '&order=ASC&timezone=UTC&format=JSON&apikey=' + encodeURIComponent(apiKey)
+      '&order=ASC&timezone=UTC&format=JSON'
 
-    const govde = await httpJson(url, { label: ETIKET, timeoutMs: 45000 })
+    // ANAHTAR URL'DE DEGIL BASLIKTA. URL'deki anahtar vekil sunucu
+    // gunluklerine, tarayici gecmisine ve hata mesajlarina dusebilir.
+    const govde = await httpJson(url, {
+      label: ETIKET,
+      timeoutMs: 45000,
+      headers: { Authorization: 'apikey ' + apiKey },
+    })
 
     if (govde && govde.status === 'error') {
       const kodu = +govde.code
       if (kodu === 429) {
-        // Dakikalik istek kotasi doldu, bir sure bekleyip ayni pencereyi tekrar iste.
-        bildir(o.onProgress, 0, ETIKET + ': hiz siniri, 65 saniye bekleniyor')
+        // Dakikalik istek kotasi doldu. Sonsuza kadar beklemek arayuzu
+        // kilitliyordu: gunluk kota dolduysa bekleyerek acilmaz. Uc denemeden
+        // sonra anlasilir bir hata verilir.
+        hizSiniriDenemesi++
+        if (hizSiniriDenemesi > MAX_HIZ_SINIRI_DENEMESI) {
+          throw new Error(
+            ETIKET + ': dakika veya gunluk kredi kotasi doldu (' +
+            MAX_HIZ_SINIRI_DENEMESI + ' deneme sonunda). Daha sonra tekrar deneyin ' +
+            'ya da baska bir kaynak secin.'
+          )
+        }
+        bildir(o.onProgress, 0, ETIKET + ': hiz siniri, 65 saniye bekleniyor (' +
+          hizSiniriDenemesi + '/' + MAX_HIZ_SINIRI_DENEMESI + ')')
         await sleep(65000)
         continue
       }

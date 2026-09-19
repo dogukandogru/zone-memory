@@ -78,8 +78,21 @@ async function httpRequest(url, opts) {
   )
 
   let sonHata = null
+  // Bir sonraki denemeden once beklenecek sure. `Retry-After` gelirse o
+  // kullanilir, yoksa ussel geri cekilme + rastgele pay (jitter).
+  let bekle = 0
   for (let deneme = 0; deneme <= retries; deneme++) {
-    if (deneme > 0) await sleep(retryDelayMs * deneme)
+    if (deneme > 0) {
+      // USSEL GERI CEKILME VE JITTER.
+      //
+      // Duz carpim (gecikme * deneme) ayni anda hiz sinirina carpan iki
+      // istemciyi ayni ritimde yeniden denemeye sokuyordu. Rastgele pay
+      // bunu dagitir. `Retry-After` varsa sunucunun dedigi sure kullanilir
+      // ama 60 saniyeyle sinirlanir: daha uzun beklemek arayuzu kilitler.
+      const ussel = retryDelayMs * Math.pow(2, deneme - 1) * (0.5 + Math.random())
+      await sleep(bekle > 0 ? bekle : ussel)
+      bekle = 0
+    }
 
     let res = null
     try {
@@ -98,6 +111,14 @@ async function httpRequest(url, opts) {
 
     // 429 hiz siniri, 5xx gecici sunucu hatasi: yeniden dene.
     if (res.status === 429 || res.status >= 500) {
+      // Govde okunmadan birakilirsa baglanti havuzda asili kalir.
+      if (res.body && typeof res.body.cancel === 'function') {
+        try { await res.body.cancel() } catch (err) { /* onemsiz */ }
+      }
+      const ra = res.headers && typeof res.headers.get === 'function'
+        ? Number(res.headers.get('retry-after'))
+        : NaN
+      if (Number.isFinite(ra) && ra > 0) bekle = Math.min(ra, 60) * 1000
       sonHata = new Error(
         label + ': sunucu HTTP ' + res.status + ' dondu (hiz siniri veya gecici hata)'
       )
@@ -107,6 +128,15 @@ async function httpRequest(url, opts) {
       const govde = await res.text().catch(function () {
         return ''
       })
+      // 401/403 "anahtar yok" degil "anahtar GECERSIZ" demektir. Ayni metni
+      // kullanmak kullaniciyi Ayarlar'a gonderip anahtari yeniden girmeye
+      // itiyordu, oysa sorun anahtarin kendisi ya da planin kapsamiydi.
+      if (res.status === 401 || res.status === 403) {
+        throw new Error(
+          label + ': API anahtari gecersiz ya da bu veriye yetkisi yok (HTTP ' +
+          res.status + '). ' + kisalt(govde)
+        )
+      }
       throw new Error(label + ': HTTP ' + res.status + '. ' + kisalt(govde))
     }
     return res

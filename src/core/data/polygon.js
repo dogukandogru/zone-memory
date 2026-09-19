@@ -71,16 +71,21 @@ async function fetchCandles(opts) {
   bildir(o.onProgress, 0, ETIKET + ': ' + pencere.carpan + ' ' + pencere.birim + ' mumlari indiriliyor')
 
   while (true) {
-    const url = sonrakiUrl
-      ? sonrakiUrl + (sonrakiUrl.indexOf('?') >= 0 ? '&' : '?') + 'apiKey=' + encodeURIComponent(apiKey)
-      : TEMEL +
-        encodeURIComponent(TICKER) +
-        '/range/' + pencere.carpan + '/' + pencere.birim +
-        '/' + imlecMs + '/' + toMs +
-        '?adjusted=true&sort=asc&limit=' + LIMIT +
-        '&apiKey=' + encodeURIComponent(apiKey)
+    const url = sonrakiUrl || (
+      TEMEL +
+      encodeURIComponent(TICKER) +
+      '/range/' + pencere.carpan + '/' + pencere.birim +
+      '/' + imlecMs + '/' + toMs +
+      '?adjusted=true&sort=asc&limit=' + LIMIT
+    )
 
-    const govde = await httpJson(url, { label: ETIKET, timeoutMs: 60000 })
+    // ANAHTAR URL'DE DEGIL BASLIKTA. URL'deki anahtar vekil sunucu
+    // gunluklerine ve hata mesajlarina dusebilir; Polygon Bearer destekler.
+    const govde = await httpJson(url, {
+      label: ETIKET,
+      timeoutMs: 60000,
+      headers: { Authorization: 'Bearer ' + apiKey },
+    })
     if (govde && govde.status === 'ERROR') {
       throw new Error(ETIKET + ': ' + (govde.error || govde.message || 'sunucu hatasi'))
     }
@@ -125,8 +130,12 @@ async function fetchCandles(opts) {
     const ilerlemeMs = sonMs - fromMs
     const pct = toMs > fromMs ? (ilerlemeMs / (toMs - fromMs)) * 100 : 100
     bildir(o.onProgress, pct, ETIKET + ': ' + t.length + ' mum indirildi')
-    // Ucretsiz planda dakikada 5 istek siniri var; 429 gelirse httpRequest yeniden dener.
-    await sleep(300)
+    // UCRETSIZ PLANDA DAKIKADA 5 ISTEK. 300 ms ile dakikada 200 istek
+    // atiliyordu: ilk birkac sayfadan sonra her istek 429 donuyor ve uzun
+    // indirme yarida kaliyordu. 12 saniye tam olarak dakikada 5 istektir.
+    // Ucretli planda bu bekleme gereksiz ama zararsiz; hizli plan kullanan
+    // `pollMs` secenegiyle kisaltabilir.
+    await sleep(Number.isFinite(o.pollMs) && o.pollMs >= 0 ? o.pollMs : 12000)
     if (tur > 20000) break // guvenlik freni
   }
 

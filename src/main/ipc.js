@@ -138,6 +138,24 @@ async function dispatch(cmd, payload) {
     case 'providers:list':
       return listProviders()
 
+    // API ANAHTARI RENDERER'A HIC GITMEZ.
+    //
+    // Veri Cek ve otomatik hazirlik `data:sync` cagirirken yuke anahtar
+    // koymuyordu, ipc de eklemiyordu; bu yuzden Polygon veya Twelve Data
+    // secilince senkron HER ZAMAN "API anahtari gerekli" hatasi veriyordu.
+    // Anahtar burada, ana surecte, ayarlardan okunup yuke eklenir; boylece
+    // renderer'a hicbir zaman gonderilmez.
+    case 'data:sync': {
+      const id = p.providerId || p.provider || ''
+      const anahtarlar = settings.get('apiKeys') || {}
+      const anahtar = id && anahtarlar[id] ? String(anahtarlar[id]) : ''
+      const yuk = Object.assign({}, p)
+      if (anahtar) yuk.apiKey = anahtar
+      return await engine.call(cmd, yuk, (pct, msg) => {
+        send('progress', { cmd: cmd, pct: pct, msg: msg })
+      })
+    }
+
     // Calisan uzun islemi durdurur. Isci ipligi yeniden baslatmak, suren
     // taramayi kesmenin tek guvenilir yolu: cekirdek dongulerin icine iptal
     // kontrolu serpistirmek yerine islemi butun olarak birakiyoruz.

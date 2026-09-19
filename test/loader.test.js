@@ -275,3 +275,50 @@ test('basisOlcumu: ortak bar sayisini ve medyan mutlak sapmayi dondurur', () => 
   assert.ok(olcum.mad < 1e-9, 'sabit fark varken sapma sifir olmali')
   assert.strictEqual(loader.basisOlcumu(spot, series.emptySeries(), 400), null)
 })
+
+test('httpRequest: Retry-After basligina uyar, 429 govdesini birakmaz', async () => {
+  const provider = require('../src/core/data/provider')
+  const asilFetch = global.fetch
+  const zamanlar = []
+  let iptalEdildi = 0
+  let cagri = 0
+  global.fetch = async () => {
+    zamanlar.push(Date.now())
+    cagri++
+    if (cagri === 1) {
+      return {
+        ok: false,
+        status: 429,
+        headers: { get: (ad) => (ad.toLowerCase() === 'retry-after' ? '1' : null) },
+        body: { cancel: async () => { iptalEdildi++ } },
+        text: async () => '',
+      }
+    }
+    return { ok: true, status: 200, headers: { get: () => null }, text: async () => '{}' }
+  }
+  try {
+    const t0 = Date.now()
+    await provider.httpRequest('https://ornek.test/veri', { retries: 2, retryDelayMs: 50, label: 'Test' })
+    const gecen = Date.now() - t0
+    assert.ok(gecen >= 900, 'Retry-After: 1 en az bir saniye beklemeli, gecen ' + gecen + ' ms')
+    assert.strictEqual(iptalEdildi, 1, '429 govdesi birakilmali')
+  } finally {
+    global.fetch = asilFetch
+  }
+})
+
+test('httpRequest: 401 ve 403 "anahtar gecersiz" der', async () => {
+  const provider = require('../src/core/data/provider')
+  const asilFetch = global.fetch
+  global.fetch = async () => ({
+    ok: false, status: 401, headers: { get: () => null }, text: async () => 'unauthorized',
+  })
+  try {
+    await assert.rejects(
+      () => provider.httpRequest('https://ornek.test/veri', { retries: 0, label: 'Test' }),
+      /gecersiz/
+    )
+  } finally {
+    global.fetch = asilFetch
+  }
+})

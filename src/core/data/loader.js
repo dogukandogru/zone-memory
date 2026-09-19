@@ -181,7 +181,7 @@ async function syncHistory(opts) {
   const anahtar = o.apiKey ? String(o.apiKey).trim() : ''
   if (saglayici.needsKey && !anahtar) {
     throw new Error(
-      saglayici.name + ' icin API anahtari gerekli. Ayarlar sekmesinden anahtari girin.'
+      saglayici.name + ' icin API anahtari kayitli degil. Ayarlar sekmesinden anahtari girin.'
     )
   }
 

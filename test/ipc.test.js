@@ -10,7 +10,7 @@ const path = require('node:path')
 const Module = require('node:module')
 
 /** Electron olmadan ipc.js yuklenebilsin diye kucuk bir sahte modul. */
-function electronsuzYukle() {
+function electronsuzYukle(sahteEngine) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'zm-ipc-'))
   process.env.ZONE_MEMORY_USER_DIR = dir
   process.env.ZONE_MEMORY_DATA_DIR = path.join(dir, 'data')
@@ -22,6 +22,8 @@ function electronsuzYukle() {
   const asilYukle = Module._load
   Module._load = function (istek, ust, ana) {
     if (istek === 'electron') return sahteElectron
+    // Motor cagrilarini yakalamak icin (API anahtari yolunu dogrularken).
+    if (sahteEngine && istek === './engine') return sahteEngine
     return asilYukle.apply(this, arguments)
   }
   for (const anahtar of Object.keys(require.cache)) {
@@ -62,4 +64,43 @@ test('settings:reset anahtarlari ve saglayiciyi korur', async () => {
   assert.strictEqual(sonra.apiKeys.polygon, 'anahtar-xyz')
   assert.strictEqual(sonra.providers.live, 'okx')
   assert.notStrictEqual(sonra.signalCfg.minMatches, 33)
+})
+
+// ---------------------------------------------------------------------------
+// V5 - API ANAHTARI VERI CEK'E ILETILIR AMA RENDERER'A HIC GITMEZ
+// ---------------------------------------------------------------------------
+// Veri Cek ve otomatik hazirlik `data:sync` cagirirken yuke anahtar
+// koymuyordu, ipc de eklemiyordu; bu yuzden Polygon veya Twelve Data
+// secilince senkron HER ZAMAN "API anahtari gerekli" hatasi veriyordu. Bu da
+// vekil hacim ve basis sorunlarinin en dogrudan cozumu olan gercek spot
+// kaynagi kapatiyordu.
+
+test('data:sync ayarlardaki anahtari yuke ekler, renderer anahtar gondermez', async () => {
+  const cagrilar = []
+  const sahteEngine = {
+    call: async (cmd, payload) => { cagrilar.push({ cmd, payload }); return { ok: true, added: 0 } },
+    restart: async () => {},
+    status: () => ({}),
+    onLog: () => {},
+  }
+  const { ipc } = electronsuzYukle(sahteEngine)
+
+  await ipc.dispatch('settings:set', { patch: { apiKeys: { polygon: 'gizli-anahtar' } } })
+
+  // Renderer anahtar GONDERMEZ, yalnizca saglayici kimligi gonderir.
+  await ipc.dispatch('data:sync', { tf: '15m', providerId: 'polygon' })
+
+  assert.strictEqual(cagrilar.length, 1)
+  assert.strictEqual(cagrilar[0].cmd, 'data:sync')
+  assert.strictEqual(cagrilar[0].payload.apiKey, 'gizli-anahtar',
+    'anahtar ana surecte yuke eklenmeli')
+  assert.strictEqual(cagrilar[0].payload.tf, '15m')
+
+  // Anahtar kayitli olmayan bir saglayicida alan HIC eklenmez.
+  await ipc.dispatch('data:sync', { tf: '15m', providerId: 'twelvedata' })
+  assert.strictEqual(cagrilar[1].payload.apiKey, undefined)
+
+  // Anahtarsiz saglayicida da eklenmez.
+  await ipc.dispatch('data:sync', { tf: '15m', providerId: 'histdata' })
+  assert.strictEqual(cagrilar[2].payload.apiKey, undefined)
 })

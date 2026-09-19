@@ -174,6 +174,17 @@ async function main() {
         (adaylar.length ? ' veya ' + adaylar[0] + ' ortam degiskenini kullanin.' : '.')
     )
   }
+  // KOMUT SATIRINDAKI ANAHTAR KABUK GECMISINE YAZILIR ve `ps` ciktisinda
+  // gorunur. Ortam degiskeni ikisini de yapmaz.
+  if (typeof args.key === 'string' && args.key.length > 0) {
+    const adaylar = ANAHTAR_ORTAM[saglayiciId] || []
+    process.stderr.write(
+      'Uyari: --key ile verilen anahtar kabuk gecmisine yazilir ve calisan ' +
+      'surec listesinde gorunur.' +
+      (adaylar.length ? ' Bunun yerine ' + adaylar[0] + ' ortam degiskenini kullanin.' : '') +
+      '\n'
+    )
+  }
 
   const from = zamanCoz(typeof args.from === 'string' ? args.from : '2009-03', false)
   const to = zamanCoz(
