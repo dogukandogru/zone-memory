@@ -395,9 +395,11 @@ Bir sinyale tıklayınca sağ panelde detay açılır:
 | Ortalama benzerlik | Bu eşleşmelerin ortalama benzerlik puanı (0 ile 1) |
 | Kazanma oranı | Eşleşmelerin kaçı bölgeye saygı göstermiş |
 | Güven skoru | Eşleşme sayısı, oranın 0,5'ten uzaklığı ve benzerliğin bileşimi |
-| Beklenen lehte / aleyhte hareket | Eşleşmelerin ortalama MFE ve MAE değeri, ATR cinsinden |
+| Benzerlerde sonuca kadar ortalama lehte / aleyhte hareket | Eşleşmelerin `mfeExitAtr` ve `maeExitAtr` ortalaması, ATR cinsinden. Tüm ufku ölçen ham MFE değil: o, stop vurulduktan sonraki hareketi de sayıyor ve hedefin 2,5 katına çıkabiliyordu |
+| Plan riski (SL mesafesi) | Girişten stopa uzaklık, ATR cinsinden. Yukarıdaki aleyhte hareketle aynı şey değil |
 | Durum | Sinyal üretildi mi, yoksa eşikler mi geçilmedi |
-| Giriş / TP1 / TP2 / SL | Bölge geometrisinden türetilen plan, TP2 eşleşmelerin dağılımından |
+| Giriş / TP1 / SL | Bölge geometrisinden türetilen plan |
+| TP2 (uzatma) | Yalnızca bölgeyi **tutmuş** benzer kayıtların risk birimi başına gittiği yoldan. Beşten az böyle kayıt varsa ya da sonuç TP1'in 1,1 katına ulaşmıyorsa TP2 **gösterilmez** |
 | R/R | (TP1 - giriş) / (giriş - SL) mutlak değeri |
 | Gerçekleşen sonuç | Yalnızca testte üretilen sinyallerde; bölgenin durumu ve net kazanç |
 | Gerekçeler | Sinyalin neden oluştuğu veya neden oluşmadığı, Türkçe |

@@ -482,6 +482,27 @@ function outcomeAdi(outcome) {
   return 'Sonuç henüz belli değil'
 }
 
+/**
+ * Benzer kayit satirinda gosterilecek KISA sonuc etiketi.
+ *
+ * Uc degerlidir. Eski hal yalnizca `success` alanina bakip her basarisizligi
+ * "Kirilim" diye gosteriyordu; oysa 15m'de form basarisizliklarinin %26'si
+ * zaman asimidir, yani bolge kirilmadi, ufuk doldu. Zaman asimi notr renkle
+ * gosterilir, cunku ne kazanc ne tam kayiptir.
+ *
+ * @param {{outcome?:string, success?:boolean}} m
+ * @returns {{ad:string, sinif:string}}
+ */
+function sonucEtiketi(m) {
+  const o = m && typeof m.outcome === 'string' ? m.outcome : ''
+  if (o === 'respect') return { ad: 'Tuttu', sinif: 'up' }
+  if (o === 'break') return { ad: 'Kırıldı', sinif: 'down' }
+  if (o === 'timeout') return { ad: 'Zaman aşımı', sinif: 'muted' }
+  if (o === 'nofill') return { ad: 'Emir dolmadı', sinif: 'muted' }
+  // Eski kayitlarda outcome alani yok, ikili bilgiye dusulur.
+  return m && m.success ? { ad: 'Tuttu', sinif: 'up' } : { ad: 'Kırıldı', sinif: 'down' }
+}
+
 /* ------------------------------------------------------------------ */
 /* renderSignals                                                       */
 /* ------------------------------------------------------------------ */
@@ -631,8 +652,19 @@ export function renderSignalDetail(el, signal, opts) {
   ]))
 
   el.appendChild(kv('En yüksek benzerlik', formatNumber(signal.bestSimilarity, 3)))
-  el.appendChild(kv('Beklenen lehte hareket', formatNumber(signal.expectedMfeAtr, 2) + ' ATR'))
-  el.appendChild(kv('Beklenen aleyhte hareket', formatNumber(signal.expectedMaeAtr, 2) + ' ATR'))
+  // "Beklenen" kelimesi bir tahmin gibi okunuyordu; sayi aslinda benzer
+  // kayitlarin SONUCA KADAR olan ortalama hareketidir. Plan riski (SL
+  // mesafesi) ayri satirda: bir donem ikisi ayni etiketle gosteriliyordu.
+  el.appendChild(kv('Benzerlerde sonuca kadar ortalama lehte hareket',
+    formatNumber(signal.expectedMfeAtr, 2) + ' ATR'))
+  el.appendChild(kv('Benzerlerde sonuca kadar ortalama aleyhte hareket',
+    formatNumber(signal.expectedMaeAtr, 2) + ' ATR'))
+  const planRiski = Number.isFinite(Number(signal.planRiskAtr))
+    ? Number(signal.planRiskAtr)
+    : Number(signal.slAtr)
+  if (Number.isFinite(planRiski) && planRiski > 0) {
+    el.appendChild(kv('Plan riski (SL mesafesi)', formatNumber(planRiski, 2) + ' ATR'))
+  }
   el.appendChild(kv('Bölge aralığı', formatPrice(signal.zoneBottom) + ' - ' + formatPrice(signal.zoneTop)))
   el.appendChild(kv('Sinyal türü', signal.kind === 'form'
     ? 'Kutu oluşumu, giriş onay barının kapanışı'
@@ -694,13 +726,24 @@ export function renderSignalDetail(el, signal, opts) {
     const yuzde = (fark / giris) * 100
     return (fark >= 0 ? '+' : '') + formatPrice(fark) + ' (' + (yuzde >= 0 ? '+' : '') + formatNumber(yuzde, 2) + '%)'
   }
-  el.appendChild(tablo(['Seviye', 'Fiyat', 'Girişe uzaklık'], [
+  const planSatirlari = [
     ['Giriş', formatPrice(giris), '-'],
     ['TP1', formatPrice(signal.tp1), uzaklik(sayi(signal.tp1, NaN))],
-    ['TP2', formatPrice(signal.tp2), uzaklik(sayi(signal.tp2, NaN))],
-    ['SL', formatPrice(signal.sl), uzaklik(sayi(signal.sl, NaN))],
-    ['RR', formatNumber(signal.rr, 2), '-'],
-  ]))
+  ]
+  // TP2 UYDURULMAZ: yeterli sayida tutmus benzer kayit yoksa satir hic
+  // gosterilmez. Eski davranis TP2'yi sessizce TP1'e esitliyordu ve ekranda
+  // ayni fiyat iki kez goruluyordu.
+  const tp2Deger = Number(signal.tp2)
+  if (Number.isFinite(tp2Deger) && tp2Deger > 0) {
+    planSatirlari.push(['TP2 (uzatma)', formatPrice(tp2Deger), uzaklik(tp2Deger)])
+  }
+  planSatirlari.push(['SL', formatPrice(signal.sl), uzaklik(sayi(signal.sl, NaN))])
+  planSatirlari.push(['RR', formatNumber(signal.rr, 2), '-'])
+  el.appendChild(tablo(['Seviye', 'Fiyat', 'Girişe uzaklık'], planSatirlari))
+  if (!(Number.isFinite(tp2Deger) && tp2Deger > 0)) {
+    el.appendChild(h('div', 'small muted',
+      'Uzatma hedefi (TP2) yok: yeterli sayıda tutmuş benzer kayıt bulunamadı.'))
+  }
 
   // Gerekceler
   el.appendChild(bolumBasligi('Gerekçeler'))
@@ -715,7 +758,9 @@ export function renderSignalDetail(el, signal, opts) {
 
   // Benzer gecmis ornekler
   const eslesmeler = Array.isArray(signal.topMatches) ? signal.topMatches : []
-  el.appendChild(bolumBasligi('Benzer geçmiş örnekler (' + tam(eslesmeler.length) + ')'))
+  const toplamEslesme = sayi(signal.matchCount, eslesmeler.length)
+  el.appendChild(bolumBasligi('En benzer ' + tam(eslesmeler.length) +
+    (toplamEslesme > eslesmeler.length ? ' / ' + tam(toplamEslesme) : '') + ' geçmiş örnek'))
   if (eslesmeler.length === 0) {
     el.appendChild(h('div', 'small muted', 'Eşik üstünde benzer kayıt bulunamadı.'))
     return
@@ -748,24 +793,32 @@ export function renderSignalDetail(el, signal, opts) {
 
     const sag = h('span', 'row-side')
     sag.appendChild(h('span', null, formatNumber(m.similarity, 3)))
-    sag.appendChild(h('span', 'row-sub ' + (m.success ? 'up' : 'down'), m.success ? 'Saygı' : 'Kırılım'))
+    // UC DEGERLI SONUC: zaman asimi "Kirilim" degildir. 15m'de form
+    // basarisizliklarinin %26'si zaman asimi, yani bolge kirilmadi.
+    const sonuc = sonucEtiketi(m)
+    sag.appendChild(h('span', 'row-sub ' + sonuc.sinif, sonuc.ad))
+    // Lehte / aleyhte sayilar da sonuca kadarki olcuden gelir (varsa).
+    const lehte = Number.isFinite(Number(m.mfeExitAtr)) ? Number(m.mfeExitAtr) : sayi(m.mfeAtr, 0)
+    const aleyhte = Number.isFinite(Number(m.maeExitAtr)) ? Number(m.maeExitAtr) : sayi(m.maeAtr, 0)
     sag.appendChild(h('span', 'row-sub',
-      '+' + formatNumber(Math.abs(sayi(m.mfeAtr, 0)), 2) + ' / -' + formatNumber(Math.abs(sayi(m.maeAtr, 0)), 2)))
+      '+' + formatNumber(Math.abs(lehte), 2) + ' / -' + formatNumber(Math.abs(aleyhte), 2)))
     satir.appendChild(sag)
 
     el.appendChild(satir)
 
     const seri = eslesmeSerisi(m)
     if (!seri.gercek) taslakVar = true
-    cizimler.push({ cnv, seri, basarili: !!m.success })
+    cizimler.push({ cnv, seri, basarili: sonuc.sinif === 'up', notr: sonuc.sinif === 'muted' })
   }
 
   // Canvas olculeri yerlesim sonrasi bellidir, cizimi simdi yap.
   for (let i = 0; i < cizimler.length; i++) {
     const c = cizimler[i]
     drawSparkline(c.cnv, c.seri.degerler, {
-      color: c.basarili ? RENK.up : RENK.down,
-      fill: c.basarili ? 'rgba(38,166,154,0.14)' : 'rgba(239,83,80,0.14)',
+      color: c.notr ? RENK.dim : (c.basarili ? RENK.up : RENK.down),
+      fill: c.notr
+        ? 'rgba(128,128,128,0.10)'
+        : (c.basarili ? 'rgba(38,166,154,0.14)' : 'rgba(239,83,80,0.14)'),
       markerIndex: c.seri.isaret,
       baseline: c.seri.gercek ? undefined : 0,
     })

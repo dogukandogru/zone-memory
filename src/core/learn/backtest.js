@@ -94,7 +94,8 @@ const DEFAULT_BACKTEST_CFG = {
  * @property {number} bestSimilarity
  * @property {number} winRate          Sinyalin ONGORDUGU basari orani
  * @property {number} confidence
- * @property {number} expectedMfeAtr
+ * @property {number} expectedMfeAtr  Benzerlerde sonuca kadar ortalama lehte
+ * @property {number} expectedMaeAtr  Benzerlerde sonuca kadar ortalama aleyhte
  * @property {number} mfeAtr           Olayin GERCEK lehte hareketi
  * @property {number} maeAtr
  * @property {string} outcome          'respect' | 'break' | 'timeout'
@@ -516,6 +517,10 @@ function yuruyenIleriTest(memory, prototypes, cfg, onProgress, sinyalUret) {
           winRate: sig.winRate,
           confidence: sig.confidence,
           expectedMfeAtr: sig.expectedMfeAtr,
+          // Plan riski (slAtr) ile ayni sey DEGIL: bu, benzer kayitlarin
+          // sonuca kadarki ortalama aleyhte hareketi. Tasinmazsa arayuz
+          // ikisini ayni satirda gostermek zorunda kaliyordu.
+          expectedMaeAtr: Number.isFinite(sig.expectedMaeAtr) ? sig.expectedMaeAtr : 0,
           mfeAtr: Number.isFinite(mfeAtr) ? mfeAtr : NaN,
           maeAtr: Number(ev.maeAtr),
           outcome: ev.outcome,

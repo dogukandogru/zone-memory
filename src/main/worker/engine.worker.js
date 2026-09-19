@@ -1839,17 +1839,20 @@ function tradesToSignals(trades, memory) {
       winRate: num(t.winRate, 0),
       confidence: num(t.confidence, 0),
       expectedMfeAtr: num(t.expectedMfeAtr, 0),
-      expectedMaeAtr: num(t.slAtr, 0),
+      // Beklenen aleyhte hareket, SL MESAFESI DEGILDIR. Bir donem burada
+      // `t.slAtr` yaziliyordu: test sinyalinde plan riski, canlida benzerlerin
+      // ortalama aleyhte hareketi gorunuyordu, yani ayni etiketin altinda iki
+      // farkli sayi vardi. Ikisi de artik ayri alanlarda.
+      expectedMaeAtr: num(t.expectedMaeAtr, 0),
+      planRiskAtr: num(t.slAtr, 0),
       entry: num(t.entry, 0),
       tp1: num(t.tp1, 0),
-      tp2: num(t.tp2, 0),
+      // TP2 yoksa null kalir; 0 yazmak grafige sifir fiyatli bir cizgi koyardi.
+      tp2: Number.isFinite(Number(t.tp2)) ? Number(t.tp2) : null,
       sl: num(t.sl, 0),
       rr: num(t.rr, 0),
       atr: num(t.atr, 0),
       session: t.session || (e ? e.session : ''),
-      prototypeId: t.prototypeId === undefined ? null : t.prototypeId,
-      prototypeSim: num(t.prototypeSim, 0),
-      prototypeLabel: t.prototypeLabel || '',
       expectancy: num(t.expectancy, 0),
       topMatches: Array.isArray(t.topMatches) ? t.topMatches : [],
       reasons: reasons,

@@ -138,7 +138,9 @@ test('BUY: tum esikler gecilince fired true ve plan yonu tp1 > entry > sl', () =
   assert.equal(s.price, t.price)
   assert.equal(s.entry, t.price, 'kapanis bolge icindeyken plan girisi kapanistir')
   assert.ok(s.tp1 > s.entry, 'BUY icin TP1 giristen yukarida olmali')
-  assert.ok(s.tp2 >= s.tp1, 'TP2 TP1 ile ayni veya daha uzak olmali')
+  // TP2 ya yok (null) ya da TP1'den BELIRGIN olarak uzaktir; artik TP1'e
+  // esitlenmiyor (bkz. "TP2 uydurulmaz" testi).
+  assert.ok(s.tp2 === null || s.tp2 > s.tp1, 'TP2 ya null ya TP1 otesinde olmali')
   assert.ok(s.sl < s.entry, 'BUY icin SL giristen asagida olmali')
   assert.ok(s.rr > 0)
   assert.ok(s.confidence >= 0 && s.confidence <= 1)
@@ -155,7 +157,7 @@ test('SELL: plan yonu tersine doner, tp1 < entry < sl', () => {
   assert.equal(s.fired, true)
   assert.equal(s.direction, 'SELL')
   assert.ok(s.tp1 < s.entry, 'SELL icin TP1 giristen asagida olmali')
-  assert.ok(s.tp2 <= s.tp1, 'SELL icin TP2 TP1 ile ayni veya daha asagida olmali')
+  assert.ok(s.tp2 === null || s.tp2 < s.tp1, 'SELL icin TP2 ya null ya TP1 otesinde olmali')
   assert.ok(s.sl > s.entry, 'SELL icin SL giristen yukarida olmali')
   assert.ok(s.rr > 0)
 })
@@ -323,11 +325,11 @@ test('plan fiyatlari yon olarak dogru: BUY tp1 > entry > sl, SELL tersi', () => 
     if (d.yon === 'BUY') {
       assert.ok(s.tp1 > s.entry, d.ad + ': TP1 giristen yukarida olmali')
       assert.ok(s.entry > s.sl, d.ad + ': giris stoptan yukarida olmali')
-      assert.ok(s.tp2 >= s.tp1)
+      assert.ok(s.tp2 === null || s.tp2 > s.tp1, d.ad + ': TP2 ya null ya TP1 otesinde')
     } else {
       assert.ok(s.tp1 < s.entry, d.ad + ': TP1 giristen asagida olmali')
       assert.ok(s.entry < s.sl, d.ad + ': giris stoptan asagida olmali')
-      assert.ok(s.tp2 <= s.tp1)
+      assert.ok(s.tp2 === null || s.tp2 < s.tp1, d.ad + ': TP2 ya null ya TP1 otesinde')
     }
     assert.ok(s.rr > 0, d.ad + ': risk/odul pozitif olmali')
     assert.ok(Math.abs(s.tp1Atr - Math.abs(s.tp1 - s.entry) / s.atr) < 1e-9)
@@ -470,4 +472,88 @@ test('decideFromCandidates cagiranin aday dizisini BOZMAZ', () => {
   const kopya = adaylar.slice()
   decideFromCandidates(t, adaylar, undefined, { minMatches: 5 }, { features: f })
   assert.deepEqual(adaylar, kopya, 'aday dizisi yerinde siralanmamali')
+})
+
+// ---------------------------------------------------------------------------
+// S7 - TP2 UYDURULMAZ, BEKLENEN HAREKET SONUCA KADARKI OLCUDEN GELIR
+// ---------------------------------------------------------------------------
+
+test('TP2 yalnizca TUTMUS komsulardan gelir, yetersiz ornekte null doner', () => {
+  const esik = { minMatches: 3, minWinRate: 0.30 }
+  // On kayit, yalnizca IKISI tutmus: TP2 icin gereken en az bes tutmus komsu
+  // yok, dolayisiyla uzatma hedefi uretilmez.
+  const azTutan = evaluateTouch(dokunus('BUY'), ozellik(), hafizaKur(10, 2, 'BUY'), [], esik, null)
+  assert.equal(azTutan.tp2, null, 'iki tutmus komsu ile TP2 uretilmemeli')
+  assert.equal(azTutan.tp2Atr, 0)
+  assert.ok(azTutan.reasons.some((r) => r.includes('uzatma hedefi yok')),
+    'gerekce TP2 olmadigini soylemeli')
+
+  // Tutmus komsularin lehte hareketi RISK BIRIMININ cok uzerindeyse TP2 olusur
+  // ve TP1'in otesinde olur.
+  const uzakGiden = fixtures.hafizaKur({
+    adet: 12, basarili: 10, yon: 'BUY', ilkZaman: T_SORGU - 200 * GUN,
+    alanlar: (i, basarili) => (basarili ? { mfeExitAtr: 6, riskAtr: 1 } : {}),
+  })
+  const genis = evaluateTouch(dokunus('BUY'), ozellik(), uzakGiden, [], esik, null)
+  assert.ok(genis.tp2 !== null, 'yeterli tutmus komsu varken TP2 uretilmeli')
+  assert.ok(genis.tp2 > genis.tp1, 'TP2 TP1 otesinde olmali: ' + genis.tp2 + ' / ' + genis.tp1)
+  assert.ok(genis.tp2Atr >= genis.tp1Atr * 1.1, 'TP2 en az TP1 x 1,1 olmali')
+})
+
+test('TP2, TP1 ile ayni fiyata ESITLENMEZ', () => {
+  const esik = { minMatches: 3, minWinRate: 0.30 }
+  // Tutmus komsularin lehte hareketi risk birimi kadar: TP2 adayi TP1'in
+  // hemen ustune dusuyor, bu yuzden hic gosterilmemeli.
+  const dar = fixtures.hafizaKur({
+    adet: 12, basarili: 10, yon: 'BUY', ilkZaman: T_SORGU - 200 * GUN,
+    alanlar: (i, basarili) => (basarili ? { mfeExitAtr: 1, riskAtr: 1 } : {}),
+  })
+  const s = evaluateTouch(dokunus('BUY'), ozellik(), dar, [], esik, null)
+  assert.ok(s.tp2 === null || s.tp2 !== s.tp1, 'TP2 TP1 ile ayni fiyat olmamali')
+})
+
+test('beklenen lehte/aleyhte hareket SONUCA KADARKI olcuden gelir', () => {
+  const esik = { minMatches: 3, minWinRate: 0.30 }
+  // Ham mfeAtr tum ufku olcer (buyuk), mfeExitAtr sonuca kadar olani (kucuk).
+  // Gosterilen sayi kucuk olani olmali; aksi halde ekranda ulasilamayacak bir
+  // hedef gorunuyordu (15m'de TP1'in 2,5 kati).
+  const mem = fixtures.hafizaKur({
+    adet: 10, basarili: 8, yon: 'BUY', ilkZaman: T_SORGU - 200 * GUN,
+    alanlar: () => ({ mfeAtr: 9, mfeExitAtr: 1.5, maeAtr: 4, maeExitAtr: 0.4 }),
+  })
+  const s = evaluateTouch(dokunus('BUY'), ozellik(), mem, [], esik, null)
+  assert.ok(Math.abs(s.expectedMfeAtr - 1.5) < 1e-9,
+    'lehte hareket mfeExitAtr ortalamasi olmali: ' + s.expectedMfeAtr)
+  assert.ok(Math.abs(s.expectedMaeAtr - 0.4) < 1e-9,
+    'aleyhte hareket maeExitAtr ortalamasi olmali: ' + s.expectedMaeAtr)
+  // Aleyhte hareket PLAN RISKI DEGILDIR; ikisi ayri sayidir. Plan riski bolge
+  // geometrisinden gelir (burada 0,5 ATR), aleyhte hareket komsulardan.
+  assert.notEqual(s.expectedMaeAtr, s.slAtr)
+
+  // Eski hafizada alan yoksa ham degere dusulur.
+  const eski = fixtures.hafizaKur({
+    adet: 10, basarili: 8, yon: 'BUY', ilkZaman: T_SORGU - 200 * GUN,
+    alanlar: () => ({ mfeAtr: 3, maeAtr: 2, mfeExitAtr: NaN, maeExitAtr: NaN }),
+  })
+  for (const ev of eski.events) { delete ev.mfeExitAtr; delete ev.maeExitAtr }
+  const e = evaluateTouch(dokunus('BUY'), ozellik(), eski, [], esik, null)
+  assert.ok(Math.abs(e.expectedMfeAtr - 3) < 1e-9, 'alan yoksa ham mfeAtr kullanilmali')
+})
+
+test('topMatches uc degerli sonucu ve sonuca kadarki hareketi tasir', () => {
+  const esik = { minMatches: 3, minWinRate: 0.30 }
+  const mem = fixtures.hafizaKur({
+    adet: 9, basarili: 3, yon: 'BUY', ilkZaman: T_SORGU - 200 * GUN,
+    // Ucu tuttu, ucu zaman asimi, ucu kirildi.
+    alanlar: (i) => (i >= 3 && i < 6 ? { outcome: 'timeout', success: false } : {}),
+  })
+  const s = evaluateTouch(dokunus('BUY'), ozellik(), mem, [], esik, null)
+  const sonuclar = s.topMatches.map((m) => m.outcome)
+  assert.ok(sonuclar.every((o) => typeof o === 'string' && o.length > 0),
+    'her eslesme outcome tasimali: ' + JSON.stringify(sonuclar))
+  assert.ok(sonuclar.includes('timeout'), 'zaman asimi ayri bir deger olarak gorunmeli')
+  for (const m of s.topMatches) {
+    assert.ok('mfeExitAtr' in m && 'maeExitAtr' in m,
+      'eslesme sonuca kadarki hareket alanlarini tasimali')
+  }
 })

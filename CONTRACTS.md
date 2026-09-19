@@ -885,22 +885,28 @@ module.exports = {
  * @property {number} bestSimilarity
  * @property {number} winRate           0..1
  * @property {number} confidence        0..1
- * @property {number} expectedMfeAtr
- * @property {number} expectedMaeAtr
+ * @property {number} expectedMfeAtr   Benzerlerde SONUCA KADAR ortalama lehte
+ *                                      hareket (mfeExitAtr; alan yoksa mfeAtr)
+ * @property {number} expectedMaeAtr   Benzerlerde SONUCA KADAR ortalama aleyhte
+ *                                      hareket. PLAN RISKI DEGILDIR, o `slAtr`
  * @property {number} entry
  * @property {number} tp1
- * @property {number} tp2
+ * @property {number|null} tp2         Uzatma hedefi. YOKSA null (bkz. asagi)
  * @property {number} sl
  * @property {number} rr
- * @property {number|null} prototypeId
- * @property {number} prototypeSim
- * @property {string} prototypeLabel
- * @property {Array<{id,time,similarity,success,mfeAtr,maeAtr,price}>} topMatches
+ * @property {number|null} prototypeId HER ZAMAN null (sekil kumeleri karara
+ *                                      katilmaz, bkz. bolum 13)
+ * @property {number} prototypeSim     HER ZAMAN 0
+ * @property {string} prototypeLabel   HER ZAMAN bos dize
+ * @property {Array<{id,time,similarity,success,outcome,mfeAtr,maeAtr,
+ *                   mfeExitAtr,maeExitAtr,price}>} topMatches
+ *   `outcome` uc degerlidir ('respect' | 'break' | 'timeout'); `success` ikili
+ *   oldugu icin arayuz zaman asimini "kirilma" diye gosteriyordu.
  * @property {string[]} reasons         Turkce aciklamalar, sinyal neden olustu/olusmadi
  * @property {number} atr
  * @property {number} tp1Atr
- * @property {number} tp2Atr
- * @property {number} slAtr
+ * @property {number} tp2Atr           `tp2` null ise 0
+ * @property {number} slAtr            Plan riski (giris - stop), ATR biriminde
  * @property {number} expectancy        Risk birimi cinsinden beklenen deger
  * @property {number} respectRate       Eslesmelerde tutma orani (pR)
  * @property {number} breakRate         Kirilma orani (pB)
@@ -918,12 +924,19 @@ Plan hesabi:
   acik): `tp1` = `zoneLevels().target`, `sl` = `zoneLevels().invalid`,
   `entry` = `zoneLevels().entry`. Bunlar `outcome.js`'in etiket uretirken
   kullandigi seviyelerin AYNISIDIR, yani "bolge tuttu" ile "TP1 vuruldu" ayni
-  olaydir. `tp2` yine eslesmelerin dagilimindan gelir ve yalnizca uzatma
-  hedefi olarak bilgilendiricidir.
+  olaydir.
+- **`tp2` (uzatma hedefi) UYDURULMAZ.** Yalnizca `outcome === 'respect'` olan
+  komsularin `mfeExitAtr / riskAtr` oranindan hesaplanir: bu oranin `tp2Pct`.
+  yuzdeligi sorgunun kendi risk mesafesiyle carpilir. Boyle bir komsu 5'ten
+  azsa ya da sonuc `tp1Atr`'nin 1,1 katina ulasmiyorsa `tp2 = null` ve
+  `tp2Atr = 0` doner; arayuz o satiri ve grafik cizgisini GOSTERMEZ.
+  Eski davranis `tp2 < tp1` durumunda sessizce `tp2 = tp1` yaziyordu ve
+  5m'de tetiklenen formlarin %19,6'sinda ekranda ayni fiyat iki kez
+  goruluyordu (olculdu; duzeltmeden sonra bu oran 0).
 - Yedek yol (bolge bilgisi yoksa veya `useZoneStop` kapaliysa):
   `tp1` = eslesmelerin `mfeExitAtr` degerlerinin `tp1Pct`. yuzdeligi (ATR
-  carpani), `tp2` = `tp2Pct`. yuzdeligi, `sl` = `maeExitAtr` degerlerinin
-  `slPct`. yuzdeligi. Alan yoksa `mfeAtr` / `maeAtr` kullanilir. Fiyata
+  carpani), `sl` = `maeExitAtr` degerlerinin `slPct`. yuzdeligi. `tp2` bu
+  yolda da yukaridaki kuralla hesaplanir. Alan yoksa `mfeAtr` / `maeAtr` kullanilir. Fiyata
   cevrim: `entry + yon * carpan * atr`, SL icin ters yon.
 - `sl` carpani en az 0.3 ATR olacak sekilde tabanlanir.
 - `rr = (tp1 - entry) / (entry - sl)` mutlak degerle.

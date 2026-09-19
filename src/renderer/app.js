@@ -565,6 +565,9 @@ function planCizgileri(s) {
   const seviyeler = [
     { price: sayi(s.entry, NaN), color: '#d1d4dc', title: 'Giriş', width: 1, dashed: false },
     { price: sayi(s.tp1, NaN), color: RENK.up, title: 'TP1', width: 1, dashed: true },
+    // TP2 artik null olabilir (yeterli sayida tutmus benzer kayit yoksa).
+    // Number(null) sifir oldugu icin asagidaki `price !== 0` suzgeci bu
+    // durumda cizgiyi elemis olur; yine de niyet burada yazili olsun.
     { price: sayi(s.tp2, NaN), color: RENK.up, title: 'TP2', width: 1, dashed: true },
     { price: sayi(s.sl, NaN), color: RENK.down, title: 'SL', width: 1, dashed: true },
   ].filter((c) => Number.isFinite(c.price) && c.price !== 0)
@@ -835,11 +838,11 @@ async function sinyalleriYukle() {
   if (durum.seciliSinyalId === null) sinyalPaneliniCiz()
 }
 
-/** Hafiza ozetini ve ortak yapilari yukler. */
+/** Hafiza ozetini ve sekil kumelerini yukler. */
 async function hafizayiYukle() {
   const ozet = await cagirGuvenli('engine:memory-summary', { tf: durum.tf }, 'Hafıza özeti alınamadı')
   if (ozet !== null) durum.hafizaOzeti = ozet && ozet.summary ? ozet.summary : ozet
-  const proto = await cagirGuvenli('engine:prototypes', { tf: durum.tf }, 'Ortak yapılar alınamadı')
+  const proto = await cagirGuvenli('engine:prototypes', { tf: durum.tf }, 'Şekil kümeleri alınamadı')
   if (proto !== null) {
     durum.prototipler = Array.isArray(proto)
       ? proto

@@ -97,8 +97,17 @@ const DEFAULT_SIGNAL_CFG = {
 
 /** Eslesme yokken kullanilan ATR tabanli varsayilan plan carpanlari. */
 const FALLBACK_TP1_ATR = 1.0
-const FALLBACK_TP2_ATR = 1.0
 const FALLBACK_SL_ATR = 1.0
+
+/**
+ * TP2 (uzatma hedefi) kurallari.
+ *
+ * TP2 uydurulmaz: yeterli sayida TUTMUS komsu yoksa ya da hesaplanan hedef
+ * TP1'in hemen ustune dusuyorsa `tp2` null doner ve ekranda satir gosterilmez.
+ * Eski davranis TP2'yi sessizce TP1'e esitliyordu.
+ */
+const MIN_TP2_MATCHES = 5
+const TP2_MIN_KAT = 1.1
 
 /** SL carpaninin alt sinirlari: cok dar stop gurultude vurulur. */
 const MIN_SL_ATR = 0.3
@@ -377,8 +386,15 @@ function decideFromCandidates (ev, candidates, levels, cfg, ek) {
       timeouts++
       sumTimeoutR += num(ev.realizedR, 0)
     } else breaks++
-    sumMfe += num(ev.mfeAtr, 0)
-    sumMae += num(ev.maeAtr, 0)
+    // SONUCA KADAR olan hareket (mfeExitAtr / maeExitAtr). Ham mfeAtr tum
+    // ufku olcer, yani stop vurulduktan SONRAKI hareketi de sayar: 15m'de
+    // "beklenen lehte hareket" boylece TP1'in 2,5 katina cikiyordu
+    // (4,68 ATR'ye karsi 1,81 ATR) ve okuyan kisi ulasilamayacak bir hedef
+    // gordugunu sanmiyordu. Eski hafizada alan yoksa ham degere dusulur.
+    const mfeCikis = num(ev.mfeExitAtr, NaN)
+    sumMfe += isFinite(mfeCikis) ? mfeCikis : num(ev.mfeAtr, 0)
+    const maeCikis = num(ev.maeExitAtr, NaN)
+    sumMae += isFinite(maeCikis) ? maeCikis : num(ev.maeAtr, 0)
   }
 
   const avgSimilarity = matchCount > 0 ? sumSim / matchCount : 0
@@ -420,14 +436,12 @@ function decideFromCandidates (ev, candidates, levels, cfg, ek) {
   // (mfeExitAtr) yuzdelikleri. Ham mfeAtr tum ufku olctugu icin stop vurulduktan
   // sonraki hareketi de icerir ve hedefleri gercekci olmayacak kadar buyutur.
   let tp1Atr = FALLBACK_TP1_ATR
-  let tp2Atr = FALLBACK_TP2_ATR
   let slAtr = FALLBACK_SL_ATR
   let planFromMemory = false
   if (matchCount > 0) {
     const mfes = sortedValues(matches, 'mfeExitAtr', 'mfeAtr')
     if (mfes.length > 0) {
       tp1Atr = num(percentile(mfes, num(conf.tp1Pct, 40) / 100), FALLBACK_TP1_ATR)
-      tp2Atr = num(percentile(mfes, num(conf.tp2Pct, 70) / 100), FALLBACK_TP2_ATR)
       planFromMemory = true
     }
   }
@@ -476,8 +490,6 @@ function decideFromCandidates (ev, candidates, levels, cfg, ek) {
   }
 
   if (!(tp1Atr > 0)) tp1Atr = FALLBACK_TP1_ATR
-  if (!(tp2Atr > 0)) tp2Atr = FALLBACK_TP2_ATR
-  if (tp2Atr < tp1Atr) tp2Atr = tp1Atr
   // Cok dar stop gurultuye takilir, en az 0.3 ATR.
   if (!(slAtr > MIN_SL_ATR)) slAtr = MIN_SL_ATR
 
@@ -491,8 +503,47 @@ function decideFromCandidates (ev, candidates, levels, cfg, ek) {
   const planEntry = zoneStopUsed ? seviyeler.entry : entry
 
   const tp1 = zoneStopUsed ? seviyeler.target : planEntry + sign * tp1Atr * atr
-  const tp2 = planEntry + sign * tp2Atr * atr
   const sl = zoneStopUsed ? seviyeler.invalid : planEntry - sign * slAtr * atr
+
+  // ------------------------------------------------------------------------
+  // TP2 (UZATMA HEDEFI): VARSA GOSTERILIR, YOKSA null
+  // ------------------------------------------------------------------------
+  // Eski hesap TP2'yi tum komsularin lehte hareket yuzdeliginden aliyordu.
+  // Iki sorunu vardi: (1) lehte hareket hedefle sinirli oldugu icin yuzdelik
+  // de hedefin otesine cikamiyordu, (2) `tp2 < tp1` durumunda TP2 sessizce
+  // TP1'e esitleniyordu ve 5m'de tetiklenen formlarin %19,6'sinda ekranda
+  // ayni fiyat iki kez goruluyordu.
+  //
+  // Yeni hesap: yalnizca BOLGEYI TUTMUS komsularin sonuca kadarki lehte
+  // hareketi, RISK BIRIMINE bolunerek toplanir (mfeExitAtr / riskAtr), bu
+  // oranin tp2Pct yuzdeligi sorgunun kendi risk mesafesiyle carpilir. Boylece
+  // TP2 "bu kurulum tuttugunda tipik olarak kac risk birimi gitti" sorusunun
+  // cevabi olur. Yeterli ornek yoksa (5'ten az) ya da sonuc TP1'in 1,1
+  // katina ulasmiyorsa TP2 YOKTUR; uydurmak yerine null donuyor.
+  const tp2Oranlari = []
+  for (let i = 0; i < matchCount; i++) {
+    const ev = matches[i].event
+    if (ev.outcome !== 'respect') continue
+    const riskAtr = num(ev.riskAtr, NaN)
+    if (!(riskAtr > 0)) continue
+    const mfeCikis = num(ev.mfeExitAtr, NaN)
+    const mfe = isFinite(mfeCikis) ? mfeCikis : num(ev.mfeAtr, NaN)
+    if (!isFinite(mfe) || mfe <= 0) continue
+    tp2Oranlari.push(mfe / riskAtr)
+  }
+  let tp2 = null
+  let tp2Atr = 0
+  if (tp2Oranlari.length >= MIN_TP2_MATCHES) {
+    const sirali = Float64Array.from(tp2Oranlari)
+    sirali.sort()
+    const oran = num(percentile(sirali, num(conf.tp2Pct, 70) / 100), NaN)
+    const planRiskAtr = zoneStopUsed ? seviyeler.riskAtr : slAtr
+    const aday = oran * planRiskAtr
+    if (isFinite(aday) && aday >= tp1Atr * TP2_MIN_KAT) {
+      tp2Atr = aday
+      tp2 = planEntry + sign * aday * atr
+    }
+  }
   const risk = Math.abs(planEntry - sl)
   const rr = risk > 0 ? Math.abs(tp1 - planEntry) / risk : 0
 
@@ -528,8 +579,16 @@ function decideFromCandidates (ev, candidates, levels, cfg, ek) {
       time: num(ev.time, 0),
       similarity: num(m.similarity, 0),
       success: ev.success === true || ev.outcome === 'respect',
+      // UC DEGERLI SONUC. `success` ikili oldugu icin arayuz zaman asimina
+      // ugramis kayitlari "Kirilim" diye gosteriyordu; oysa 15m'de form
+      // basarisizliklarinin %26'si zaman asimidir, yani bolge kirilmadi.
+      outcome: typeof ev.outcome === 'string' ? ev.outcome : '',
       mfeAtr: num(ev.mfeAtr, 0),
       maeAtr: num(ev.maeAtr, 0),
+      // Sonuca kadar olan hareket: ekranda gosterilen "lehte / aleyhte"
+      // sayilarinin plan hedefleriyle ayni olcuden gelmesi icin.
+      mfeExitAtr: num(ev.mfeExitAtr, NaN),
+      maeExitAtr: num(ev.maeExitAtr, NaN),
       price: num(ev.price, 0),
     })
   }
@@ -614,8 +673,11 @@ function decideFromCandidates (ev, candidates, levels, cfg, ek) {
   }
 
   if (planFromMemory) {
-    reasons.push('Plan: TP1 ' + tp1Atr.toFixed(2) + ' ATR, TP2 ' + tp2Atr.toFixed(2) +
-      ' ATR, SL ' + slAtr.toFixed(2) + ' ATR, R/R ' + rr.toFixed(2))
+    reasons.push('Plan: TP1 ' + tp1Atr.toFixed(2) + ' ATR, ' +
+      (tp2 === null
+        ? 'uzatma hedefi yok (yeterli sayıda tutmuş benzer kayıt bulunamadı)'
+        : 'TP2 ' + tp2Atr.toFixed(2) + ' ATR') +
+      ', SL ' + slAtr.toFixed(2) + ' ATR, R/R ' + rr.toFixed(2))
   } else {
     reasons.push('Benzer kayıt olmadığı için plan varsayılan ' + FALLBACK_TP1_ATR.toFixed(1) +
       ' ATR hedef ve ' + FALLBACK_SL_ATR.toFixed(1) + ' ATR zararla dolduruldu')
