@@ -21,7 +21,8 @@ const IS_DEV = process.argv.includes('--dev')
  * pencerenin goruntusunu PNG olarak yazar ve kapanir. Amac: bir degisikligin
  * gercek arayuzde nasil gorundugunu, pencereyi elle acmadan dogrulayabilmek.
  * `--shot-panel <ad>` ile once bir panel sekmesi acilir (signals, zones,
- * memory, settings, test), `--shot-wait <sn>` bekleme suresini uzatir.
+ * memory, settings, test), `--shot-wait <sn>` bekleme suresini uzatir,
+ * `--shot-scroll son` (ya da piksel sayisi) panel govdesini kaydirir.
  */
 function argDegeri(ad) {
   const i = process.argv.indexOf(ad)
@@ -30,6 +31,8 @@ function argDegeri(ad) {
 const SHOT_PATH = argDegeri('--shot')
 const SHOT_PANEL = argDegeri('--shot-panel')
 const SHOT_WAIT = Number(argDegeri('--shot-wait')) || 12
+/** `--shot-scroll son` panelin sonuna kaydirir, sayi verilirse o kadar piksel. */
+const SHOT_SCROLL = argDegeri('--shot-scroll')
 
 /** @type {BrowserWindow|null} */
 let mainWindow = null
@@ -87,6 +90,18 @@ function createWindow() {
               'document.querySelector(\'[data-tab="' + SHOT_PANEL + '"]\')?.click(); true'
             )
             await new Promise((r) => setTimeout(r, 1500))
+          }
+          // Panel govdesini kaydirmak: uzun panellerde ekranin altinda kalan
+          // tablolar (alt kume kirilimi, sermaye egrisi) baska turlu
+          // dogrulanamiyordu.
+          if (SHOT_SCROLL && mainWindow) {
+            await mainWindow.webContents.executeJavaScript(
+              '(function(){var k=document.querySelector(".panel.active .panel-body")' +
+              '||document.querySelector(".panel-body");' +
+              'if(k)k.scrollTop=' + (SHOT_SCROLL === 'son' ? 'k.scrollHeight' : Number(SHOT_SCROLL) || 0) +
+              ';return true})()'
+            )
+            await new Promise((r) => setTimeout(r, 600))
           }
           const resim = await mainWindow.webContents.capturePage()
           require('fs').writeFileSync(SHOT_PATH, resim.toPNG())

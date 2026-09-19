@@ -1002,30 +1002,42 @@ export function renderMemory(el, summary, prototypes) {
   const parcalar = s.byPart || null
   if (parcalar) {
     el.appendChild(bolumBasligi('Skor bileşenleri (gerçekten ayırt ediyor mu)'))
-    const parcaSatirlari = []
+    // Tur basina AYRI tablo: her satira "Kutu olusumu - " onekini koymak yan
+    // paneldeki dar tabloyu tasiriyordu.
+    let parcaVar = false
     for (const tur of ['form', 'touch']) {
       const grup = parcalar[tur]
       if (!grup) continue
+      const parcaSatirlari = []
       for (const ad of Object.keys(grup)) {
         const g = grup[ad]
         if (!g || !g.evet || !g.hayir) continue
         if (g.evet.total === 0 || g.hayir.total === 0) continue
+        const fark = Number.isFinite(g.diffPts)
+          ? (g.diffPts >= 0 ? '+' : '') + formatNumber(g.diffPts, 1)
+          : '-'
+        // Yan panel dar: sutunlar KISA tutulur, ornek sayisi bilesen adinin
+        // yanindadir ve hukum farkin yanina sigar.
         parcaSatirlari.push([
-          turAdi(tur) + ' - ' + (PARCA_ADLARI[ad] || ad),
-          tam(g.evet.total) + ' / ' + formatPercent(g.evet.winRate, 1),
-          tam(g.hayir.total) + ' / ' + formatPercent(g.hayir.winRate, 1),
-          (Number.isFinite(g.diffPts) ? (g.diffPts >= 0 ? '+' : '') + formatNumber(g.diffPts, 1) : '-') + ' puan',
-          g.separates ? (g.diffPts >= 0 ? 'ayırt ediyor' : 'TERS YÖNDE ayırt ediyor') : 'fark yok',
+          (PARCA_ADLARI[ad] || ad) + ' (' + tam(g.evet.total) + ')',
+          formatPercent(g.evet.winRate, 1),
+          formatPercent(g.hayir.winRate, 1),
+          fark + (g.separates ? (g.diffPts >= 0 ? '*' : ' TERS') : ''),
         ])
       }
+      if (parcaSatirlari.length === 0) continue
+      parcaVar = true
+      el.appendChild(h('div', 'small muted', turAdi(tur)))
+      el.appendChild(tablo(['Bileşen', 'Var', 'Yok', 'Fark'], parcaSatirlari))
     }
-    el.appendChild(parcaSatirlari.length
-      ? tablo(['Bileşen', 'Var (n / oran)', 'Yok (n / oran)', 'Fark', 'Sonuç'], parcaSatirlari)
-      : h('div', 'small muted', 'Bileşen kırılımı yok, hafızayı yeniden tarayın.'))
+    if (!parcaVar) {
+      el.appendChild(h('div', 'small muted', 'Bileşen kırılımı yok, hafızayı yeniden tarayın.'))
+    }
     el.appendChild(h('div', 'small muted',
-      'Son sütun iki %95 Wilson aralığının örtüşüp örtüşmediğine bakar. "Fark yok" o bileşenin ' +
-      'bir şey söylemediği anlamına gelir. "Ters yönde" ise bileşen doğru olduğunda sonucun ' +
-      'daha KÖTÜ olduğu ölçülmüş demektir. Skor sinyal kararına girmez, bilgi amaçlıdır.'))
+      'Bileşen adının yanındaki sayı, bileşenin doğru olduğu olay sayısıdır. Son sütun iki ' +
+      '%95 Wilson aralığının örtüşüp örtüşmediğine bakar: işaretsiz fark, aralıklar örtüştüğü ' +
+      'için "bir şey söylemiyor" demektir; * ayırt ettiğini, TERS ise bileşen doğru olduğunda ' +
+      'sonucun daha KÖTÜ olduğunu gösterir. Skor sinyal kararına girmez, bilgi amaçlıdır.'))
   }
 
   // Seans dagilimi
