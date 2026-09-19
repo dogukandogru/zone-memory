@@ -193,9 +193,77 @@ function hataGoster(mesaj) {
 function canliDurumuYaz() {
   const e = el('statusLive')
   if (!e) return
-  e.textContent = durum.canli ? 'Canlı: açık (' + durum.tf + ')' : 'Canlı: kapalı'
-  e.style.color = durum.canli ? RENK.up : ''
+  if (!durum.canli) {
+    e.textContent = 'Canlı: kapalı'
+    e.style.color = ''
+    e.title = ''
+    return
+  }
+
+  // CANLI SAGLIK GOSTERGESI.
+  //
+  // Gosterge onceden hata durumunda da yesil "Canlı: açık" kaliyordu:
+  // Binance yanit vermezse "sinyal yok" ile "akis olmus" ayirt edilemiyordu.
+  // Uc durum var:
+  //   kirmizi  son turda hata alindi
+  //   turuncu  yoklama ya da veri bayat (akis duruyor olabilir)
+  //   yesil    yoklama guncel ve veri geliyor
+  const d = durum.canliDurum || {}
+  const simdi = Math.floor(Date.now() / 1000)
+  const yoklamaAralik = sayi(d.pollSeconds, 20)
+  const sonYoklama = sayi(d.lastPollTime, 0)
+  const yoklamaYas = sonYoklama > 0 ? simdi - sonYoklama : Infinity
+  const sonVeri = sayi(d.lastBarTime, 0)
+  const tfSn = tfSaniye(durum.tf)
+  const veriYas = sonVeri > 0 ? simdi - sonVeri : Infinity
+
+  let renk = RENK.up
+  if (d.lastError) renk = RENK.down
+  else if (yoklamaYas > yoklamaAralik * 3) renk = RENK.warn
+  // Veri yasi olcutu bar suresine baglidir: 15 dakikalikta iki bar 30 dakika
+  // demektir, bu normaldir; 1 dakikalikta iki dakika gecikme anormaldir.
+  // PIYASA KAPALIYKEN bakilmaz: hafta sonu son barin 20 saat eski olmasi
+  // normaldir, uyari vermek gostergeyi anlamsizlastirir.
+  else if (d.marketOpen !== false && tfSn > 0 && veriYas > tfSn * 2 + yoklamaAralik * 2) {
+    renk = RENK.warn
+  }
+
+  const parcalar = ['Canlı: açık (' + durum.tf + ')']
+  if (Number.isFinite(veriYas)) parcalar.push('son veri ' + sureMetni(veriYas) + ' önce')
+  else parcalar.push('henüz veri yok')
+  if (d.marketOpen === false) parcalar.push('piyasa kapalı')
+  e.textContent = parcalar.join(', ')
+  e.style.color = renk
+
+  const ipucu = []
+  if (d.lastError) ipucu.push('Hata: ' + d.lastError)
+  if (d.checkError) ipucu.push('Kontrol hatası: ' + d.checkError)
+  if (sayi(d.consecutiveErrors, 0) > 1) {
+    ipucu.push(formatNumber(d.consecutiveErrors, 0) + ' turdur hata alınıyor')
+  }
+  ipucu.push('Yoklama: ' + (Number.isFinite(yoklamaYas) ? sureMetni(yoklamaYas) + ' önce' : 'yok') +
+    ' (her ' + formatNumber(yoklamaAralik, 0) + ' sn)')
+  ipucu.push('Tur sayısı: ' + formatNumber(sayi(d.ticks, 0), 0))
+  ipucu.push('Eklenen bar: ' + formatNumber(sayi(d.addedBars, 0), 0))
+  if (typeof d.basis === 'number' && isFinite(d.basis)) {
+    ipucu.push('Fiyat kaydırması: ' + formatNumber(d.basis, 2))
+  }
+  if (typeof d.volScale === 'number' && isFinite(d.volScale)) {
+    ipucu.push('Hacim ölçeği: ' + formatNumber(d.volScale, 1))
+  }
+  if (d.needsSync) ipucu.push('Eksik dönem var, Veri Çek gerekiyor')
+  e.title = ipucu.join('\n')
 }
+
+/** Saniyeyi kisa okunabilir sureye cevirir: 35 sn, 4 dk, 2 sa. */
+function sureMetni(sn) {
+  if (!Number.isFinite(sn)) return '-'
+  if (sn < 90) return Math.round(sn) + ' sn'
+  if (sn < 5400) return Math.round(sn / 60) + ' dk'
+  if (sn < 172800) return Math.round(sn / 3600) + ' sa'
+  return Math.round(sn / 86400) + ' gün'
+}
+
 
 /** Kaynak durum metnini gunceller. */
 function kaynakDurumuYaz() {
@@ -1925,6 +1993,17 @@ function olaylariBagla() {
   // Canli akista bosluk olustu ya da vekil duzeltmesi hesaplanamadi: bar
   // YAZILMADI. Eksik donemi kapatmadan devam etmek seride kalici delik
   // birakacagi icin hemen veri tamamlama calistirilir.
+  // CANLI DURUM: her tikte gelir. Gosterge rengi ve ipucu buradan tazelenir;
+  // onceden yalnizca baslama ve durmada guncelleniyordu, yani akis olse bile
+  // yesil kaliyordu.
+  window.api.on('live:status', (veri) => {
+    if (!veri) return
+    durum.canliDurum = veri
+    durum.canli = !!veri.running
+    canliDurumuYaz()
+    kaynakDurumuYaz()
+  })
+
   window.api.on('live:gap', async (veri) => {
     if (!veri) return
     if (veri.tf && veri.tf !== durum.tf) return

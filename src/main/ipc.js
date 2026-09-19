@@ -19,6 +19,7 @@ const engine = require('./engine')
 const settings = require('./settings')
 const live = require('./live')
 const paths = require('./paths')
+const logfile = require('./logfile')
 
 /** @type {import('electron').BrowserWindow|null} */
 let mainWindow = null
@@ -51,6 +52,14 @@ function send(type, data) {
     wc.send('api:event', { type: type, data: data })
   } catch (err) {
     // Pencere kapaniyor olabilir, sessizce gec.
+  }
+  // GUNLUK: ekrandaki satir 12-20 saniyede kayboluyordu, dosyada kalir.
+  if (type === 'log' && data && data.message) {
+    logfile.write({
+      level: data.level || 'bilgi',
+      source: data.source || 'uygulama',
+      message: data.message,
+    })
   }
 }
 
@@ -209,6 +218,14 @@ function register(win) {
       const data = await dispatch(cmd, payload)
       return { ok: true, data: data === undefined ? null : data }
     } catch (err) {
+      // Yigin izi arayuze GITMEZ ama dosyaya yazilir: hatanin nerede
+      // olustugu sonradan ancak boyle bulunabiliyor.
+      logfile.write({
+        level: 'hata',
+        source: 'ipc:' + cmd,
+        message: errorText(err),
+        stack: err && err.stack ? err.stack : null,
+      })
       return { ok: false, error: errorText(err) }
     }
   })

@@ -11,6 +11,7 @@ const paths = require('./paths')
 const ipc = require('./ipc')
 const engine = require('./engine')
 const live = require('./live')
+const logfile = require('./logfile')
 
 const IS_MAC = process.platform === 'darwin'
 const IS_DEV = process.argv.includes('--dev')
@@ -63,6 +64,16 @@ function createWindow() {
   mainWindow.on('closed', () => {
     mainWindow = null
     ipc.setWindow(null)
+  })
+
+  // Arayuz sureci cokerse ekran bosalir ve hicbir iz kalmazdi.
+  mainWindow.webContents.on('render-process-gone', (olay, ayrinti) => {
+    logfile.write({
+      level: 'hata',
+      source: 'arayuz',
+      message: 'Arayuz sureci sonlandi: ' + (ayrinti && ayrinti.reason ? ayrinti.reason : 'bilinmiyor') +
+        (ayrinti && ayrinti.exitCode !== undefined ? ' (cikis kodu ' + ayrinti.exitCode + ')' : ''),
+    })
   })
 
   // Yeni pencere acma istekleri varsayilan tarayiciya gider.
@@ -200,11 +211,39 @@ function buildMenu() {
           shell.openPath(paths.dataDir())
         },
       },
+      {
+        // Gece olusan hatalarin ne zaman basladigini bulmanin tek yolu.
+        label: 'Gunluk Klasorunu Ac',
+        click: () => {
+          shell.openPath(logfile.ensureDirSync())
+        },
+      },
     ],
   })
 
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
 }
+
+// SURECI DUSUREN HATALAR DOSYAYA YAZILIR.
+//
+// Bunlar olustugunda uygulama ya kapaniyor ya da pencere bosaliyor; ekrandaki
+// 12-20 saniyelik durum satiri hicbir ise yaramiyordu.
+process.on('uncaughtException', (err) => {
+  logfile.write({
+    level: 'hata',
+    source: 'ana-surec',
+    message: err && err.message ? err.message : String(err),
+    stack: err && err.stack ? err.stack : null,
+  })
+})
+process.on('unhandledRejection', (sebep) => {
+  logfile.write({
+    level: 'hata',
+    source: 'ana-surec',
+    message: 'Yakalanmamis soz reddi: ' + (sebep && sebep.message ? sebep.message : String(sebep)),
+    stack: sebep && sebep.stack ? sebep.stack : null,
+  })
+})
 
 // Tek ornek kilidi: ikinci ornek varolan pencereyi one getirir.
 const gotLock = app.requestSingleInstanceLock()
@@ -221,6 +260,8 @@ if (!gotLock) {
 
   app.whenReady().then(() => {
     paths.ensureDirs()
+    // Eski gunlukleri temizle ve klasoru kur.
+    logfile.init()
     buildMenu()
     ipc.register()
     engine.start()

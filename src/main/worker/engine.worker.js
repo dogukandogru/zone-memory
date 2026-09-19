@@ -1618,7 +1618,9 @@ handlers['engine:live-tick'] = async function (payload) {
         // gerekcede gorunur, cunku eskimis bir basis sessizce yanlis fiyat
         // seviyesi uretir.
         if (stored && stored.length > 0) {
-          basisYas = Math.max(0, fetchedAt - stored.time[stored.length - 1])
+          // `fetchedAt` asagida tanimli; burada yuke bakariz (ayni deger).
+          const cekimAni = num(payload.fetchedAt, Math.floor(Date.now() / 1000))
+          basisYas = Math.max(0, cekimAni - stored.time[stored.length - 1])
         }
       } else {
         needsSync = true

@@ -54,6 +54,15 @@ const state = {
   lastPollTime: null,
   lastBarTime: null,
   lastError: null,
+  // ISCININ kendi kontrol hatasi (bar yazildi ama sinyal uretilemedi gibi).
+  // `lastError` agdan gelen hatayi tutar; ikisi ayri seylerdir.
+  checkError: null,
+  // Depoya en son ne zaman bar YAZILDI. "Sinyal yok" ile "akis olmus" ayrimi
+  // buradan gorunur: yoklama calisiyor ama bar gelmiyorsa akis olmustur.
+  lastAddedTime: null,
+  // Ust uste kac tiktir hata aliniyor. Tek bir gecici hata ile surekli hata
+  // arasindaki farki gostergede ayirmak icin.
+  consecutiveErrors: 0,
   ticks: 0,
   signals: 0,
   addedBars: 0,
@@ -98,9 +107,27 @@ function getProviderById(id) {
   return p
 }
 
+/**
+ * Piyasa su an acik mi (kural tabanli New York takvimi).
+ *
+ * Gosterge bunu bilmek zorunda: hafta sonu son barin 20 saat eski olmasi
+ * NORMALDIR, sali ogleden sonra ayni sey akisin oldugunu gosterir.
+ */
+let piyasaTakvimi = null
+function piyasaAcikMi() {
+  try {
+    if (!piyasaTakvimi) piyasaTakvimi = require('../core/session').createMarketCalendar()
+    return piyasaTakvimi(Math.floor(Date.now() / 1000))
+  } catch (err) {
+    // Takvim kurulamazsa "acik" varsayariz: yanlis alarm, sessiz kalmaktan iyidir.
+    return true
+  }
+}
+
 /** Anlik durum. */
 function status() {
   return {
+    marketOpen: piyasaAcikMi(),
     running: state.running,
     tf: state.tf,
     providerId: state.providerId,
@@ -108,9 +135,13 @@ function status() {
     isProxy: state.isProxy,
     pollSeconds: state.pollSeconds,
     basis: state.basis,
+    volScale: state.volScale,
     lastPollTime: state.lastPollTime,
     lastBarTime: state.lastBarTime,
+    lastAddedTime: state.lastAddedTime,
     lastError: state.lastError,
+    checkError: state.checkError,
+    consecutiveErrors: state.consecutiveErrors,
     ticks: state.ticks,
     signals: state.signals,
     addedBars: state.addedBars,
@@ -263,6 +294,10 @@ async function tick() {
     state.ticks += 1
     state.lastPollTime = Math.floor(Date.now() / 1000)
     state.lastError = null
+    state.consecutiveErrors = 0
+    // Isci kendi icinde bir kontrol hatasi bildirdiyse gostergede gorunmeli:
+    // bar yaziliyor ama sinyal uretilemiyor olabilir.
+    state.checkError = res && res.checkError ? String(res.checkError) : null
 
     if (res && res.basisWarned) basisWarned = true
     if (res && typeof res.volScale === 'number' && isFinite(res.volScale) && res.volScale > 0) {
@@ -284,6 +319,7 @@ async function tick() {
     }
     if (res && res.added > 0) {
       state.addedBars += res.added
+      state.lastAddedTime = Math.floor(Date.now() / 1000)
     }
     // Duzeltme hesaplanamadi ya da akista bosluk olustu: bar YAZILMADI.
     // Arayuz bunu gorunce eksik donemi Veri Cek ile kapatir, yoksa canli
@@ -329,10 +365,17 @@ async function tick() {
   } catch (err) {
     const message = err && err.message ? err.message : String(err)
     state.lastError = message
+    state.consecutiveErrors += 1
     // Durdurulduktan sonra gelen hatalar icin gurultu yapma.
     if (state.running) logLine('Canli veri hatasi: ' + message + ' Denemeye devam ediliyor.')
   } finally {
     ticking = false
+    // HER TIKTE DURUM YAYINLANIR.
+    //
+    // Gosterge onceden yalnizca baslama ve durmada guncelleniyordu: Binance
+    // yanit vermese bile "Canli: acik" yesil kaliyordu ve "sinyal yok" ile
+    // "akis olmus" ayirt edilemiyordu.
+    emitEvent('live:status', status())
   }
 }
 

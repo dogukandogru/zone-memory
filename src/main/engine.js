@@ -18,6 +18,7 @@
 const path = require('path')
 const { Worker } = require('worker_threads')
 const paths = require('./paths')
+const logfile = require('./logfile')
 
 const WORKER_FILE = path.join(__dirname, 'worker', 'engine.worker.js')
 const MAX_RESTART_DELAY_MS = 5000
@@ -30,6 +31,15 @@ const pending = new Map()
 let stopping = false
 let crashStreak = 0
 let restartTimer = null
+/** Her baslatmaya artan bir kimlik: saglik zamanlayicisi buna baglanir. */
+let spawnId = 0
+/**
+ * Yeniden baslatma beklenirken gelen istekler.
+ *
+ * Isci cokup geri cekilme suresi beklenirken gelen her cagri isciyi aninda
+ * yeniden baslatiyordu, yani geri cekilme hic ise yaramiyordu.
+ */
+const bekleyenIstekler = []
 /** @type {((message:string)=>void)|null} */
 let logHandler = null
 
@@ -93,6 +103,7 @@ function spawn() {
   const dir = paths.dataDir()
   process.env.ZONE_MEMORY_DATA_DIR = dir
 
+  spawnId++
   worker = new Worker(WORKER_FILE, {
     workerData: { dataDir: dir, userDataDir: paths.userDataDir() },
     resourceLimits: { maxOldGenerationSizeMb: 6144 },
@@ -102,11 +113,25 @@ function spawn() {
 
   worker.on('error', (err) => {
     emitLog('Motor hatasi: ' + (err && err.message ? err.message : String(err)))
+    // Yigin izi yalnizca dosyaya gider: cokmenin nerede oldugu sonradan
+    // ancak boyle bulunabiliyor.
+    logfile.write({
+      level: 'hata',
+      source: 'engine',
+      message: err && err.message ? err.message : String(err),
+      stack: err && err.stack ? err.stack : null,
+    })
     rejectAll('Motor beklenmedik sekilde durdu: ' + (err && err.message ? err.message : 'bilinmeyen hata'))
   })
 
   worker.on('exit', (code) => {
     worker = null
+    // Kapanista cikis kodu 0 olmayabilir; bu normaldir ve hata degildir.
+    logfile.write({
+      level: stopping || code === 0 ? 'bilgi' : 'hata',
+      source: 'engine',
+      message: 'Isci kapandi, cikis kodu ' + code + (stopping ? ' (uygulama kapaniyor)' : ''),
+    })
     if (pending.size > 0) {
       rejectAll('Motor kapandi (cikis kodu ' + code + '), islem tamamlanamadi.')
     }
@@ -117,13 +142,27 @@ function spawn() {
     restartTimer = setTimeout(() => {
       restartTimer = null
       if (!stopping && !worker) spawn()
+      // Bekleyen istekler yeni isciye gonderilir.
+      const kuyruk = bekleyenIstekler.splice(0, bekleyenIstekler.length)
+      for (const istek of kuyruk) {
+        if (stopping || !worker) {
+          istek.reject(new Error('Motor kapali.'))
+          continue
+        }
+        call(istek.cmd, istek.payload, istek.onProgress).then(istek.resolve, istek.reject)
+      }
     }, delay)
     if (restartTimer.unref) restartTimer.unref()
   })
 
   // Uzun sure sorunsuz calistiysa cokme sayacini sifirla.
+  //
+  // Zamanlayici SPAWN KIMLIGINE baglidir: onceki baslatmanin zamanlayicisi
+  // yeni baslatmanin sayacini sifirlayabiliyordu ve ust uste cokmeler
+  // "saglikli" sayilip geri cekilme suresi hic buyumuyordu.
+  const benimSpawn = spawnId
   const healthy = setTimeout(() => {
-    crashStreak = 0
+    if (spawnId === benimSpawn) crashStreak = 0
   }, 30000)
   if (healthy.unref) healthy.unref()
 }
@@ -174,6 +213,16 @@ function call(cmd, payload, onProgress) {
     if (!worker) {
       if (stopping) {
         reject(new Error('Motor kapali.'))
+        return
+      }
+      // GERI CEKILME BEKLENIYORSA HEMEN BASLATMA.
+      //
+      // Onceden her cagri isciyi aninda yeniden baslatiyordu ve ust uste
+      // cokmelerde geri cekilme suresi hicbir zaman devreye girmiyordu:
+      // cokup baslayan bir isci saniyede defalarca yeniden kuruluyordu.
+      // Artik istek kuyruga alinir, zamanlayici dolunca gonderilir.
+      if (restartTimer) {
+        bekleyenIstekler.push({ cmd: cmd, payload: payload, onProgress: onProgress, resolve: resolve, reject: reject })
         return
       }
       spawn()
