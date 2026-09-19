@@ -4,14 +4,16 @@
 // saati kurali).
 const test = require('node:test')
 const assert = require('node:assert')
+const zlib = require('node:zlib')
 
 const histdata = require('../src/core/data/histdata')
 
 const SAAT = 3600
 
 /** Tek bir tick satiri uretir: YYYYMMDD HHMMSSmmm,bid,ask,0 */
-function tickSatiri(tarih, saat) {
-  return tarih + ' ' + saat + '000,2000.00,2000.20,0'
+function tickSatiri(tarih, saat, bid) {
+  const b = bid === undefined ? 2000 : bid
+  return tarih + ' ' + saat + '000,' + b.toFixed(2) + ',' + (b + 0.2).toFixed(2) + ',0'
 }
 
 /** Verilen gun ve dosya saati icin uretilen barin UTC zamanini dondurur. */

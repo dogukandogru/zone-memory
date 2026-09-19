@@ -92,6 +92,9 @@ async function fetchCandles(opts) {
 
   let imlec = from
   let tur = 0
+  // Hacimli bar sayaci: forex/metal serilerinde hacim hic gelmeyebilir ve o
+  // donemde indikatorun hacim kapisi hic acilmaz (yani kutu olusmaz).
+  let hacimliBar = 0
   bildir(o.onProgress, 0, ETIKET + ': ' + kod + ' mumlari indiriliyor')
 
   while (imlec <= to) {
@@ -137,7 +140,9 @@ async function fetchCandles(opts) {
       kap.push(c)
       // Forex/metal serilerinde hacim gelmez; gelmezse 0 yazilir.
       const v = r.volume === undefined || r.volume === null ? 0 : +r.volume
-      hac.push(Number.isFinite(v) ? v : 0)
+      const hacim = Number.isFinite(v) ? v : 0
+      if (hacim > 0) hacimliBar++
+      hac.push(hacim)
     }
 
     if (satirlar.length < CIKTI_BOYU) break
@@ -161,7 +166,15 @@ async function fetchCandles(opts) {
     volume: hac,
   }))
   if (secim.yenidenOrnekle && seri.length > 0) seri = resample(seri, o.tfSec)
-  bildir(o.onProgress, 100, ETIKET + ': ' + seri.length + ' mum hazir')
+  // HACIM YOKSA KUTU DA YOKTUR. Indikatorun kutu kapisi hacim patlamasina
+  // bakar (`vR = hacim / SMA(hacim)`); hacim hep 0 gelirse bu kapi hic
+  // acilmaz ve o donemde tek bir bolge bile olusmaz. Cagiran taraf bunu
+  // kullaniciya soylesin diye seriye isaret konur.
+  if (seri.length > 0 && hacimliBar === 0) {
+    Object.defineProperty(seri, 'hacimYok', { value: true, enumerable: false })
+  }
+  bildir(o.onProgress, 100, ETIKET + ': ' + seri.length + ' mum hazir' +
+    (seri.length > 0 && hacimliBar === 0 ? ' (hacim gelmedi, bu donemde kutu olusmaz)' : ''))
   return seri
 }
 

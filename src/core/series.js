@@ -297,6 +297,79 @@ function growF64(arr, need) {
 }
 
 /**
+ * Kapasiteli seriye YERINDE ekleme yapar.
+ *
+ * Neden var: canli dongu her yeni barda `concatSeries` cagiriyordu, bu da 6
+ * milyon barlik seride bar basina 6 sutunluk tam kopya (~293 MB) demekti.
+ * Yerinde ekleme kapasite yettigi surece hic kopya almaz; kapasite dolunca
+ * `growF64` diziyi iki katina cikarir, yani ekleme amortize edilmis O(1)
+ * olur.
+ *
+ * `dst` DEGISTIRILIR ve geri dondurulur. Sutunlari `length` degerinden uzun
+ * olabilir; gecerli bar sayisi her zaman `length` alanidir.
+ *
+ * `src` zaman sirali varsayilir. Son bardan ESKI gelen satir yerinde
+ * eklemeyle cozulemeyecegi icin ATLANIR; son barla AYNI zamanli satir mevcut
+ * barin uzerine yazar (canli barin guncellenmesi). Sonlu olmayan zaman ya da
+ * OHLC iceren satir `sanitize` ile ayni mantikla atilir, sonlu olmayan hacim
+ * 0 yazilir.
+ *
+ * @param {Series|null} dst Kapasiteli hedef seri (yoksa yenisi kurulur)
+ * @param {Series} src Eklenecek barlar
+ * @returns {Series} dst
+ */
+function appendInPlace(dst, src) {
+  const add = src ? src.length | 0 : 0
+  const hedef = dst || createSeries(0)
+  if (add === 0) return hedef
+  let n = hedef.length | 0
+  const need = n + add
+  // Sutunlar ayri ayri denetlenir: kapasiteleri farkli olabilir.
+  if (hedef.time.length < need) hedef.time = growF64(hedef.time, need)
+  if (hedef.open.length < need) hedef.open = growF64(hedef.open, need)
+  if (hedef.high.length < need) hedef.high = growF64(hedef.high, need)
+  if (hedef.low.length < need) hedef.low = growF64(hedef.low, need)
+  if (hedef.close.length < need) hedef.close = growF64(hedef.close, need)
+  if (hedef.volume.length < need) hedef.volume = growF64(hedef.volume, need)
+
+  const dt = hedef.time
+  const dopen = hedef.open
+  const dhigh = hedef.high
+  const dlow = hedef.low
+  const dclose = hedef.close
+  const dvol = hedef.volume
+  const st = src.time
+  const so = src.open
+  const sh = src.high
+  const sl = src.low
+  const sc = src.close
+  const sv = src.volume
+
+  for (let i = 0; i < add; i++) {
+    const t = st[i]
+    if (!Number.isFinite(t)) continue
+    if (!Number.isFinite(so[i]) || !Number.isFinite(sh[i]) || !Number.isFinite(sl[i]) || !Number.isFinite(sc[i])) {
+      continue
+    }
+    if (n > 0) {
+      const son = dt[n - 1]
+      if (t < son) continue
+      if (t === son) n--
+    }
+    dt[n] = t
+    dopen[n] = so[i]
+    dhigh[n] = sh[i]
+    dlow[n] = sl[i]
+    dclose[n] = sc[i]
+    const v = sv[i]
+    dvol[n] = Number.isFinite(v) ? v : 0
+    n++
+  }
+  hedef.length = n
+  return hedef
+}
+
+/**
  * Ust zaman dilimine yeniden ornekler. Kova baslangici
  * Math.floor(time / toTfSec) * toTfSec olarak hizalanir.
  * Bos kovalar URETILMEZ. Tek gecisli calisir, tamponlar gerektikce buyur.
@@ -515,6 +588,7 @@ module.exports = {
   lastIndexAtOrBefore,
   firstIndexAtOrAfter,
   growF64,
+  appendInPlace,
   resample,
   sanitize,
 }

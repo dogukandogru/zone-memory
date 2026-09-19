@@ -1428,6 +1428,55 @@ handlers['engine:memory-delete'] = async function (payload) {
  * sonuncusuyla doldurulur. Her olay canli sinyal gunlugune de yazilir.
  */
 /**
+ * HACIM REJIMI: kapi orani tarihsel referansin cok uzerinde mi.
+ *
+ * Referans, deponun VEKIL YAZILMAMIS son bolumunden hesaplanir ve surec
+ * basina bir kez cikarilir (kaynak degismedikce degismez). Canli oran ise her
+ * turda son 2000 bardan olculur.
+ *
+ * Esik 1,5 kat: olculdu, duzeltme calisirken PAXG orani spot referansin
+ * yaklasik 0,8 katina iniyor (%2,63'e karsi %3,13), duzeltme calismazken
+ * yaklasik 4 katina cikiyor (%12,27). Arada genis bir pay var.
+ */
+const REJIM_KAT = 1.5
+/** Canli oran kac bardan olculur. */
+const REJIM_PENCERE = 2000
+let rejimOnbellek = { tf: null, ref: null }
+
+async function hacimRejimiKontrol (tf, seri, tfSec) {
+  if (!seri || seri.length < REJIM_PENCERE) return null
+  const loader = core('data/loader')
+  try {
+    if (rejimOnbellek.tf !== tf || rejimOnbellek.ref === null) {
+      const araliklar = await loader.vekilAraliklariOku(paths.dataDir(), tf)
+      // Referans: en eski vekil araligindan ONCEKI son bolum. Vekil hic
+      // yazilmamissa serinin sonu kullanilir.
+      let son = seri.length
+      if (araliklar.length > 0) {
+        let enErken = Infinity
+        for (const r of araliklar) {
+          if (r && Number.isFinite(r.from) && r.from < enErken) enErken = r.from
+        }
+        if (Number.isFinite(enErken)) {
+          son = 0
+          while (son < seri.length && seri.time[son] < enErken) son++
+        }
+      }
+      const bas = Math.max(0, son - 8 * 7 * 86400 / (tfSec > 0 ? tfSec : 60))
+      const olcum = loader.hacimKapiOrani(seri, { fromIndex: bas, toIndex: son })
+      rejimOnbellek = { tf: tf, ref: olcum.n > 500 ? olcum.rate : null }
+    }
+    const ref = rejimOnbellek.ref
+    if (!(ref > 0)) return null
+    const canli = loader.hacimKapiOrani(seri, { fromIndex: seri.length - REJIM_PENCERE })
+    if (canli.n < 200) return null
+    return { rate: canli.rate, ref: ref, bozuk: canli.rate > ref * REJIM_KAT }
+  } catch (err) {
+    return null
+  }
+}
+
+/**
  * Ekonomik takvimi surec basina BIR KEZ yukler.
  *
  * Canli dongu her 20 saniyede bir cagiriliyor; dosyayi her tikta okumak
@@ -1544,36 +1593,43 @@ handlers['engine:live-tick'] = async function (payload) {
   // Hafiza ile etkin ayar uyusmuyor: canli sinyal uretilmez, arayuz uyarir.
   let cfgMismatch = false
 
+  // Hacim duzeltmesi artik SABIT BIR OLCEK DEGIL: vekilin hacim ORANI
+  // dagilimi spot seriye eslestiriliyor (V3). Bu yuzden "onceki turdan bilinen
+  // katsayilari uygula" kisayolu KALDIRILDI; kisayol, tam yolun yazdigindan
+  // baska hacimler uretir ve iki yol sessizce ayrisirdi. Duzeltme her turda
+  // bastan hesaplanir (olculdu: 8 haftalik 1 dakikalik pencerede yaklasik
+  // 10 ms, 20 saniyelik dongu icin onemsiz).
+  let basisYas = null
   if (payload.isProxy) {
     const loader = core('data/loader')
-    if (basis === null || volScale === null) {
-      // Bilinmeyen varsa ikisini birlikte yeniden hesaplariz.
-      try {
-        const stored = await getSeries(tf, false)
-        const duzeltme = loader.normalizeProxy(stored, inc)
-        if (duzeltme.ok) {
-          basis = duzeltme.basis
-          volScale = duzeltme.volScale
-          basisComputed = true
-          inc = duzeltme.series
-        } else {
-          needsSync = true
-          if (!basisWarned) {
-            basisWarned = true
-            logs.push('Vekil kaynak duzeltilemedi (' + duzeltme.reason + '), bar yazilmadi. Veri Cek ile bosluk kapatilmali.')
-          }
+    try {
+      const stored = await getSeries(tf, false)
+      const duzeltme = loader.normalizeProxy(stored, inc, {
+        tfSec: tfSec,
+        proxyRanges: await loader.vekilAraliklariOku(paths.dataDir(), tf),
+      })
+      if (duzeltme.ok) {
+        basis = duzeltme.basis
+        volScale = duzeltme.volScale
+        basisComputed = true
+        inc = duzeltme.series
+        // Basisin YASI: kac saniyelik ortak bolgeden hesaplandigi degil,
+        // depodaki son gercek barin uzerinden ne kadar gectigi. Canli
+        // gerekcede gorunur, cunku eskimis bir basis sessizce yanlis fiyat
+        // seviyesi uretir.
+        if (stored && stored.length > 0) {
+          basisYas = Math.max(0, fetchedAt - stored.time[stored.length - 1])
         }
-      } catch (err) {
+      } else {
         needsSync = true
-        logs.push('Vekil duzeltme hesaplanamadi: ' + (err && err.message ? err.message : String(err)))
+        if (!basisWarned) {
+          basisWarned = true
+          logs.push('Vekil kaynak duzeltilemedi (' + duzeltme.reason + '), bar yazilmadi. Veri Cek ile bosluk kapatilmali.')
+        }
       }
-    } else {
-      // Onceki turdan bilinen katsayilar: ayni sirayla uygulanir.
-      inc = loader.applyBasis(inc, basis)
-      if (volScale !== 1) {
-        for (let i = 0; i < inc.length; i++) inc.volume[i] *= volScale
-      }
-      inc = loader.piyasaSaatleriyleSuz(inc)
+    } catch (err) {
+      needsSync = true
+      logs.push('Vekil duzeltme hesaplanamadi: ' + (err && err.message ? err.message : String(err)))
     }
   }
 
@@ -1719,6 +1775,19 @@ handlers['engine:live-tick'] = async function (payload) {
         memMeta
       )
       const hafizaVar = !!(mem && mem.events && mem.events.length > 0)
+      // HACIM REJIMI KORUMASI (V3).
+      //
+      // Kutu kapisi `vR = hacim / SMA(hacim)` oranina bakar. Kaynak degisince
+      // bu oran sessizce kayar: olculdu, ham PAXG 1 dakikalikta kapi %12,27
+      // oraninda aciliyor, spot referansinda %3,13. Duzeltme calisiyorsa oran
+      // referansa yakin kalmali; hala belirgin yuksekse o donemde uretilen
+      // olaylar hafizadakilerle KARSILASTIRILAMAZ, bu yuzden sinyal
+      // uretilmez.
+      const rejim = await hacimRejimiKontrol(tf, s, tfSec)
+      if (rejim && rejim.bozuk) {
+        logs.push('Hacim rejimi kaymis (kapi orani %' + (rejim.rate * 100).toFixed(1) +
+          ', referans %' + (rejim.ref * 100).toFixed(1) + '), sinyal uretilmedi.')
+      }
       // EKONOMIK TAKVIM (Y2): dosya yoksa null kalir ve hicbir sey degismez.
       // Her tikta diskten okumak yerine surec boyunca bir kez yuklenir.
       const canliTakvim = takvimOnbellek()
@@ -1744,7 +1813,7 @@ handlers['engine:live-tick'] = async function (payload) {
           logs.push('Hafiza farkli bir ayarla kuruldu, sinyal uretilmedi. "Geçmişi Tara" calistirin.')
         }
       }
-      const uretilebilir = hafizaVar && izUyum !== false
+      const uretilebilir = hafizaVar && izUyum !== false && !(rejim && rejim.bozuk)
       const protos = uretilebilir && adaylar.length > 0 ? await getProtos(tf, false) : []
       let ozellikYok = 0
 
@@ -1766,7 +1835,13 @@ handlers['engine:live-tick'] = async function (payload) {
                 : null }
             )
             if (sig && basis !== null && basis !== 0 && Array.isArray(sig.reasons)) {
-              sig.reasons.push('Vekil kaynak fiyati ' + basis.toFixed(2) + ' birim kaydirildi.')
+              // Basisin DEGERI ve YASI birlikte yazilir: eskimis bir basis
+              // sessizce yanlis fiyat seviyesi uretir, kullanici bunu
+              // gerekcede gormeli.
+              sig.reasons.push('Vekil kaynak fiyati ' + basis.toFixed(2) + ' birim kaydirildi' +
+                (Number.isFinite(basisYas)
+                  ? ' (depodaki son gercek bar ' + Math.round(basisYas / 60) + ' dakika once)'
+                  : '') + '.')
             }
             // UST ZAMAN DILIMI BAGLAMI: bilgi, sinyale KATILMAZ.
             if (sig && canliHtf && canliHtf.dizin) {

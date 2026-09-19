@@ -20,6 +20,16 @@ const { httpJson, sleep, kaynakZamanDilimi, bildir } = require('./provider')
 
 const ETIKET = 'Yahoo Finance'
 const SEMBOL = 'GC%3DF' // GC=F, URL kodlanmis
+
+/**
+ * Bu kaynakla kapatilabilecek en uzun bosluk.
+ *
+ * GC=F vadeli bir kontrattir; kontrat devrinde fiyat sicrar ve tek bir
+ * medyan fark bunu duzeltemez. Yalnizca `gapFill: true` ile cagrildiginda
+ * (yani bir bosluk doldurma isteginde) uygulanir, normal gecmis indirmede
+ * degil.
+ */
+const YAHOO_MAX_BOSLUK_SN = 2 * 86400
 const SUNUCULAR = [
   'https://query1.finance.yahoo.com/v8/finance/chart/',
   'https://query2.finance.yahoo.com/v8/finance/chart/',
@@ -141,6 +151,22 @@ async function fetchCandles(opts) {
     if (from < enEski) from = enEski
   }
   if (from >= to) return emptySeries()
+
+  // UZUN BOSLUK DOLDURMA REDDEDILIR.
+  //
+  // GC=F bir VADELI kontrattir ve kontrat devrinde fiyat sicrar. Tek bir
+  // medyan fark (basis) bu sicramayi duzeltemez: iki gunluk bir bosluk bile
+  // devre denk gelebilir ve seride sahte bir seviye kaymasi birakir. Kisa
+  // bosluklarda risk kucuk oldugu icin sinir gun bazinda konuldu.
+  if (o.gapFill === true && to - from > YAHOO_MAX_BOSLUK_SN) {
+    throw new Error(
+      ETIKET + ': ' + Math.round((to - from) / 86400) + ' gunluk bosluk bu kaynakla ' +
+      'kapatilamaz (sinir ' + Math.round(YAHOO_MAX_BOSLUK_SN / 86400) + ' gun). ' +
+      'GC=F vadeli bir kontrattir, devir gunlerinde fiyat sicrar ve tek bir ' +
+      'fiyat kaydirmasiyla duzeltilemez. Bosluk icin spot bir kaynak kullanin ' +
+      '(HistData, Polygon, Twelve Data).'
+    )
+  }
 
   const cikti = { t: [], o: [], h: [], l: [], c: [], v: [] }
   const toplamSpan = to - from
