@@ -447,6 +447,23 @@ async function kuyrukOku(filePath) {
   return temiz.length > 0 ? temiz : null
 }
 
+/**
+ * Kuyruk dosyasindaki HAM kayit sayisi (tekillestirmeden once).
+ *
+ * Sinir tekil bar sayisina degil dosyaya bakar: ayni bar tekrar tekrar
+ * eklenirse tekil sayi sabit kalir ama dosya buyur, ve her okuma o dosyayi
+ * bastan cozmek zorunda kalir.
+ */
+async function kuyrukSatirSayisi(filePath) {
+  try {
+    const st = await fs.promises.stat(tailPathOf(filePath))
+    return Math.floor(st.size / TAIL_BYTES_PER_BAR)
+  } catch (err) {
+    if (err && err.code === 'ENOENT') return 0
+    throw err
+  }
+}
+
 /** Kuyruk barlarini dosyanin sonuna ekler. */
 async function kuyrugaYaz(filePath, s) {
   const n = s.length | 0
@@ -526,11 +543,13 @@ async function readSeries(filePath) {
   const tail = await kuyrukOku(filePath)
   const tailLen = tail ? tail.length : 0
   const main = await anaOku(filePath, tailLen)
-  if (!main) {
-    // Ana dosya yok. Tek basina kuyruk kalmissa (yarim kalmis tam yazim)
-    // veri kaybetmemek icin o dondurulur.
-    return tailLen > 0 ? tail : null
-  }
+  // ANA DOSYA YOKSA KUYRUK DA YOK SAYILIR. Kuyruk yalnizca ana dosya varken
+  // yazilir, yazim da rename ile yapilir; yani cokme ana dosyayi ortadan
+  // kaldiramaz. Ana dosyasi olmayan bir kuyruk kullanicinin .bin dosyasini
+  // elle silmesinden kalmis artiktir. Onu geri vermek, silinmis bir depoyu
+  // bir kac barla canliymis gibi gosterir ve 1m'den turetilen tam seriyi
+  // golgeler. Ilk tam yazimda bu artik silinir.
+  if (!main) return null
   if (tailLen === 0) return main
   if (main.length === 0 || tail.time[0] > main.time[main.length - 1]) {
     // Normal durum: kuyruk ana dosyanin sonundan yeni. Ayrilan fazla
@@ -568,8 +587,9 @@ function appendSeries(filePath, s) {
     // yazim yapiyordu: canli dongude her bos tik 293 MB yaziyordu.
     if (incoming.length === 0) return { added: 0, total: gorunen }
 
+    const hamSatir = await kuyrukSatirSayisi(filePath)
     const hizli =
-      durum !== null && incoming.time[0] > anaSon && tailLen + incoming.length <= TAIL_MAX_BARS
+      durum !== null && incoming.time[0] > anaSon && hamSatir + incoming.length <= TAIL_MAX_BARS
     if (hizli) {
       await kuyrugaYaz(filePath, incoming)
       const birlesik = tailLen > 0 ? series.sanitize(series.concatSeries(tail, incoming)) : incoming
@@ -579,9 +599,10 @@ function appendSeries(filePath, s) {
 
     const main = await anaOku(filePath, tailLen)
     let taban = main
-    if (tailLen > 0) {
-      if (!taban) taban = tail
-      else if (main.length === 0 || tail.time[0] > main.time[main.length - 1]) {
+    // Ana dosya yoksa kuyruk artigi kullanilmaz (bkz. readSeries); yazim
+    // sirasinda silinir.
+    if (tailLen > 0 && main) {
+      if (main.length === 0 || tail.time[0] > main.time[main.length - 1]) {
         taban = kapasiteyeEkle(main, tail)
       } else {
         taban = series.sanitize(series.concatSeries(series.sliceSeries(main, 0, main.length), tail))
@@ -614,13 +635,17 @@ function compactTail(filePath) {
       return { compacted: 0, total: durum ? durum.count : 0 }
     }
     const main = await anaOku(filePath, tailLen)
-    let merged = tail
-    if (main) {
-      if (main.length === 0 || tail.time[0] > main.time[main.length - 1]) {
-        merged = kapasiteyeEkle(main, tail)
-      } else {
-        merged = series.sanitize(series.concatSeries(series.sliceSeries(main, 0, main.length), tail))
-      }
+    if (!main) {
+      // Ana dosyasi olmayan kuyruk artiktir (bkz. readSeries): yeni bir depo
+      // uretmek yerine silinir.
+      await fs.promises.unlink(tailPathOf(filePath)).catch(function () {})
+      return { compacted: 0, total: 0 }
+    }
+    let merged
+    if (main.length === 0 || tail.time[0] > main.time[main.length - 1]) {
+      merged = kapasiteyeEkle(main, tail)
+    } else {
+      merged = series.sanitize(series.concatSeries(series.sliceSeries(main, 0, main.length), tail))
     }
     await yazTemel(filePath, merged)
     return { compacted: tailLen, total: merged.length }
@@ -637,10 +662,8 @@ async function statSeries(filePath) {
   const tail = await kuyrukOku(filePath)
   const tailLen = tail ? tail.length : 0
   const durum = await anaDurum(filePath)
-  if (!durum) {
-    if (tailLen === 0) return null
-    return { count: tailLen, firstTime: tail.time[0], lastTime: tail.time[tailLen - 1] }
-  }
+  // Ana dosya yoksa depo yok sayilir; kuyruk artigi kullanilmaz (bkz. readSeries).
+  if (!durum) return null
   if (tailLen === 0) return durum
   const yeni = kuyrukYeniSayisi(tail, durum.count, durum.lastTime)
   const kuyrukSon = tail.time[tailLen - 1]

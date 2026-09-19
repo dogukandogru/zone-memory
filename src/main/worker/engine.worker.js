@@ -1737,6 +1737,8 @@ handlers['engine:live-tick'] = async function (payload) {
   let lastTouchTime = null
   const events = []
   let labeled = 0
+  // Isci icindeki kontrol hatasi: bar yazildi ama sinyal uretilemedi.
+  let kontrolHatasi = null
   if (added > 0) {
     try {
       const s = await getSeries(tf, false)
@@ -1746,8 +1748,11 @@ handlers['engine:live-tick'] = async function (payload) {
       // bar) ve canli olay hafizadakinden farkli cikiyordu: olculdu, 1m canli
       // olaylarin %5,8'inde baglam vektoru, %2,4'unde trend ve skor,
       // %1,3'unde qualified bayragi farkliydi.
+      // Indikator asagida `payload.params` ile kosturuluyor; kuyruk uzunlugu
+      // da AYNI ayardan hesaplanmali. (Hafizanin meta'si bu kapsamda daha
+      // asagida tanimli; oradan okumak sessiz bir ReferenceError uretiyordu.)
       const gerekenKuyruk = core('indicator/proZones').requiredTailBars(
-        (memMeta && memMeta.indicatorParams) || payload.params || null, tfSec)
+        payload.params || null, tfSec)
       const tail = clampInt(payload.tailBars, 500, 50000,
         Math.max(DEFAULT_TAIL_BARS, gerekenKuyruk))
       const start = Math.max(0, s.length - tail)
@@ -1927,7 +1932,10 @@ handlers['engine:live-tick'] = async function (payload) {
       labeled = await liveLogEtiketle(tf, s, tfSec, canliCfg.planOutcomeCfg, logs,
         (payload.cfgPatch && payload.cfgPatch.backtestCfg) || null)
     } catch (err) {
-      logs.push('Canli kontrol hatasi: ' + (err && err.message ? err.message : String(err)))
+      // Gunluk satiri 12-20 saniyede kayboluyordu; hata artik durum
+      // nesnesiyle de donuyor ve gostergede kalici olarak gorunuyor.
+      kontrolHatasi = (err && err.message ? err.message : String(err))
+      logs.push('Canli kontrol hatasi: ' + kontrolHatasi)
     }
   }
 
@@ -1957,6 +1965,9 @@ handlers['engine:live-tick'] = async function (payload) {
     events: events,
     // Bu tikte gunluge yazilan sonuc satiri sayisi.
     labeled: labeled,
+    // Isci icinde olusan kontrol hatasi (varsa). Gunluk satiri 12-20 saniyede
+    // kayboluyordu; bu alan gostergede kalici olarak gorunur.
+    checkError: kontrolHatasi,
     signal: signal,
     touch: touch,
     lastTouchTime: lastTouchTime,

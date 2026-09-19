@@ -230,6 +230,7 @@ module.exports = {
   lastIndexAtOrBefore(s, t),       // <= t olan en buyuk indeks, yoksa -1
   firstIndexAtOrAfter(s, t),
   growF64(arr, need),              // Float64Array kapasitesini iki katina cikarir
+  appendInPlace(dst, src),         // kapasiteli sutunlara YERINDE ekleme, dst DEGISIR
   resample(s, toTfSec),            // Series, epoch katlarina hizali kovalar
   sanitize(s),                     // zaman sirali, tekrarsiz, NaN'siz Series dondur
 }
@@ -238,6 +239,12 @@ module.exports = {
 `resample` kurallari: kova baslangici `Math.floor(time / toTfSec) * toTfSec`.
 open = kovanin ilk open, high = max, low = min, close = son close, volume = toplam.
 Bos kovalar URETILMEZ (piyasa kapali saatler gercek bosluktur).
+
+`appendInPlace(dst, src)`: `dst` sutunlari kapasite kadar uzun olabilir, gecerli
+bar sayisi her zaman `dst.length`. Kapasite yetmezse `growF64` ile iki katina
+cikar. `src` zaman siralidir; son bardan ESKI satir ATLANIR, son barla AYNI
+zamanli satir uzerine yazar. Neden: canli dongu her barda `concatSeries`
+cagirdiginda 6 milyon barlik seride bar basina tam kopya aliniyordu.
 
 ## 5. `src/core/store/binstore.js` (A1)
 
@@ -252,18 +259,65 @@ offset 24  : count * float64  time
 ...        : count * float64  open, high, low, close, volume (bu sirayla)
 ```
 
+Ayrica ANA DOSYANIN YANINDA bir kuyruk dosyasi olabilir: `<ad>.bin.tail.bin`.
+Baslik YOKTUR, satir siralidir, bar basina 48 bayt:
+
+```
+bar i : float64 time, open, high, low, close, volume (bu sirayla)
+```
+
 ```js
 module.exports = {
   MAGIC,                              // 'ZMEM0001'
-  async writeSeries(filePath, series),// once .tmp yaz sonra rename (atomik)
-  async readSeries(filePath),         // Series | null (dosya yoksa null)
+  TAIL_SUFFIX,                        // '.tail.bin'
+  TAIL_MAX_BARS,                      // 5000
+  async writeSeries(filePath, series),// gecici dosyaya yaz + rename (atomik), kuyrugu siler
+  async readSeries(filePath),         // Series | null (dosya yoksa null), kuyrukla birlesik
   async appendSeries(filePath, series),// {added, total} zamana gore tekillestirir
-  async statSeries(filePath),         // {count, firstTime, lastTime} | null
+  async compactTail(filePath),        // {compacted, total} kuyrugu ana dosyaya isler
+  async statSeries(filePath),         // {count, firstTime, lastTime} | null, kuyrukla birlesik
 }
 ```
 
-`appendSeries` mevcut veriyi okur, `concatSeries` ile birlestirir, `sanitize`
-eder ve yeniden yazar. Ayni zaman damgasi varsa YENI veri kazanir.
+**KUYRUK NEDEN VAR.** 1m deposu 6 milyon bara yaklasinca dosya ~293 MB oluyor
+ve `appendSeries` tek bar icin bile tum dosyayi okuyup yeniden yaziyordu;
+canli dongu her yeni barda bunu yapiyor. Olculdu (275 MB / 6.000.000 bar):
+tam yeniden yazim 354 ms, kuyruga ekleme 3,8 ms; maliyet dosya boyutundan
+BAGIMSIZ hale geliyor.
+
+`appendSeries`, gelen barlarin hepsi ANA DOSYANIN son zamanindan yeniyse ve
+kuyruk + gelen bar sayisi `TAIL_MAX_BARS`'i asmiyorsa yalnizca kuyruga yazar
+(ana dosya hic okunmaz, hic yazilmaz). Aksi halde ana dosya + kuyruk + gelen
+barlar `concatSeries` ve `sanitize` ile birlestirilip tam yazilir, kuyruk
+silinir. Ayni zaman damgasi varsa YENI veri kazanir. Bos seri eklemek dosyaya
+DOKUNMAZ.
+
+`readSeries` ve `statSeries` ana dosya ile kuyrugu birlestirerek doner; ayni
+zaman damgasinda KUYRUK kazanir. Kuyruk ana dosyadan ONCE okunur: ters sirada,
+arada sikistirma calisirsa (ana dosya henuz eski, kuyruk artik silinmis) o
+barlar tumden kaybolur. Kuyruk dosyasi olmayan depolar aynen okunur (geriye
+uyum). `compactTail` kuyrugu ana dosyaya isler ve siler; kuyruk yokken ana
+dosyayi yeniden YAZMAZ. ANA DOSYASI OLMAYAN kuyruk artiktir (kullanici `.bin`
+dosyasini elle silmistir), yok sayilir ve ilk yazimda silinir: geri vermek
+silinmis bir depoyu bir kac barla canliymis gibi gosterir ve 1m'den turetilen
+tam seriyi golgeler.
+
+**YAZIM GUVENLIGI.**
+- Dosya yolu bazli async mutex: `writeSeries`, `appendSeries` ve `compactTail`
+  ayni yol icin sirayla kosar. Gecici dosya adi
+  `filePath + '.' + process.pid + '.' + rastgele + '.tmp'`. Sabit `.tmp` adi
+  ile iki yazar (canli dongu + "Veri Cek") ayni dosyaya yaziyor ve ikinci
+  rename yarim tamponu ana dosyanin uzerine tasiyordu.
+- `rename` sonrasi klasor `fsync` edilir (Windows'ta hata yutulur).
+- Okumada `stat.size` beklenen boyuta BIREBIR esit olmalidir: eksik bayt kadar
+  FAZLA bayt da hatadir. Ilk ve son 1000 barda zamanin sonlu ve artan oldugu
+  dogrulanir (tam tarama 6 milyon barda gereksiz, bozulma uclarda cikiyor).
+- `statSeries` ilk ve son zamani IKI AYRI tamponla okur ve `bytesRead === 8`
+  kontrolu yapar; tek tamponla kisa okuma sessizce onceki degeri geri veriyor,
+  `lastTime = firstTime` cikiyordu.
+- Kuyrugun yarim kalmis SON kaydi (48 baytin altinda) atilir: o barlar
+  saglayicidan yeniden cekilebilir, okumayi tumden reddetmek depoyu
+  kullanilamaz hale getirirdi.
 
 ## 6. `src/core/store/memstore.js` (A1)
 
@@ -1409,7 +1463,12 @@ yukselen mum `#26a69a`, dusen mum `#ef5350`, metin `#d1d4dc`.
   hesaplanmis kucuk ornekler), pivotHigh/pivotLow konumlandirmasi.
 - `series.test.js`: resample kova hizalamasi, indexAtTime ikili aramasi,
   concatSeries tekillestirme.
-- `binstore.test.js`: yaz/oku gidis donus, append tekillestirme.
+- `binstore.test.js`: yaz/oku gidis donus, append tekillestirme, kuyruk davranisi
+  (300.000 barlik depoda tek bar eklemenin ana dosya boyutunu degistirmedigi ve
+  tam yazimdan belirgin hizli oldugu, esanli iki `appendSeries` sonrasi iki barin
+  da okundugu, `TAIL_MAX_BARS` asilinca sikistigi, cakisan zaman damgasinda
+  kuyrugun kazandigi), fazla baytli / kesik govdeli dosyada hata, kuyruk dosyasi
+  olmayan deponun aynen okundugu.
 - `indicator.test.js`: sentetik seride kutu olusumu, hacim ve bollinger
   kapilarinin gercekten elemesi, yakin pivotun birlestigi, tek barda kirilma,
   kutu omru, form olayinin onay barinda uretildigi, temas olayinin ilk dokunusta
