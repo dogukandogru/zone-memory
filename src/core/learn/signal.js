@@ -421,7 +421,6 @@ function decideFromCandidates (ev, candidates, levels, cfg, ek) {
   // Sonuc dagilimi: tutma, kirilma ve zaman asimi ORANLARI ayri tutulur.
   // Beklenen deger hesabinda zaman asimini tam zarar saymak yanlisti; o
   // olaylarda ufuk sonunda cikiliyor ve ortalama sonuc sifira yakin.
-  let breaks = 0
   let timeouts = 0
   let sumTimeoutR = 0
   for (let i = 0; i < matchCount; i++) {
@@ -438,7 +437,7 @@ function decideFromCandidates (ev, candidates, levels, cfg, ek) {
     else if (ev.outcome === 'timeout') {
       timeouts++
       sumTimeoutR += num(ev.realizedR, 0)
-    } else breaks++
+    }
     // SONUCA KADAR olan hareket (mfeExitAtr / maeExitAtr). Ham mfeAtr tum
     // ufku olcer, yani stop vurulduktan SONRAKI hareketi de sayar: 15m'de
     // "beklenen lehte hareket" boylece TP1'in 2,5 katina cikiyordu

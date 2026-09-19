@@ -24,7 +24,7 @@
 
 const { runIndicator, DEFAULT_PARAMS } = require('../indicator/proZones')
 const { labelTouch, DEFAULT_OUTCOME_CFG } = require('./outcome')
-const { buildFeatures, CTX_NAMES, WINDOW_BARS } = require('./features')
+const { buildFeatures, CTX_NAMES } = require('./features')
 const { tfSeconds } = require('../tf')
 const { createMarketCalendar } = require('../session')
 const stats = require('./stats')

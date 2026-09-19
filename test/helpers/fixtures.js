@@ -8,9 +8,10 @@
  * CTX_NAMES uzunlugu 22'den 24'e cikinca) kopyalarin biri gunceleniyor digeri
  * eski kaliyordu. Tek kaynak oldugu icin artik boyle bir sapma olamaz.
  *
- * DIKKAT: BU DOSYA TEST ICERMEZ. `npm test` yalnizca `test/*.test.js` desenini
- * tarar, `test/helpers/` alt klasoru kosulmaz; burada bir test tanimlamak
- * hicbir yerde kosmayan, sessizce olu bir test yaratir.
+ * DIKKAT: BU DOSYA TEST ICERMEZ ve test TANIMLAMAMALIDIR. `npm test` artik
+ * argumansiz `node --test` kullaniyor (Node 20 tirnakli globu, Node 24 dizin
+ * argumanini reddediyordu), yani bu dosya da taraniyor. Icinde test
+ * tanimlanirsa yardimcilarla testler birbirine karisir.
  *
  * Uretilen olaylar guncel sozlesmeye uyar:
  *   features.shape / ret / ctx  uzunluklari SHAPE_LEN / RET_LEN / CTX_NAMES.length

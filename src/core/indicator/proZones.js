@@ -69,7 +69,7 @@
 // ============================================================================
 
 const { sma, ema, atr, rsi, stdev, pivotHigh, pivotLow, clamp } = require('../ta')
-const { SESSIONS, sessionIndexArray, localHourArray, localDowArray } = require('../session')
+const { SESSIONS, localTimeArrays } = require('../session')
 const { resample } = require('../series')
 const { tfSeconds } = require('../tf')
 
@@ -87,6 +87,16 @@ const DEFAULT_PARAMS = {
   // KUTU DURUMU ARALIKLARINI KAYDET (Y3). Varsayilan kapali: yalnizca ust
   // zaman dilimi baglami olculurken gerekiyor ve bellekte yer tutuyor.
   recordTimeline: false,
+  // TUM ARA DIZILERI DONDUR (T6). Varsayilan kapali.
+  //
+  // Baglam onceden 14 dizi donduruyordu ama bunlarin altisini (bbBasis,
+  // bbUpper, bbLower, volRatio, flowScore, sessionIdx) proZones disinda HIC
+  // kimse okumuyor: features.js yalnizca atr, rsi, sma20, sma50, bullTrend,
+  // bearTrend, localHour, localDow alanlarina bakiyor, memory.js ve
+  // engine.worker.js ise sadece atr'ye. Olculdu: 6.134.954 barlik 1 dakikalik
+  // seride 14 dizi 450,5 MB tutuyordu ve etiketleme bitene kadar bellekte
+  // kaliyordu. Kesif ve hata ayiklama icin acilabilir.
+  fullContext: false,
   maxAgeBars: 100,
   touchCooldown: 12,
   boxLengthBars: 100,
@@ -153,18 +163,28 @@ const FLOW_MIN = 1.0
 const FLOW_MAX = 10.0
 
 /**
- * Bos sonuc iskeleti: uzunlugu 0 olan seride bile tum baglam alanlari dolu olur.
+ * Bos sonuc iskeleti: uzunlugu 0 olan seride bile beklenen baglam alanlari
+ * dolu olur. Alan kumesi dolu seridekiyle AYNI kuraldan gecer, yoksa cagiran
+ * kod bos seride var olan bir alani dolu seride bulamaz.
  * @param {number} n
+ * @param {boolean} [full] `fullContext` ayari
  */
-function emptyContext (n) {
+function emptyContext (n, full) {
   const f = () => { const a = new Float64Array(n); a.fill(NaN); return a }
-  return {
+  const c = {
     atr: f(), rsi: f(), sma20: f(), sma50: f(),
-    bbBasis: f(), bbUpper: f(), bbLower: f(),
-    volRatio: new Float64Array(n), flowScore: new Float64Array(n),
     bullTrend: new Uint8Array(n), bearTrend: new Uint8Array(n),
-    sessionIdx: new Uint8Array(n), localHour: new Uint8Array(n), localDow: new Uint8Array(n),
+    localHour: new Uint8Array(n), localDow: new Uint8Array(n),
   }
+  if (full) {
+    c.bbBasis = f()
+    c.bbUpper = f()
+    c.bbLower = f()
+    c.volRatio = new Float64Array(n)
+    c.flowScore = new Float64Array(n)
+    c.sessionIdx = new Uint8Array(n)
+  }
+  return c
 }
 
 /**
@@ -307,7 +327,7 @@ function runIndicator (s, params, tfSec, onProgress) {
   }
 
   if (n === 0) {
-    return { zones: [], touches: [], context: emptyContext(0), stats }
+    return { zones: [], touches: [], context: emptyContext(0, p.fullContext), stats }
   }
 
   const open = s.open
@@ -361,9 +381,8 @@ function runIndicator (s, params, tfSec, onProgress) {
   if (p.useHtfTrend) fillHtfTrend(s, p, step, bullTrend, bearTrend)
 
   // --- Baglam: seanslar ----------------------------------------------------
-  const sessionIdx = sessionIndexArray(time, p.sessionTz)
-  const localHour = localHourArray(time, p.sessionTz)
-  const localDow = localDowArray(time, p.sessionTz)
+  // Uc dizi de ayni yerel saniyeden turer, tek gecis yeter (bkz. session.js).
+  const { sessionIdx, localHour, localDow } = localTimeArrays(time, p.sessionTz)
   const allowedMap = {
     Asia: !!p.useAsia,
     London: !!p.useLondon,
@@ -815,25 +834,34 @@ function runIndicator (s, params, tfSec, onProgress) {
 
   report(100, 'Tarama tamamlandi')
 
+  // BAGLAM (T6): varsayilan olarak yalnizca DISARIDAN OKUNAN sekiz dizi doner.
+  // Bollinger bantlari, hacim orani, flow skoru ve seans indeksi kutu
+  // olusumunda ve skorlamada zaten kullanildi; bu dizilerin cagirana gitmesi
+  // yalnizca etiketleme boyunca bellekte kalmalarina yol aciyordu. Kesif icin
+  // `fullContext: true` ile hepsi geri gelir.
+  const context = {
+    atr: atrNow,
+    rsi: rsi14,
+    sma20,
+    sma50,
+    bullTrend,
+    bearTrend,
+    localHour,
+    localDow,
+  }
+  if (p.fullContext) {
+    context.bbBasis = bbBasis
+    context.bbUpper = bbUpper
+    context.bbLower = bbLower
+    context.volRatio = volRatio
+    context.flowScore = flowScore
+    context.sessionIdx = sessionIdx
+  }
+
   return {
     zones,
     touches,
-    context: {
-      atr: atrNow,
-      rsi: rsi14,
-      sma20,
-      sma50,
-      bbBasis,
-      bbUpper,
-      bbLower,
-      volRatio,
-      flowScore,
-      bullTrend,
-      bearTrend,
-      sessionIdx,
-      localHour,
-      localDow,
-    },
+    context,
     // Ust zaman dilimi baglami icin kutu durumu araliklari (Y3). Yalnizca
     // `p.recordTimeline` verildiyse dolu, aksi halde null.
     timeline: timeline,

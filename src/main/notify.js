@@ -17,7 +17,7 @@
  * - Bildirime tiklaninca pencere one gelir ve sinyal secilir.
  */
 
-const { Notification, app, shell } = require('electron')
+const { Notification, app } = require('electron')
 
 const settings = require('./settings')
 

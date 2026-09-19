@@ -20,7 +20,7 @@ function electronsuzYukle(sahteEngine) {
     ipcMain: { handle() {}, removeHandler() {} },
   }
   const asilYukle = Module._load
-  Module._load = function (istek, ust, ana) {
+  Module._load = function (istek, _ust, _ana) {
     if (istek === 'electron') return sahteElectron
     // Motor cagrilarini yakalamak icin (API anahtari yolunu dogrularken).
     if (sahteEngine && istek === './engine') return sahteEngine

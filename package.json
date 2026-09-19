@@ -8,11 +8,16 @@
   "private": true,
   "main": "src/main/main.js",
   "type": "commonjs",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "node scripts/stamp-build.mjs && electron .",
     "dev": "node scripts/stamp-build.mjs && electron . --dev",
-    "test": "node --test \"test/*.test.js\"",
-    "test:coverage": "node --test --experimental-test-coverage \"test/*.test.js\"",
+    "test": "node --test",
+    "test:coverage": "node --test --experimental-test-coverage",
+    "lint": "eslint src scripts test",
+    "typecheck": "tsc --noEmit -p jsconfig.json",
     "import-legacy": "node scripts/import-legacy.mjs",
     "fetch-history": "node scripts/fetch-history.mjs",
     "dist": "node scripts/stamp-build.mjs --dist && electron-builder",
@@ -22,7 +27,9 @@
   },
   "devDependencies": {
     "electron": "^43.4.0",
-    "electron-builder": "^26.15.3"
+    "electron-builder": "^26.15.3",
+    "eslint": "^9.0.0",
+    "typescript": "^5.9.0"
   },
   "dependencies": {
     "lightweight-charts": "4.2.3"

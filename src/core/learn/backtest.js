@@ -144,7 +144,7 @@ const DEFAULT_BACKTEST_CFG = {
  */
 
 /** Bos sonuc iskeleti (veri yoksa donulur). Alan duzeni dolu sonucla aynidir. */
-function emptyResult(baselineWinRate, labeled, warmup, embargoSec) {
+function emptyResult(baselineWinRate, labeled, warmup, _embargoSec) {
   return {
     trades: [],
     summary: {

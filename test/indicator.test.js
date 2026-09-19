@@ -15,6 +15,9 @@ const assert = require('node:assert/strict')
 
 const { runIndicator, DEFAULT_PARAMS } = require('../src/core/indicator/proZones')
 const series = require('../src/core/series')
+const {
+  localTimeArrays, sessionIndexArray, localHourArray, localDowArray,
+} = require('../src/core/session')
 
 const T0 = 1704067200   // 2024-01-01 00:00:00 UTC, 3600 ve 86400 katidir
 const ADIM = 900        // 15 dakika
@@ -511,11 +514,11 @@ test('HTF trend: trendTf grafik zaman diliminden kucuk veya esitse seri oldugu g
   }
 })
 
-test('context: sozlesmedeki tum ara diziler dolu ve dogru tipte', () => {
+test('context: fullContext acikken sozlesmedeki tum ara diziler dolu ve dogru tipte', () => {
   const n = 340
   const d = taslak(n, () => 100)
   dipEkle(d, 250, 5, 20000)
-  const r = runIndicator(series.fromArrays(d), {}, ADIM)
+  const r = runIndicator(series.fromArrays(d), { fullContext: true }, ADIM)
   const c = r.context
 
   for (const ad of ['atr', 'rsi', 'sma20', 'sma50', 'bbBasis', 'bbUpper', 'bbLower',
@@ -540,12 +543,100 @@ test('context: sozlesmedeki tum ara diziler dolu ve dogru tipte', () => {
   }
 })
 
+// T6: varsayilan baglam, DISARIDAN OKUNAN sekiz diziden ibarettir. Geri
+// kalan alti dizi (bbBasis, bbUpper, bbLower, volRatio, flowScore,
+// sessionIdx) proZones disinda hicbir yerde okunmuyordu ama 1 dakikalik
+// seride 450,5 MB'in yarisini tutuyordu. Bu test, alan kumesinin sessizce
+// geri buyumesini engeller: features.js yeni bir alan okumaya baslarsa o alan
+// buraya ACIKCA eklenmelidir.
+test('context: varsayilan olarak yalnizca disaridan okunan sekiz diziyi tasir', () => {
+  const n = 340
+  const d = taslak(n, () => 100)
+  dipEkle(d, 250, 5, 20000)
+  const r = runIndicator(series.fromArrays(d), {}, ADIM)
+  const c = r.context
+
+  const beklenen = ['atr', 'rsi', 'sma20', 'sma50',
+    'bullTrend', 'bearTrend', 'localHour', 'localDow']
+  assert.deepEqual(Object.keys(c).sort(), beklenen.slice().sort())
+  for (const ad of beklenen) assert.equal(c[ad].length, n, ad + ' uzunlugu bar sayisi kadar olmali')
+
+  for (const ad of ['bbBasis', 'bbUpper', 'bbLower', 'volRatio', 'flowScore', 'sessionIdx']) {
+    assert.equal(c[ad], undefined, ad + ' fullContext olmadan donmemeli')
+  }
+
+  // features.js baglamdan yalnizca bu sekiz alani okur; her biri kullanilabilir
+  // deger tasimali, bos kabuk olmamali.
+  assert.ok(c.atr[n - 1] > 0)
+  assert.ok(c.rsi[n - 1] >= 0 && c.rsi[n - 1] <= 100)
+  assert.ok(Number.isFinite(c.sma20[n - 1]))
+  assert.ok(Number.isFinite(c.sma50[n - 1]))
+  for (let i = 0; i < n; i++) {
+    assert.ok(c.localHour[i] <= 23)
+    assert.ok(c.localDow[i] <= 6)
+  }
+})
+
 test('runIndicator: bos seride guvenli sonuc dondurur', () => {
   const r = runIndicator(series.emptySeries(), {}, ADIM)
   assert.deepEqual(r.zones, [])
   assert.deepEqual(r.touches, [])
   assert.equal(r.stats.bars, 0)
   assert.equal(r.context.atr.length, 0)
+  // Bos seri de dolu seriyle AYNI alan kumesini vermeli, yoksa cagiran kod
+  // bos seride var olan bir alani dolu seride bulamaz.
+  assert.equal(r.context.sessionIdx, undefined)
+  assert.equal(runIndicator(series.emptySeries(), { fullContext: true }, ADIM)
+    .context.sessionIdx.length, 0)
+})
+
+// T6: uc eski fonksiyon artik localTimeArrays'i sarmaliyor. Seans, yerel saat
+// ve yerel gun ayni yerel saniyeden turedigi icin tek gecis yeter, ama yaz
+// saati gecisinin ORTASINDAKI bir gunde ofset gun icinde degisir: tek gecisin
+// onbellegi bu gunu de uc ayri gecisle birebir ayni cozmelidir.
+test('localTimeArrays: uc eski fonksiyonla birebir ayni, yaz saati gecis gunu dahil', () => {
+  // 30 Mart 2014, Europe/Athens yaz saatine gecti (yerel 03:00 -> 04:00).
+  // 26 Ekim 2014 geri donusu, 31 Mart 2024 ve 27 Ekim 2024 guncel gecisler.
+  const gecisler = [
+    Date.UTC(2014, 2, 29, 12) / 1000,
+    Date.UTC(2014, 9, 25, 12) / 1000,
+    Date.UTC(2024, 2, 30, 12) / 1000,
+    Date.UTC(2024, 9, 26, 12) / 1000,
+  ]
+  const zamanlar = []
+  for (const bas of gecisler) {
+    // Gecisi ortalayan iki gunu 10 dakikalik adimlarla tara.
+    for (let t = bas; t < bas + 2 * 86400; t += 600) zamanlar.push(t)
+  }
+  // Gecersiz zaman damgasi da kapsansin: seans 'Other' (3), saat ve gun 0.
+  zamanlar.push(NaN)
+
+  for (const tz of ['Europe/Athens', 'Europe/Istanbul', 'America/New_York']) {
+    const tek = localTimeArrays(zamanlar, tz)
+    assert.deepEqual(Array.from(tek.sessionIdx), Array.from(sessionIndexArray(zamanlar, tz)),
+      tz + ': seans indeksi eski fonksiyondan farkli')
+    assert.deepEqual(Array.from(tek.localHour), Array.from(localHourArray(zamanlar, tz)),
+      tz + ': yerel saat eski fonksiyondan farkli')
+    assert.deepEqual(Array.from(tek.localDow), Array.from(localDowArray(zamanlar, tz)),
+      tz + ': yerel gun eski fonksiyondan farkli')
+  }
+
+  // Gecis gercekten yakalanmis olmali: ayni yerel saat iki kez gorulmeli ya da
+  // bir saat atlanmali, yoksa test sabit ofsetli bir seriyi dogrulamis olur.
+  const bir = localTimeArrays(zamanlar.slice(0, 288), 'Europe/Athens').localHour
+  let atlama = false
+  for (let i = 1; i < bir.length; i++) {
+    const d = (bir[i] - bir[i - 1] + 24) % 24
+    if (d > 1) { atlama = true; break }
+  }
+  assert.ok(atlama, 'yaz saati gecisi tarananan araliga dusmemisse test anlamsizdir')
+
+  // Gecersiz damga sozlesmesi.
+  const son = zamanlar.length - 1
+  const t = localTimeArrays(zamanlar, 'Europe/Athens')
+  assert.equal(t.sessionIdx[son], 3)
+  assert.equal(t.localHour[son], 0)
+  assert.equal(t.localDow[son], 0)
 })
 
 test('onProgress: en fazla 100 kez, 0..100 arasi artan yuzde ile cagrilir', () => {

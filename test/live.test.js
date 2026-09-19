@@ -66,7 +66,7 @@ function liveYukle(kancalar) {
   }
 
   const asilYukle = Module._load
-  Module._load = function (istek, ust, ana) {
+  Module._load = function (istek, _ust, _ana) {
     if (istek === './engine') return sahteEngine
     if (istek === './settings') return sahteSettings
     if (istek === '../core/data/provider') return sahteProvider

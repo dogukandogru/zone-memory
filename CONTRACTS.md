@@ -321,9 +321,11 @@ tam seriyi golgeler.
 
 ## 6. `src/core/store/memstore.js` (A1)
 
-Hafiza kayitlari iki dosyada tutulur:
-- `<ad>.json` : `{version:1, tf, rowLen, shapeLen, retLen, ctxLen, ctxNames:[],
-  count, builtToTime, events:[...]}` ve AYAR IZI alanlari:
+Hafiza kayitlari UC dosyada tutulur (`.meta.json` yan ozettir, kaybi
+telafi edilebilir):
+- `<ad>.json` : `{version:2, buildId, tf, rowLen, shapeLen, retLen, ctxLen,
+  ctxNames:[], partsNames:[], count, builtToTime, events:[...]}` ve AYAR IZI
+  alanlari:
   `indicatorParams`, `outcomeCfg`, `featureVersion`, `cfgHash`, `builtAt`,
   `buildCommit`, `buildSrcHash`. `events` icinde her kayit `features` HARIC tum
   Event + Outcome alanlari.
@@ -335,7 +337,31 @@ Hafiza kayitlari iki dosyada tutulur:
   `cfgHash = memstore.cfgHash({indicatorParams, outcomeCfg, ctxNames})`
   (anahtarlari sirali JSON'un sha256 ozetinin ilk 12 hanesi). `loadMemory`
   bunlari `meta` alani icinde geri verir, `statMemory` da dondurur.
-- `<ad>.vec`  : `count * rowLen` adet float32. Satir duzeni: `[shape(16), ret(32), ctx(ctxLen)]`.
+- `<ad>.vec`  : 24 baytlik baslik + `count * rowLen` adet float32.
+  Satir duzeni: `[shape(16), ret(32), ctx(ctxLen)]`.
+
+  Baslik (little endian): `ZMV2` (4 bayt), uint16 bicim surumu (2), uint16
+  `rowLen`, uint32 `count`, `buildId`'nin ilk 12 bayti.
+
+  **Baslik neden var.** `saveMemory` once `.vec`, sonra `.json` dosyasini AYRI
+  AYRI rename ediyordu ve `loadMemory` yalnizca `.vec`in KISA olup olmadigina
+  bakiyordu. Arada kapanma, cokme ya da iptal olursa yeni `.vec` eski `.json`
+  ile kaliyor, her olaya BASKA bir olayin vektoru baglaniyor ve hicbir uyari
+  cikmiyordu: tum benzerlik ve basari oranlari sessizce bozuluyordu. Artik
+  `count`, `rowLen` ve `buildId` eslesmek ZORUNDA; uzunluk kontrolu de `<`
+  degil `!==` (uzun dosya da reddedilir). Baslik tasimayan ESKI dosyalarda
+  yalnizca tam uzunluk esitligine bakilir.
+- `<ad>.meta.json` : kucuk yan ozet (`version`, `buildId`, `tf`, `count`,
+  `rowLen`, `ctxLen`, `ctxNames`, `partsNames`, `firstTime`, `lastTime`,
+  `builtToTime` ve ayar izi). `statMemory` ONCE bunu okur: 1 dakikalik
+  hafizada buyuk JSON'u ayristirmak 111 ms suruyordu. Dosya yoksa ya da
+  bozuksa sessizce eski yola dusulur.
+
+**Yer tasarrufu.** JSON'da kesirli sayilar `Number(v.toPrecision(7))` ile
+yuvarlanir (tam sayilar ve `time`, `id`, `bar` gibi HAM alanlar aynen kalir) ve
+`parts` nesnesi bit maskesi olarak yazilir; `loadMemory` geri acar. Olay
+anahtar kumesi degisirse maske kullanilmaz, cunku maskede "anahtar yok" ile
+"false" ayirt edilemez.
 
 ```js
 module.exports = {
@@ -378,7 +404,11 @@ YOKTUR (kesin buyukluk). `pivotLow` simetrigidir.
 
 ## 8. `src/core/session.js` (A2)
 
-Seans hesabi Europe/Istanbul saatine gore yapilir. 6 milyon bar icin her bar
+Seans hesabi VARSAYILAN olarak Europe/Athens saatine gore yapilir (ekranda
+gorunen saatler yine Istanbul'dur). Nedeni: Turkiye 2016 Eylul'unde yaz
+saatini birakti, bu yuzden Londra'nin 08:00 acilisi 2016 oncesi yerel 10:00,
+sonrasinda kislari yerel 11:00 oluyordu ve kNN ayni piyasa anini iki farkli
+saat olarak goruyordu. 6 milyon bar icin her bar
 `Intl.DateTimeFormat` cagirmak cok yavastir; bu yuzden GUN bazinda onbellek
 kullan: bir UTC gunu icin ofset bir kez hesaplanir ve o gunun tum barlarina
 uygulanir. (Turkiye 2016'dan beri sabit UTC+3, oncesinde yaz saati uygulaniyordu,
@@ -387,10 +417,15 @@ bu yuzden sabit ofset varsayimi YAPILAMAZ.)
 ```js
 module.exports = {
   SESSIONS,                       // ['Asia','London','New York','Other']
+  // Uc diziyi TEK GECISTE uretir: uc ayri gecis 6,1 milyon barda 255 ms
+  // suruyordu, tek gecis 111 ms. Asagidaki uc fonksiyon bunu sarmalar.
+  localTimeArrays(timeArr, tz),   // {sessionIdx, localHour, localDow}
   sessionIndexArray(timeArr, tz), // Uint8Array, SESSIONS icindeki indeks
   localHourArray(timeArr, tz),    // Uint8Array 0..23
   localDowArray(timeArr, tz),     // Uint8Array 0..6, 0 = Pazar
   sessionName(hour),              // 0-8 Asia, 8-13 London, 13-21 New York, else Other
+  createMarketCalendar(tz),       // (tSec) => bool, kural tabanli New York takvimi
+  createSessionAnchor(tz),        // (tSec, kovaSn) => kova basi (seans capasi)
 }
 ```
 
@@ -495,7 +530,15 @@ olayin OLDUGU BARDA degisen bes seyi olcer:
 Kapali bir olay turu (`signalOnForm` / `signalOnTouch` false) hic olay uretmez.
 
 `IndicatorContext`, ozellik cikarimi ve etiketleme icin yeniden hesaplanmasin
-diye geri verilen ara diziler:
+diye geri verilen ara diziler.
+
+VARSAYILAN olarak yalnizca `proZones` DISINDA okunan SEKIZ dizi doner.
+Olculdu: 6.134.954 barlik 1 dakikalik seride tam kume 450,5 MB tutuyor ve
+etiketleme bitene kadar bellekte kaliyordu; sekiz dizilik kume 210,6 MB.
+Kalan alti dizi (`bbBasis`, `bbUpper`, `bbLower`, `volRatio`, `flowScore`,
+`sessionIdx`) yalnizca `params.fullContext === true` ile gelir ve bunlari
+uygulama kodunda okuyan baska bir yer yoktur (yalnizca testler ve tani
+betikleri).
 
 ```js
 /**
@@ -504,18 +547,24 @@ diye geri verilen ara diziler:
  * @property {Float64Array} rsi        RSI(14)
  * @property {Float64Array} sma20
  * @property {Float64Array} sma50
- * @property {Float64Array} bbBasis
- * @property {Float64Array} bbUpper
- * @property {Float64Array} bbLower
- * @property {Float64Array} volRatio     hacim / hacim ortalamasi
- * @property {Float64Array} flowScore    clamp(volRatio * 3, 1, 10)
  * @property {Uint8Array} bullTrend
  * @property {Uint8Array} bearTrend
- * @property {Uint8Array} sessionIdx
  * @property {Uint8Array} localHour
  * @property {Uint8Array} localDow
+ *
+ * Yalnizca `fullContext: true` ile:
+ * @property {Float64Array} [bbBasis]
+ * @property {Float64Array} [bbUpper]
+ * @property {Float64Array} [bbLower]
+ * @property {Float64Array} [volRatio]   hacim / hacim ortalamasi
+ * @property {Float64Array} [flowScore]  clamp(volRatio * 3, 1, 10)
+ * @property {Uint8Array} [sessionIdx]
  */
 ```
+
+Seans dizileri (`sessionIdx`, `localHour`, `localDow`) tek gecipte
+`session.localTimeArrays` ile uretilir: uc ayri gecis 6,1 milyon barda 255 ms
+suruyordu, tek gecis 111 ms.
 
 Diger kurallar:
 

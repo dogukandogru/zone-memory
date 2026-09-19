@@ -22,7 +22,6 @@ import { dataDir as varsayilanDataDir, DEFAULT_SYMBOL } from './userdata-path.mj
 
 const require = createRequire(import.meta.url)
 const memstore = require('../src/core/store/memstore.js')
-const binstore = require('../src/core/store/binstore.js')
 const loader = require('../src/core/data/loader.js')
 const memory = require('../src/core/learn/memory.js')
 const backtest = require('../src/core/learn/backtest.js')

@@ -1,0 +1,23 @@
+{
+  // NEDEN checkJs kapali: tur denetimi depoya tek seferde acilirsa binlerce
+  // uyari gelir ve hicbiri okunmaz. Dosyalar tek tek `// @ts-check` satiri
+  // eklenerek denetime alinacak; bu yapilandirma o ana kadar editorun dogru
+  // tamamlama yapmasini ve `tsc --noEmit` ile sozdizimi hatalarinin (kapanmamis
+  // parantez, yanlis anahtar sozcuk) yakalanmasini sagliyor.
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false,
+    "noEmit": true,
+    "target": "ES2022",
+    // NEDEN module ESNext: depoda hem CommonJS (cekirdek, ana surec) hem ESM
+    // (renderer, scripts) .js dosyalari var. NodeNext secilseydi renderer'daki
+    // `import` satirlari "CommonJS dosyasinda import" hatasi verirdi.
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM"],
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src/**/*.js", "scripts/**/*.mjs", "test/**/*.js"],
+  "exclude": ["node_modules", "release", "dist", "out", "build"]
+}

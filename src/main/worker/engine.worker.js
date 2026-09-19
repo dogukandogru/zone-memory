@@ -16,6 +16,7 @@
 
 const fs = require('fs')
 const fsp = fs.promises
+const path = require('path')
 const { parentPort, workerData } = require('worker_threads')
 
 // Veri klasorunu ana iplikten devral (isci ipliginde Electron `app` yoktur).
@@ -2254,6 +2255,41 @@ function tradesToSignals(trades, memory) {
 function log(message) {
   parentPort.postMessage({ type: 'log', message: String(message) })
 }
+
+/**
+ * Hafiza yazimindan kalan .tmp artiklarini siler.
+ *
+ * saveMemory uc gecici dosya yazip sirayla rename ediyor; arada cokme ya da
+ * iptal olursa geride yarim bir .tmp kalir. Zararsizdir ama klasoru kirletir
+ * ve "yazim yarida kaldi" izini gizler. Isci acilisinda bir kez temizlenir.
+ */
+const GECICI_YAS_SN = 3600
+
+async function gecicileriTemizle () {
+  try {
+    const dir = paths.dataDir()
+    const dosyalar = await fsp.readdir(dir)
+    const simdi = Date.now()
+    for (const ad of dosyalar) {
+      if (!/_memory\..*\.tmp$/.test(ad)) continue
+      const tam = path.join(dir, ad)
+      try {
+        // YALNIZCA ESKIMIS ARTIKLAR. Betikler (ornek: measure-all --scan)
+        // uygulama acikken ayni klasore yazabiliyor; taze bir .tmp dosyasi
+        // SUREN bir yazim olabilir ve silmek o kaydi bozar.
+        const st = await fsp.stat(tam)
+        if ((simdi - st.mtimeMs) / 1000 < GECICI_YAS_SN) continue
+        await fsp.unlink(tam)
+        log('Yarim kalmis hafiza gecici dosyasi silindi: ' + ad)
+      } catch (err) {
+        // Baska bir surec kullaniyor olabilir, sessizce gec.
+      }
+    }
+  } catch (err) {
+    // Klasor okunamazsa temizlik yapilmaz; kritik degil.
+  }
+}
+gecicileriTemizle()
 
 parentPort.on('message', async (msg) => {
   if (!msg || typeof msg !== 'object') return
