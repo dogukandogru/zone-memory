@@ -681,14 +681,9 @@ export function renderSignalDetail(el, signal, opts) {
     }
   }
 
-  // En yakin ortak yapi (prototip)
-  el.appendChild(bolumBasligi('En yakın ortak yapı'))
-  el.appendChild(kv('Yapı', signal.prototypeLabel && String(signal.prototypeLabel).length
-    ? String(signal.prototypeLabel) : 'Eşleşen ortak yapı bulunamadı'))
-  if (signal.prototypeId !== null && signal.prototypeId !== undefined) {
-    el.appendChild(kv('Yapı numarası', '#' + tam(signal.prototypeId)))
-  }
-  el.appendChild(kv('Yapı benzerliği', formatNumber(signal.prototypeSim, 3)))
+  // PROTOTIP SATIRLARI KALDIRILDI: sekil kumelerinin basari orani tabandan
+  // ayirt edilemiyordu, "En yakin ortak yapi" satiri olmayan bir dayanak
+  // hissi veriyordu. Kumeler yalnizca Hafiza panelinde bilgi olarak duruyor.
 
   // Islem plani
   el.appendChild(bolumBasligi('İşlem planı'))
@@ -944,12 +939,22 @@ export function renderMemory(el, summary, prototypes) {
     el.appendChild(tablo(['Yıl', 'Toplam', 'Saygı', 'Kırılım', 'Oran', 'Ort. MFE', 'Ort. MAE'], satirlar))
   }
 
-  // Ortak yapilar (prototipler)
-  el.appendChild(bolumBasligi('Ortak yapılar (' + tam(protolar.length) + ')'))
+  // SEKIL KUMELERI: BILGI AMACLI, SINYALE KATILMAZ.
+  //
+  // Olculdu: kumelerin basari orani hafiza tabanindan ayirt edilemiyor
+  // (15m'de sekiz kumenin orani %31,2 - %35,5, taban %33,4). Once bu satirlar
+  // "gercekten ise yaramis kalip" diye sunuluyordu; simdi her kumenin yaninda
+  // tabana gore fark yaziyor ve renk yalnizca fark guven araliginin disinda
+  // kalirsa kullaniliyor.
+  el.appendChild(bolumBasligi('Şekil kümeleri (' + tam(protolar.length) + ', tahmin gücü yok)'))
   if (protolar.length === 0) {
-    el.appendChild(h('div', 'small muted', 'Ortak yapı çıkarılmadı, tarama sonrası oluşur.'))
+    el.appendChild(h('div', 'small muted', 'Şekil kümesi çıkarılmadı, tarama sonrası oluşur.'))
     return
   }
+  const hafizaTabani = sayi(s.winRate, NaN)
+  el.appendChild(h('div', 'small muted',
+    'Kümeler sinyal kararına katılmaz. Karşılaştırma tabanı, hafızanın tamamının ' +
+    'tutma oranı: ' + (Number.isFinite(hafizaTabani) ? formatPercent(hafizaTabani, 1) : '-') + '.'))
 
   const cizimler = []
   for (let i = 0; i < protolar.length; i++) {
@@ -957,9 +962,20 @@ export function renderMemory(el, summary, prototypes) {
     const kutu = h('div', 'stat')
     kutu.style.marginBottom = '5px'
 
+    // Fark anlamli mi: kumenin Wilson araligi hafiza tabanini ICERIYORSA
+    // "fark yok" demektir ve renk kullanilmaz.
+    const etiketli = sayi(p.labeled, 0)
+    const kazanan = sayi(p.wins, 0)
+    const aralik = etiketli > 0 ? wilsonAralik(kazanan, etiketli) : null
+    const ayirdedici = !!(aralik && Number.isFinite(hafizaTabani) &&
+      (aralik.lo > hafizaTabani || aralik.hi < hafizaTabani))
+    const fark = Number.isFinite(hafizaTabani) ? (sayi(p.winRate, 0) - hafizaTabani) * 100 : NaN
+
     const bas = h('div', 'kv')
-    bas.appendChild(h('span', null, p.label ? String(p.label) : ('Yapı #' + tam(p.id))))
-    bas.appendChild(h('span', sayi(p.winRate, 0) >= 0.5 ? 'up' : 'down', formatPercent(p.winRate, 0)))
+    bas.appendChild(h('span', null, p.label ? String(p.label) : ('Küme #' + tam(p.id))))
+    const sinif = ayirdedici ? (fark >= 0 ? 'up' : 'down') : 'muted'
+    bas.appendChild(h('span', sinif, formatPercent(p.winRate, 0) +
+      (Number.isFinite(fark) ? '  (' + (fark >= 0 ? '+' : '') + formatNumber(fark, 1) + ' puan)' : '')))
     kutu.appendChild(bas)
 
     const cnv = document.createElement('canvas')
@@ -968,7 +984,9 @@ export function renderMemory(el, summary, prototypes) {
 
     kutu.appendChild(h('div', 'row-sub',
       tam(p.size) + ' üye, lehte ' + formatNumber(p.avgMfeAtr, 2) +
-      ' ATR, aleyhte ' + formatNumber(p.avgMaeAtr, 2) + ' ATR'))
+      ' ATR, aleyhte ' + formatNumber(p.avgMaeAtr, 2) + ' ATR' +
+      (aralik ? ', %95 aralık ' + formatPercent(aralik.lo, 1) + ' - ' + formatPercent(aralik.hi, 1) : '') +
+      (ayirdedici ? '' : ', taban ile fark yok')))
     el.appendChild(kutu)
 
     const merkez = p.centroid
@@ -976,15 +994,42 @@ export function renderMemory(el, summary, prototypes) {
     if (merkez && merkez.length) {
       for (let j = 0; j < merkez.length; j++) degerler.push(sayi(merkez[j], NaN))
     }
-    cizimler.push({ cnv, degerler, iyi: sayi(p.winRate, 0) >= 0.5 })
+    cizimler.push({ cnv, degerler, ayirdedici: ayirdedici, iyi: fark >= 0 })
   }
   for (let i = 0; i < cizimler.length; i++) {
-    drawSparkline(cizimler[i].cnv, cizimler[i].degerler, {
-      color: cizimler[i].iyi ? RENK.up : RENK.down,
-      fill: cizimler[i].iyi ? 'rgba(38,166,154,0.14)' : 'rgba(239,83,80,0.14)',
+    const c = cizimler[i]
+    drawSparkline(c.cnv, c.degerler, {
+      color: c.ayirdedici ? (c.iyi ? RENK.up : RENK.down) : RENK.dim,
+      fill: c.ayirdedici
+        ? (c.iyi ? 'rgba(38,166,154,0.14)' : 'rgba(239,83,80,0.14)')
+        : 'rgba(128,128,128,0.10)',
       lineWidth: 1.5,
     })
   }
+}
+
+/**
+ * Wilson %95 araligi (arayuz kopyasi).
+ *
+ * Cekirdekteki learn/stats.js CommonJS'tir ve renderer ESM oldugu icin
+ * dogrudan yuklenemez; formul tek satirlik oldugu icin burada tekrarlaniyor.
+ * Degistirirken iki dosya birlikte degismeli.
+ *
+ * @param {number} k Kazanan sayisi
+ * @param {number} n Toplam
+ * @returns {{lo:number, hi:number}|null}
+ */
+function wilsonAralik(k, n) {
+  if (!(n > 0)) return null
+  const z = 1.959963984540054
+  const p = k / n
+  const z2 = z * z
+  const merkez = p + z2 / (2 * n)
+  const yayilim = z * Math.sqrt((p * (1 - p) + z2 / (4 * n)) / n)
+  const bolen = 1 + z2 / n
+  const lo = (merkez - yayilim) / bolen
+  const hi = (merkez + yayilim) / bolen
+  return { lo: lo < 0 ? 0 : lo, hi: hi > 1 ? 1 : hi }
 }
 
 /* ------------------------------------------------------------------ */

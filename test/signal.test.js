@@ -235,17 +235,31 @@ test('Signal nesnesi sozlesmedeki tum alanlari tasir', () => {
   }
 })
 
-test('prototip verilirse eslesme bilgisi doldurulur', () => {
+// S8 - Sekil kumeleri karara KATILMAZ.
+//
+// Olculdu: kumelerin basari orani hafiza tabanindan ayirt edilemiyor
+// (15m'de sekiz kumenin orani %31,2 - %35,5, taban %33,4). Gerekce
+// cumlesindeki "En yakin ortak yapi" satiri olmayan bir dayanak hissi
+// veriyordu; bu test o satirin GERI GELMEMESINI kilitler.
+test('prototip verilse bile karara ve gerekceye girmez', () => {
   const f = ozellik()
   const protos = [{
     id: 0, size: 30, winRate: 0.7, avgMfeAtr: 1.8, avgMaeAtr: 0.6,
-    centroid: Float32Array.from(f.shape), label: 'Yukselen + genis + kirilma', memberIds: [],
+    centroid: Float32Array.from(f.shape), label: 'Yukselen + kirilma', memberIds: [],
   }]
   const s = evaluateTouch(dokunus('BUY'), f, hafizaKur(10, 8, 'BUY'), protos, {}, null)
-  assert.equal(s.prototypeId, 0)
-  assert.ok(s.prototypeSim > 0.99)
-  assert.equal(s.prototypeLabel, 'Yukselen + genis + kirilma')
-  assert.ok(s.reasons.some((r) => r.includes('ortak yapı')))
+  // Alanlar uyumluluk icin duruyor, ama bos.
+  assert.equal(s.prototypeId, null)
+  assert.equal(s.prototypeSim, 0)
+  assert.equal(s.prototypeLabel, '')
+  assert.ok(!s.reasons.some((r) => r.includes('ortak yapı')),
+    'gerekcede ortak yapi satiri olmamali')
+
+  // Prototip verilmesi karari HIC degistirmemeli.
+  const protosuz = evaluateTouch(dokunus('BUY'), f, hafizaKur(10, 8, 'BUY'), [], {}, null)
+  assert.equal(s.fired, protosuz.fired)
+  assert.equal(s.winRate, protosuz.winRate)
+  assert.deepEqual(s.reasons, protosuz.reasons)
 })
 
 test('reasons metinlerinde em-dash kullanilmaz', () => {

@@ -38,7 +38,6 @@
  */
 
 const { knn, DEFAULT_WEIGHTS } = require('./similarity')
-const { matchPrototype } = require('./cluster')
 const { zoneLevels, DEFAULT_OUTCOME_CFG } = require('./outcome')
 const { wilson } = require('./stats')
 
@@ -281,10 +280,11 @@ function findCandidates (touch, features, memory, cfg, beforeTime) {
  * @param {Object|null|undefined} [levels] Bolge seviyeleri. `undefined` ise
  *        burada hesaplanir; `null` ACIKCA "seviye yok" demektir.
  * @param {Object} [cfg]
- * @param {{features?:Object|null, prototypes?:Object[], scanned?:number,
- *          beforeTime?:number|null}} [ek] Gerekce metinleri ve prototip
- *        eslesmesi icin ek baglam. `scanned` taranan hafiza kaydi sayisidir
- *        (gerekce cumlesinde gecer), verilmezse aday sayisi kullanilir.
+ * @param {{features?:Object|null, scanned?:number, baseRate?:number|null,
+ *          baseN?:number|null, beforeTime?:number|null}} [ek] Gerekce
+ *        metinleri ve kalibrasyon icin ek baglam. `scanned` taranan hafiza
+ *        kaydi sayisidir (gerekce cumlesinde gecer), verilmezse aday sayisi
+ *        kullanilir. `prototypes` artik okunmaz (bkz. asagidaki not).
  * @returns {Object} Signal
  */
 function decideFromCandidates (ev, candidates, levels, cfg, ek) {
@@ -299,7 +299,6 @@ function decideFromCandidates (ev, candidates, levels, cfg, ek) {
   const bt = (btHam === undefined || btHam === null) ? null : num(btHam, null)
 
   const features = baglam.features === undefined ? t.features : baglam.features
-  const prototypes = baglam.prototypes
   const direction = yonBelirle(t)
   const sign = direction === 'BUY' ? 1 : -1
   const entry = num(t.price, 0)
@@ -506,18 +505,18 @@ function decideFromCandidates (ev, candidates, levels, cfg, ek) {
     0, 1
   )
 
-  // En yakin ortak yapi (prototip).
-  let prototypeId = null
-  let prototypeSim = 0
-  let prototypeLabel = ''
-  if (features && features.shape && Array.isArray(prototypes) && prototypes.length > 0) {
-    const pm = matchPrototype(features.shape, prototypes)
-    if (pm && pm.prototype) {
-      prototypeId = num(pm.prototype.id, null)
-      prototypeSim = num(pm.similarity, 0)
-      prototypeLabel = typeof pm.prototype.label === 'string' ? pm.prototype.label : ''
-    }
-  }
+  // PROTOTIP (sekil kumeleri) SINYALE KATILMIYOR.
+  //
+  // Olculdu: kumelerin basari orani tabandan ayirt edilemiyor (15m'de sekiz
+  // kumenin orani %31,2 - %35,5, taban %33,4; prototip orani basarili ve
+  // basarisiz olaylarda 0,3343'e karsi 0,3336). Buna ragmen gerekce
+  // cumlesinde "En yakin ortak yapi" diye gorunuyor ve okuyan kisiye
+  // olmayan bir dayanak hissi veriyordu. Alanlar uyumluluk icin bos
+  // degerlerle doluyor; kumeler yalnizca Hafiza panelinde bilgi olarak
+  // duruyor (bkz. cluster.js).
+  const prototypeId = null
+  const prototypeSim = 0
+  const prototypeLabel = ''
 
   const topMatches = []
   const topN = Math.min(matchCount, MAX_TOP_MATCHES)
@@ -597,9 +596,6 @@ function decideFromCandidates (ev, candidates, levels, cfg, ek) {
       reasons.push('Kalibre oranın %95 alt sınırı %' + toPct(winRateLo) +
         ', tabana göre fark ' + (lift >= 0 ? '+' : '') + toPct(lift) + ' puan')
       reasons.push('Ortalama benzerlik ' + avgSimilarity.toFixed(2) + ', en yüksek ' + bestSimilarity.toFixed(2))
-    }
-    if (prototypeLabel) {
-      reasons.push('En yakın ortak yapı: ' + prototypeLabel + ' (benzerlik ' + prototypeSim.toFixed(2) + ')')
     }
   }
 
@@ -719,7 +715,7 @@ function decideFromCandidates (ev, candidates, levels, cfg, ek) {
  * @param {Object} touch Touch
  * @param {Object|null} features Features
  * @param {{events:Object[]}} memory
- * @param {Object[]} prototypes
+ * @param {Object[]} [prototypes] YOK SAYILIR; imza eski cagiranlar icin duruyor
  * @param {Object} [cfg]
  * @param {number|null} [beforeTime]
  * @returns {Object} Signal
@@ -731,7 +727,6 @@ function evaluateTouch (touch, features, memory, prototypes, cfg, beforeTime) {
     // `|| null`: arguman hic verilmediyse `undefined` gelir ve o durumda
     // "olayin kendi vektorune duse" davranisi ISTENMEZ, ozellik yok sayilir.
     features: features || null,
-    prototypes: prototypes,
     scanned: events.length,
     beforeTime: beforeTime,
   })

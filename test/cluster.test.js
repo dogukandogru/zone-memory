@@ -184,12 +184,15 @@ test('matchPrototype: en yakin prototipi ve 0..1 arasi benzerligi dondurur', () 
   assert.equal(matchPrototype(protos[0].centroid, null), null)
 })
 
-test('label: egim + oynaklik + son hareket semasini uretir', () => {
+test('label: egim + son hareket semasini uretir', () => {
   const yukselen = Float32Array.from([0, 0.05, 0.1, 0.2, 0.35, 0.5, 0.7, 0.85, 1])
   const ad = cluster.label(yukselen)
   assert.equal(typeof ad, 'string')
   assert.ok(ad.startsWith('Yukselen'), 'yukselen sekil Yukselen ile baslamali: ' + ad)
-  assert.equal(ad.split(' + ').length, 3, 'uc bilesenli ad beklenir: ' + ad)
+  // Oynaklik parcasi KALDIRILDI: merkez vektor normalize edildigi icin
+  // "sikisik / genis" ayrimi seklin kendisi hakkinda bir sey soylemiyordu.
+  assert.equal(ad.split(' + ').length, 2, 'iki bilesenli ad beklenir: ' + ad)
+  assert.ok(!/sikisik|genis/.test(ad), 'ad oynaklik parcasi tasimamali: ' + ad)
 
   const dusen = Float32Array.from([1, 0.85, 0.7, 0.5, 0.35, 0.2, 0.1, 0.05, 0])
   assert.ok(cluster.label(dusen).startsWith('Dusen'))

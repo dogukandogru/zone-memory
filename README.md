@@ -341,7 +341,7 @@ düğmesine basın. Uygulama:
 2. Tüm kutuları, kutu oluşum olaylarını ve bölgeye ilk geri dönüşleri bulur.
 3. Her olayı hedef / geçersizlik / ufuk kuralına göre etiketler.
 4. Özellik vektörlerini çıkarır ve hafızayı diske yazar.
-5. Başarılı kurulumlardan prototip kümeleri üretir.
+5. Başarılı kurulumlardan şekil kümeleri üretir (bilgi amaçlı, bkz. 6.6).
 
 Uzun bir seride bu işlem birkaç dakika sürer ve on binlerce olay üretir.
 Bir kez yapılır, sonra artımlı olarak güncellenir. İlerleme çubuğu üst şeritte
@@ -400,7 +400,6 @@ Bir sinyale tıklayınca sağ panelde detay açılır:
 | Giriş / TP1 / TP2 / SL | Bölge geometrisinden türetilen plan, TP2 eşleşmelerin dağılımından |
 | R/R | (TP1 - giriş) / (giriş - SL) mutlak değeri |
 | Gerçekleşen sonuç | Yalnızca testte üretilen sinyallerde; bölgenin durumu ve net kazanç |
-| Prototip | Kurulumun benzediği örüntü kümesinin adı |
 | Gerekçeler | Sinyalin neden oluştuğu veya neden oluşmadığı, Türkçe |
 
 **Kanıt rozeti.** Sinyal kartında `KANITLI` / `ZAYIF` / `KANIT YOK` etiketi
@@ -855,17 +854,25 @@ Sinyal katmanı komşu bulmayı (pahalı) ve karar vermeyi (ucuz) ayrı iki adı
 yapar. Eşikler değiştiğinde komşular değişmediği için eşik taraması aynı komşu
 listesini yeniden kullanabilir.
 
-### 6.6 Prototip kümeleme
+### 6.6 Şekil kümeleri (bilgi amaçlı, sinyale katkısı yok)
 
 Yalnızca **başarılı** olayların şekil vektörleri k-means++ ile kümelenir
 (varsayılan `k = 8`, en az 15 üyeli kümeler kalır, sabit tohum ile
-deterministik). Her küme, geçmişte gerçekten işe yaramış bir kurulum kalıbını
-temsil eder ve eğim, oynaklık ve son hareketten türetilen okunabilir bir ad
-alır, örneğin `Düşen + sıkışık + V dönüş`.
+deterministik). Her küme eğim ve son hareketten türetilen okunabilir bir ad
+alır, örneğin `Düşen + V dönüş`; aynı ad iki kümeye düşerse sonuna `#id`
+eklenir.
 
-Canlı bir kurulum geldiğinde en yakın prototip de raporlanır. Bu, sayısal
-benzerlik puanının yanında "bu, şu bilinen kalıba benziyor" şeklinde insan
-tarafından okunabilir bir bağlam verir.
+**Bu kümeler sinyal kararına katılmaz ve gerekçe metinlerinde görünmez.**
+Ölçüldü: kümelerin tutma oranı hafıza tabanından ayırt edilemiyor (15m'de
+sekiz kümenin oranı %31,2 - %35,5, hafıza tabanı %33,4; prototip oranı
+başarılı ve başarısız olaylarda 0,3343'e karşı 0,3336). Bir dönem sinyal
+gerekçesinde "En yakın ortak yapı" satırı vardı ve olmayan bir dayanak hissi
+veriyordu; kaldırıldı. `Signal.prototypeId`, `prototypeSim` ve
+`prototypeLabel` alanları uyumluluk için duruyor ama her zaman boş döner.
+
+Hafıza panelindeki küme listesi her kümenin yanında hafıza tabanına göre puan
+farkını ve %95 Wilson aralığını gösterir; renk yalnızca aralık tabanı
+dışarıda bırakıyorsa kullanılır.
 
 ### 6.7 Sinyal eşikleri
 
@@ -1101,7 +1108,7 @@ Zone Memory/
     XAUUSD_1m.dst.json              Yaz saati göçünün yapıldığını gösteren işaret
     XAUUSD_15m_memory.json          Hafıza üst verisi (olaylar, sonuçlar, ayar izi)
     XAUUSD_15m_memory.vec           Özellik vektörleri (float32)
-    XAUUSD_15m_memory.protos.json   Prototip kümeleri
+    XAUUSD_15m_memory.protos.json   Şekil kümeleri (bilgi amaçlı)
     XAUUSD_15m_memory.zones.json    Kayıtlı bölgeler
     XAUUSD_15m_memory.signals.json  Son testte üretilen sinyaller
     XAUUSD_15m_memory.backtest.json Son yürüyen ileri test özeti
@@ -1115,7 +1122,7 @@ Birkaç not:
   yazılmaz; böylece o alanda hazır ayar ve çekirdek varsayılanı gerçekten
   devreye girer ve varsayılan değişiklikleri size ulaşır. Dosyada bir de
   `settingsVersion` alanı bulunur.
-- **`.bin` dışındaki her şey yeniden üretilebilir.** Hafıza, prototipler,
+- **`.bin` dışındaki her şey yeniden üretilebilir.** Hafıza, şekil kümeleri,
   sinyaller ve test özeti "Geçmişi Tara" ve Test ile yeniden kurulur.
 - **`.live.jsonl` yeniden üretilemez.** Canlıda gerçekten ne olduğunun kaydıdır
   ve tarama ile hafıza silme işlemlerinden etkilenmez; yalnızca yeni satır

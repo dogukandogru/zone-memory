@@ -32,8 +32,6 @@ const YAKINSAMA_ESIGI = 1e-10
        icin bu esikler dogrudan "normalize edilmis yukseklik" birimindedir) --- */
 /** Ilk ucte bir ile son ucte bir ortalamasi arasindaki fark bu kadarsa trend var. */
 const EGIM_ESIGI = 0.12
-/** Merkezdeki tepe-dip araligi bu esigin altindaysa fiyat sikismis demektir. */
-const ARALIK_ESIGI = 0.50
 /** V donus icin iki bacagin her birinin en az bu kadar hareket etmesi gerekir. */
 const DONUS_ESIGI = 0.10
 /** Son bacak ayni yonde bu kadar hareket ettiyse kirilma adayidir. */
@@ -356,6 +354,12 @@ function buildPrototypes (memory, opts) {
     prototipler[x] = {
       id: x,
       size: grup.length,
+      // Etiketli uye sayisi ve kazanan sayisi: arayuz bu kumenin oraninin
+      // hafiza tabanindan ISTATISTIKSEL olarak farkli olup olmadigini
+      // (Wilson araligi) bu iki sayiyla hesapliyor. Yalnizca oran verilince
+      // "oran yuksek" ile "fark anlamli" birbirine karisiyordu.
+      labeled: toplamSayi[x],
+      wins: basariSayi[x],
       winRate: toplamSayi[x] > 0 ? basariSayi[x] / toplamSayi[x] : 0,
       avgMfeAtr: mfeSayi[x] > 0 ? mfeToplam[x] / mfeSayi[x] : 0,
       avgMaeAtr: maeSayi[x] > 0 ? maeToplam[x] / maeSayi[x] : 0,
@@ -363,6 +367,15 @@ function buildPrototypes (memory, opts) {
       label: label(merkezler[x]),
       memberIds,
     }
+  }
+
+  // AYNI AD IKI KEZ GECMESIN. Ad yalnizca uc egim ve uc hareket bicimini
+  // ayirdigi icin sekiz kumeli bir hafizada uc ad iki kez tekrarlanabiliyordu;
+  // ekranda iki farkli satir ayni adla gorunuyordu.
+  const adSayaci = new Map()
+  for (const pr of prototipler) adSayaci.set(pr.label, (adSayaci.get(pr.label) || 0) + 1)
+  for (const pr of prototipler) {
+    if (adSayaci.get(pr.label) > 1) pr.label = pr.label + ' #' + pr.id
   }
 
   return prototipler
@@ -380,16 +393,18 @@ function secBasarili (ev) {
  *   1. Egim      : son dilim ortalamasi eksi bas dilim ortalamasi.
  *                  +EGIM_ESIGI ustu "Yukselen", -EGIM_ESIGI alti "Dusen",
  *                  arasi "Yatay".
- *   2. Oynaklik  : vektordeki tepe-dip araligi. ARALIK_ESIGI altinda "sikisik",
- *                  ustunde "genis".
- *   3. Son hareket: ilk bacak (orta eksi bas) ile son bacak (son eksi orta).
+ *   2. Son hareket: ilk bacak (orta eksi bas) ile son bacak (son eksi orta).
  *                  Isaretleri zit ve ikisi de DONUS_ESIGI'ni asiyorsa "V donus"
  *                  (pencerenin ortasinda yon degistirmis, klasik tepki hareketi),
  *                  ayni yonde ve son bacak hem KIRILMA_ESIGI'ni hem de ilk
  *                  bacagin IVME_KATI katini asiyorsa "kirilma" (sona dogru
  *                  ivmelenme), aksi halde "duz" (duzgun veya kararsiz seyir).
  *
- * Ornek cikti: 'Dusen + sikisik + V donus'
+ * Ornek cikti: 'Dusen + V donus'
+ *
+ * OYNAKLIK PARCASI KALDIRILDI: merkez vektor normalize edildigi icin
+ * "sikisik / genis" ayrimi sekil hakkinda bir sey soylemiyordu, yalnizca
+ * normalizasyonun kalintisini adlandiriyordu.
  *
  * @param {ArrayLike<number>} centroid
  * @returns {string}
@@ -422,17 +437,7 @@ function label (centroid) {
   else if (egim < -EGIM_ESIGI) egimAdi = 'Dusen'
   else egimAdi = 'Yatay'
 
-  // 2. Oynaklik
-  let enAz = centroid[0]
-  let enCok = centroid[0]
-  for (let i = 1; i < n; i++) {
-    const v = centroid[i]
-    if (v < enAz) enAz = v
-    if (v > enCok) enCok = v
-  }
-  const oynaklikAdi = (enCok - enAz) < ARALIK_ESIGI ? 'sikisik' : 'genis'
-
-  // 3. Son hareket
+  // 2. Son hareket
   const ilkBacak = ortaOrt - basOrt
   const sonBacak = sonOrt - ortaOrt
   const ilkBuyukluk = Math.abs(ilkBacak)
@@ -447,7 +452,7 @@ function label (centroid) {
     hareketAdi = 'duz'
   }
 
-  return egimAdi + ' + ' + oynaklikAdi + ' + ' + hareketAdi
+  return egimAdi + ' + ' + hareketAdi
 }
 
 /**

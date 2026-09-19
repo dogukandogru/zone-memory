@@ -104,8 +104,6 @@ const DEFAULT_BACKTEST_CFG = {
  *   kirildiysa -slAtr, zaman asiminda ufuk sonu kapanisindan hesaplanan
  *   deger (maliyet dusulmus)
  * @property {number} equityAtr        Bu islemden sonraki birikimli kazanc
- * @property {number|null} prototypeId
- * @property {string} prototypeLabel
  */
 
 /**
@@ -530,12 +528,10 @@ function yuruyenIleriTest(memory, prototypes, cfg, onProgress, sinyalUret) {
           costAtr: costAtr,     // bu islemin maliyeti, ATR biriminde
           pnlAtr: pnlAtr,       // net: grossAtr - costAtr
           equityAtr: cum,
-          prototypeId: sig.prototypeId === undefined ? null : sig.prototypeId,
-          prototypeLabel: sig.prototypeLabel || '',
-          // Arayuzun sinyal ayrinti ekrani icin gerekli alanlar. Bunlar
-          // tasinmazsa panelde "Yapi benzerligi 0,000" ve "Benzer gecmis
-          // ornekler (0)" gorunur, yani mini grafikler bos kalir.
-          prototypeSim: Number.isFinite(sig.prototypeSim) ? sig.prototypeSim : 0,
+          // Prototip alanlari KALDIRILDI: sekil kumeleri karara katilmiyor
+          // (bkz. signal.js). Arayuzun ayrinti ekrani icin gereken diger
+          // alanlar burada tasinmaya devam ediyor; tasinmazsa panelde
+          // "Benzer gecmis ornekler (0)" gorunur ve mini grafikler bos kalir.
           expectancy: Number.isFinite(sig.expectancy) ? sig.expectancy : 0,
           reasons: Array.isArray(sig.reasons) ? sig.reasons.slice() : [],
           // Dosya boyutu buyumesin diye ilk 6 eslesme yeter.

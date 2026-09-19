@@ -744,8 +744,11 @@ module.exports = {
   /**
    * Yalnizca basarili (success) kayitlarin sekil vektorlerinden ortak yapilari
    * cikarir. Kucuk kumeler (minSize altinda) elenir.
-   * @returns {Array<{id, size, winRate, avgMfeAtr, avgMaeAtr, centroid:Float32Array,
-   *                  label:string, memberIds:number[]}>}
+   * @returns {Array<{id, size, labeled, wins, winRate, avgMfeAtr, avgMaeAtr,
+   *                  centroid:Float32Array, label:string, memberIds:number[]}>}
+   *
+   * `labeled` ve `wins`: arayuz kumenin oraninin hafiza tabanindan
+   * istatistiksel olarak farkli olup olmadigini bu iki sayiyla hesaplar.
    */
   buildPrototypes(memory, opts),  // opts: {k=8, minSize=15, seed=42, onlySuccess=true}
   /** Bir sekil vektorunun en yakin prototipini bulur. */
@@ -753,10 +756,18 @@ module.exports = {
 }
 ```
 
-`label`: sekil vektorunden turetilen okunabilir Turkce ad, ornegin
-`'Dusen kama, sert donus'` yerine daha basit ve mekanik bir sema kullan:
-egim (yukselen/dusen/yatay), oynaklik (sikisik/genis) ve son hareket
-(v-donus/duz/kirilma) uclusunden uretilmis ad, ornegin `'Dusen + sikisik + V donus'`.
+`label`: sekil vektorunden turetilen okunabilir Turkce ad. Mekanik bir sema
+kullanilir: egim (yukselen/dusen/yatay) ve son hareket (v-donus/duz/kirilma)
+ikilisi, ornegin `'Dusen + V donus'`. Ayni ad iki kumeye duserse sonuna `#id`
+eklenir. Oynaklik parcasi (sikisik/genis) KALDIRILDI: merkez vektor normalize
+edildigi icin bu ayrim seklin kendisi hakkinda bir sey soylemiyordu.
+
+PROTOTIPLER SINYAL KARARINA KATILMAZ. `decideFromCandidates` prototip
+eslestirmesi yapmaz; `Signal.prototypeId` her zaman `null`, `prototypeSim` 0
+ve `prototypeLabel` bos dizedir (alanlar yalnizca uyumluluk icin duruyor) ve
+gerekce metinlerinde "ortak yapi" satiri yoktur. Test islem kaydinda
+(`Trade`) prototip alanlari da yoktur. Neden: kumelerin tutma orani hafiza
+tabanindan ayirt edilemiyor (bkz. README 6.6).
 
 ## 14. `src/core/learn/memory.js` (A6)
 
