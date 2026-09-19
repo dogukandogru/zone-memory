@@ -191,6 +191,37 @@ function agirliklariCoz (weights) {
 }
 
 /**
+ * Merkezlenmis sorgu sekliyle bir adayin Pearson benzerligi, 0..1 araliginda.
+ * Hem on elemede hem ikinci asamada ayni hesap kullanilir.
+ * @param {Float64Array} qMerkez Sorgunun ortalamadan farklari
+ * @param {number} qNorm Sorgunun normu
+ * @param {Float32Array|Float64Array} cs Aday sekil vektoru
+ * @returns {number}
+ */
+function sekilBenzerligi (qMerkez, qNorm, cs) {
+  const sl = qMerkez.length | 0
+  if (!cs || cs.length !== sl) return 0
+  let ct = 0
+  for (let d = 0; d < sl; d++) ct += cs[d]
+  const cOrt = ct / sl
+  let pay = 0
+  let cKare = 0
+  for (let d = 0; d < sl; d++) {
+    const y = cs[d] - cOrt
+    pay += qMerkez[d] * y
+    cKare += y * y
+  }
+  let r = 0
+  if (qNorm > 0 && cKare > EPS) {
+    r = pay / (qNorm * Math.sqrt(cKare))
+    if (!Number.isFinite(r)) r = 0
+    else if (r < -1) r = -1
+    else if (r > 1) r = 1
+  }
+  return (r + 1) / 2
+}
+
+/**
  * Iki ozellik vektorunun benzerligi. Tum degerler 0..1 arasindadir.
  * Eksik bir alt vektor varsa o bilesenin benzerligi 0 sayilir.
  *
@@ -320,9 +351,19 @@ function knn (query, memory, opts) {
   if (M <= 0) return []
   const hSim = new Float64Array(M)
   const hIdx = new Int32Array(M)
+  const hSekil = new Float64Array(M)
+  const hCtx = new Float64Array(M)
   let hBoyut = 0
 
-  // 1. asama: ucuz sekil benzerligi ile on eleme.
+  // 1. asama: TAM benzerligin UCUZ kismiyla on eleme.
+  //
+  // Onceden on eleme yalnizca sekil benzerligine bakiyordu. Sekil skorun
+  // %60'ini alsa da basariyi ayirt etmiyor (olculdu: AUC 0.50), bilgi
+  // baglam vektorunde. Yalnizca sekle gore elemek, tam siralamada ilk k'ya
+  // girecek adaylarin bir kismini daha ilk adimda atiyordu (olculdu: %21).
+  // Artik on eleme sekil VE baglam bileseniyle yapilir; pahali olan DTW
+  // yalnizca hayatta kalanlarda hesaplanir (DTW'nin skora etkisi zaten
+  // olculdu: p01-p99 araligi 0.11, yani en fazla 0.016 puan).
   for (let i = 0; i < n; i++) {
     const ev = events[i]
     if (!ev) continue
@@ -366,12 +407,20 @@ function knn (query, memory, opts) {
       else if (r > 1) r = 1
     }
     const shapeSim = (r + 1) / 2
+    const ctxSim = query.ctx && f.ctx ? (cosine(query.ctx, f.ctx) + 1) / 2 : 0
+    // On eleme puani: skorun DTW disindaki kismi.
+    const onPuan = w.shape * shapeSim + w.ctx * ctxSim
 
     if (hBoyut < M) {
-      yiginEkle(hSim, hIdx, hBoyut, shapeSim, i)
+      yiginEkle(hSim, hIdx, hBoyut, onPuan, i)
+      hSekil[hBoyut] = shapeSim
+      hCtx[hBoyut] = ctxSim
       hBoyut++
-    } else if (shapeSim > hSim[0]) {
-      yiginKokDegistir(hSim, hIdx, hBoyut, shapeSim, i)
+      // Yigin siralamasi degistigi icin bileseni indeksle birlikte tasimak
+      // yerine 2. asamada yeniden okunur; bu yuzden burada yalnizca
+      // buyume anindaki degerleri tutariz ve asagida indeksten okuruz.
+    } else if (onPuan > hSim[0]) {
+      yiginKokDegistir(hSim, hIdx, hBoyut, onPuan, i)
     }
   }
 
@@ -382,7 +431,10 @@ function knn (query, memory, opts) {
   for (let h = 0; h < hBoyut; h++) {
     const ev = events[hIdx[h]]
     const f = ev.features
-    const shapeSim = hSim[h]
+    // Bilesenler yeniden hesaplanir: yigin islemleri sirayi degistirdigi icin
+    // 1. asamadaki degerleri indeksle tasimak hataya acik olurdu, maliyeti
+    // ise yalnizca hayatta kalan k*8 aday kadardir.
+    const shapeSim = sekilBenzerligi(qMerkez, qNorm, f.shape)
     const ctxSim = query.ctx && f.ctx ? (cosine(query.ctx, f.ctx) + 1) / 2 : 0
 
     let dtwSim = 0
