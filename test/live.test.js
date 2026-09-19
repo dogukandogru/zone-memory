@@ -100,7 +100,10 @@ test('oturum degisirse eski turun sonucu KULLANILMAZ', async () => {
       return seriUret(1700000000, 10, o.tfSec)
     },
     onEngine: async (cmd, payload) => {
-      motorCagrisi++
+      // Yalnizca canli tik sayilir; 'data:status' cagrisi yazim zaman dilimini
+      // belirlemek icin yapiliyor ve bu testin konusu degil.
+      if (cmd === 'engine:live-tick') motorCagrisi++
+      if (cmd === 'data:status') return { byTf: {} }
       return { tf: payload.tf, added: 1, lastBar: { time: 1700000000, close: 2000 }, events: [], logs: [] }
     },
   })
@@ -123,10 +126,11 @@ test('oturum degisirse eski turun sonucu KULLANILMAZ', async () => {
 
 test('isci baska bir zaman dilimi dondurduyse yanit atilir', async () => {
   const { live, geriAl } = liveYukle({
-    onEngine: async () => ({
+    onEngine: async (cmd) => {
+      if (cmd === 'data:status') return { byTf: {} }
       // Isci BASKA bir tf dondurur: yanit kullanilmamali.
-      tf: '5m', added: 3, lastBar: { time: 1700000000, close: 2000 }, events: [], logs: [],
-    }),
+      return { tf: '5m', added: 3, lastBar: { time: 1700000000, close: 2000 }, events: [], logs: [] }
+    },
   })
 
   live.start({ tf: '15m', providerId: 'sahte' })
@@ -140,9 +144,10 @@ test('isci baska bir zaman dilimi dondurduyse yanit atilir', async () => {
 
 test('ayni turun yaniti kullanilir ve durum her tikte yayinlanir', async () => {
   const { live, olaylar, geriAl } = liveYukle({
-    onEngine: async (cmd, payload) => ({
-      tf: payload.tf, added: 2, lastBar: { time: 1700000600, close: 2001 }, events: [], logs: [],
-    }),
+    onEngine: async (cmd, payload) => {
+      if (cmd === 'data:status') return { byTf: {} }
+      return { tf: payload.tf, added: 2, lastBar: { time: 1700000600, close: 2001 }, events: [], logs: [] }
+    },
   })
 
   live.start({ tf: '15m', providerId: 'sahte' })
@@ -164,7 +169,8 @@ test('durdur ve hemen baslat: yeni oturumun ilk tiki ATLANMAZ', async () => {
   let motorCagrisi = 0
   const { live, geriAl } = liveYukle({
     onEngine: async (cmd, payload) => {
-      motorCagrisi++
+      if (cmd === 'engine:live-tick') motorCagrisi++
+      if (cmd === 'data:status') return { byTf: {} }
       return { tf: payload.tf, added: 1, lastBar: null, events: [], logs: [] }
     },
   })

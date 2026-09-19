@@ -174,6 +174,41 @@ function createMarketCalendar (tz) {
 }
 
 /**
+ * KOVA CAPASI: 4 saatlik ve gunluk kovalari SEANS ACILISINDAN baslatir.
+ *
+ * Epoch katlarina hizali kovalar spot altinin gunuyle ortusmez: olculdu,
+ * 28.006 adet 4 saatlik kovanin 1.611'i (%5,8) iki saatten az veri iceriyor
+ * ve 5.445 gunluk kovanin 896'si Pazar aksami acilisindan olusan yarim kova.
+ * TradingView gunu New York seans acilisindan (yerel 18:00, yaz saatinde
+ * 17:00 UTC karsiligi degisir) sayar.
+ *
+ * Donen fonksiyon bir zamani ve hedef kova suresini alip kovanin BASLANGIC
+ * zamanini verir.
+ *
+ * @param {string} [tz] Varsayilan America/New_York
+ * @returns {(tSec:number, kovaSn:number)=>number}
+ */
+function createSessionAnchor (tz) {
+  const offsetAt = createOffsetLookup(tz || PIYASA_TZ)
+  return function kovaBasi (tSec, kovaSn) {
+    if (!Number.isFinite(tSec)) return tSec
+    const off = offsetAt(tSec)
+    const local = tSec + off
+    // Seans gunu yerel 18:00'de baslar: 18 saat geri kaydirip gun sinirini
+    // bulmak, "bu an hangi seans gunune ait" sorusunu cevaplar.
+    const kaydirilmis = local - 18 * 3600
+    const gunBasi = Math.floor(kaydirilmis / DAY) * DAY + 18 * 3600
+    const gecen = local - gunBasi
+    const kovaIdx = Math.floor(gecen / kovaSn)
+    // Yerel kova basini UTC'ye cevir. Ofset gun icinde degisebilir (yaz
+    // saati gecisi), bu yuzden cevrimden sonra bir kez daha duzeltilir.
+    const yerelKovaBasi = gunBasi + kovaIdx * kovaSn
+    const kaba = yerelKovaBasi - off
+    return kaba - (offsetAt(kaba) - off)
+  }
+}
+
+/**
  * Saatten seans adi. Python portundaki _session_name ile birebir aynidir.
  * @param {number} hour 0..23
  * @returns {string} 'Asia' | 'London' | 'New York' | 'Other'
@@ -277,4 +312,5 @@ module.exports = {
   sessionName,
   createOffsetLookup,
   createMarketCalendar,
+  createSessionAnchor,
 }

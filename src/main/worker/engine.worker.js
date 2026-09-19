@@ -1499,6 +1499,52 @@ function takvimOnbellek () {
 }
 
 /**
+ * Turetilmis zaman dilimi dosyalarinin kaynak izlerini siler.
+ *
+ * Canli akis yalnizca 1 dakikalige yazar; turetilmis dosyalar o anda eskir.
+ * Dosyalari her tikte yeniden yazmak pahali olurdu (5m dosyasi 1,2 milyon
+ * bar), bu yuzden yalnizca IZ silinir ve yukleyici bir sonraki okumada
+ * kendisi tazeler.
+ */
+async function turetilmisIzleriGecersizKil () {
+  const loader = core('data/loader')
+  const { TURETILEN_TF } = core('tf')
+  for (const tf of TURETILEN_TF) {
+    try {
+      await fsp.unlink(loader.turetilmisIzYolu(paths.dataDir(), tf))
+    } catch (err) {
+      // Iz yoksa silinecek de yoktur.
+    }
+  }
+}
+
+/**
+ * Canli analiz serisi: grafik zaman diliminde, 1 dakikaliktan TURETILMIS.
+ *
+ * Canli akis 1 dakikalige yaziyorsa grafik zaman diliminin dosyasi eskimistir;
+ * o dosyayi okumak canli barlari gormemek demektir. Bu yuzden 1 dakikalik
+ * serinin kuyrugu bellekte yeniden orneklenir.
+ *
+ * @param {string} tf Grafik zaman dilimi
+ * @param {string} yazimTf Canlinin yazdigi zaman dilimi
+ * @param {number} kuyrukBar Grafik zaman diliminde gereken bar sayisi
+ */
+async function canliAnalizSerisi (tf, yazimTf, kuyrukBar) {
+  if (yazimTf === tf) return await getSeries(tf, false)
+  const taban = await getSeries(yazimTf, false)
+  if (!taban || taban.length === 0) return seriesMod.emptySeries()
+  const tfSn = core('tf').tfSeconds(tf)
+  const yazimSn = core('tf').tfSeconds(yazimTf)
+  const gerekenTabanBar = Math.ceil(kuyrukBar * (tfSn / yazimSn)) + Math.ceil(tfSn / yazimSn) + 2
+  const bas = Math.max(0, taban.length - gerekenTabanBar)
+  // Kova sinirina hizala, yoksa ilk kova eksik veriyle olusur.
+  let hizaliBas = bas
+  while (hizaliBas < taban.length && taban.time[hizaliBas] % tfSn !== 0) hizaliBas++
+  const dilim = seriesMod.sliceSeries(taban, hizaliBas, taban.length)
+  return seriesMod.resample(dilim, tfSn)
+}
+
+/**
  * UST ZAMAN DILIMI BAGLAMI (Y3) - CANLI ICIN ONBELLEK.
  *
  * Indikatoru ust dilimde kosmak ucuzdur (olculdu: 28.000 bar / 4h icin 0,09
@@ -1652,7 +1698,15 @@ handlers['engine:live-tick'] = async function (payload) {
   // testle mesgulken (1m testi 53-60 sn) cekim aninda acik olan bar aksi
   // halde kapanmis sayilip yarim OHLCV ile kalici yaziliyordu.
   const fetchedAt = num(payload.fetchedAt, Math.floor(Date.now() / 1000))
-  const closedEnd = seriesMod.closedEndIndex(inc.time, tfSec, fetchedAt, inc.length)
+  // YAZIM ZAMAN DILIMI GRAFIKTEN FARKLI OLABILIR (V6).
+  //
+  // Canli akis 1 dakikalik depo varken 1 dakikalik bar ceker ve YALNIZCA
+  // 1m'ye yazar; grafigin zaman dilimi ondan turetilir. Onceden her zaman
+  // dilimi kendi dosyasina yaziyordu ve dosyalar sessizce ayrisiyordu
+  // (olculdu: 5m 323 bar geride, 15m'de 181 fazla / 95 eksik bar).
+  const yazimTf = typeof payload.writeTf === 'string' && payload.writeTf ? payload.writeTf : tf
+  const yazimSn = yazimTf === tf ? tfSec : core('tf').tfSeconds(yazimTf)
+  const closedEnd = seriesMod.closedEndIndex(inc.time, yazimSn, fetchedAt, inc.length)
 
   let added = 0
   let stored = false
@@ -1663,13 +1717,13 @@ handlers['engine:live-tick'] = async function (payload) {
     // yalnizca bellekteki seriye eklenir.
     let tfStat = null
     try {
-      tfStat = await binstore.statSeries(paths.candlePath(tf))
+      tfStat = await binstore.statSeries(paths.candlePath(yazimTf))
     } catch (err) {
       tfStat = null
     }
     const hasTfStore = !!(tfStat && tfStat.count > 0)
     let baseHasData = false
-    if (!hasTfStore && tf !== '1m') {
+    if (!hasTfStore && yazimTf !== '1m') {
       try {
         const baseStat = await binstore.statSeries(paths.candlePath('1m'))
         baseHasData = !!(baseStat && baseStat.count > 0)
@@ -1680,7 +1734,7 @@ handlers['engine:live-tick'] = async function (payload) {
     const canStore = hasTfStore || !baseHasData
 
     const lastStored = hasTfStore ? num(tfStat.lastTime, -1) : -1
-    const cached = seriesCache.tf === tf && seriesCache.series ? seriesCache.series : null
+    const cached = seriesCache.tf === yazimTf && seriesCache.series ? seriesCache.series : null
     const lastCached = cached && cached.length > 0 ? cached.time[cached.length - 1] : -1
     const lastKnown = Math.max(lastStored, lastCached)
 
@@ -1691,10 +1745,10 @@ handlers['engine:live-tick'] = async function (payload) {
     // kacirildiysa bar eklemeyiz. Eksik barla devam etmek seride kalici bir
     // delik birakir; pivot, ATR ve hacim ortalamalari o delikten sonra
     // gecmisle tutarsiz hesaplanir. Bunun yerine senkron istenir.
-    if (startIdx < closedEnd && lastKnown > 0 && inc.time[startIdx] - lastKnown > tfSec) {
+    if (startIdx < closedEnd && lastKnown > 0 && inc.time[startIdx] - lastKnown > yazimSn) {
       const piyasaAcikMi = core('session').createMarketCalendar()
       let acikBosluk = 0
-      for (let t = lastKnown + tfSec; t < inc.time[startIdx]; t += tfSec) {
+      for (let t = lastKnown + yazimSn; t < inc.time[startIdx]; t += yazimSn) {
         if (piyasaAcikMi(t)) acikBosluk++
         if (acikBosluk > 0) break
       }
@@ -1709,9 +1763,14 @@ handlers['engine:live-tick'] = async function (payload) {
     if (startIdx < closedEnd) {
       const fresh = seriesMod.sliceSeries(inc, startIdx, closedEnd)
       if (canStore) {
-        const res = await binstore.appendSeries(paths.candlePath(tf), fresh)
+        const res = await binstore.appendSeries(paths.candlePath(yazimTf), fresh)
         added = num(res && res.added, 0)
         stored = true
+        // Turetilmis dosyalar artik guncel degil: izleri silinir ki yukleyici
+        // bir sonraki okumada 1 dakikaliktan tazelesin. Dosyalarin kendisini
+        // her tikte yeniden yazmak 1,2 milyon barlik 5m dosyasi icin
+        // gereksiz bir maliyet olurdu.
+        if (yazimTf === '1m') await turetilmisIzleriGecersizKil()
       } else {
         // Ayri dosya yoksa bar yalnizca bellekteki seriye eklenir; bu barlar
         // "eklendi" sayilmaz ki sonraki turda yeniden denensin.
@@ -1743,7 +1802,6 @@ handlers['engine:live-tick'] = async function (payload) {
   let kontrolHatasi = null
   if (added > 0) {
     try {
-      const s = await getSeries(tf, false)
       // KUYRUK PENCERESI: indikatorun son barlari TAM SERIYLE AYNI hesaplamasi
       // icin gereken uzunluk. Sabit 4000 bar, 1 dakikalik grafikte ust zaman
       // dilimi EMA'sini isitmiyordu (15 dakikalik trend icin yalnizca 266 ust
@@ -1757,6 +1815,9 @@ handlers['engine:live-tick'] = async function (payload) {
         payload.params || null, tfSec)
       const tail = clampInt(payload.tailBars, 500, 50000,
         Math.max(DEFAULT_TAIL_BARS, gerekenKuyruk))
+      // Canli 1 dakikalige yaziyorsa grafik serisi ONDAN turetilir: grafik
+      // zaman diliminin dosyasi bu anda eskimistir.
+      const s = await canliAnalizSerisi(tf, yazimTf, tail)
       const start = Math.max(0, s.length - tail)
       const sub = seriesMod.sliceSeries(s, start, s.length)
       const ind = core('indicator/proZones').runIndicator(sub, payload.params || {}, tfSec)

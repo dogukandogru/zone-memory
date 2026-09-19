@@ -69,6 +69,8 @@ const state = {
   // Duzeltme hesaplanamadi veya akista bosluk var: bar yazilmiyor, once
   // Veri Cek ile eksik donem kapatilmali.
   needsSync: false,
+  // Canlinin fiilen YAZDIGI zaman dilimi (1 dakikalik depo varsa '1m').
+  writeTf: null,
   // Motor uzun bir isle mesgul: canli tik kuyrukta bekliyor.
   waitingForEngine: false,
   // Oturum kimligi: her start() ile artar (bkz. sessionSeq).
@@ -160,6 +162,7 @@ function status() {
     signals: state.signals,
     addedBars: state.addedBars,
     needsSync: state.needsSync,
+    writeTf: state.writeTf,
     waitingForEngine: state.waitingForEngine,
   }
 }
@@ -195,6 +198,8 @@ async function start(opts) {
   state.pollSeconds = Math.min(MAX_POLL_SECONDS, Math.max(MIN_POLL_SECONDS, Math.floor(Number(cfg.livePollSeconds) || 20)))
   state.basis = null
   state.volScale = null
+  // Yazim zaman dilimi asagida belirlenir; o ana kadar grafik zaman dilimi.
+  state.writeTf = tf
   state.lastError = null
   state.ticks = 0
   state.signals = 0
@@ -208,6 +213,11 @@ async function start(opts) {
   logLine('Canli akis basladi: ' + state.providerName + ', ' + tf + ', ' + state.pollSeconds + ' saniyede bir.')
   emitEvent('live:status', status())
 
+  // 1 dakikalik depo varsa canli akis 1 dakikalik bar ceker ve yalnizca
+  // 1m'ye yazar. Depo durumu isciden bir kez sorulur; her tikte sormak
+  // gereksiz bir tur ekler.
+  yazimTfBelirle(tf).catch(() => {})
+
   timer = setInterval(() => {
     tick().catch(() => {})
   }, state.pollSeconds * 1000)
@@ -217,6 +227,31 @@ async function start(opts) {
   tick().catch(() => {})
 
   return status()
+}
+
+/**
+ * Canlinin hangi zaman dilimine yazacagini belirler.
+ *
+ * 1 dakikalik depo varsa 1m'ye yazilir ve grafik ondan turetilir; boylece
+ * turetilmis dosyalar 1 dakikalikla ayrismaz (V6). Depo durumu okunamazsa
+ * eski davranisa (grafik zaman dilimine yazma) dusulur.
+ */
+async function yazimTfBelirle(tf) {
+  if (tf === '1m') {
+    state.writeTf = '1m'
+    return
+  }
+  try {
+    const durumBilgisi = await engine.call('data:status', {})
+    const satir = durumBilgisi && durumBilgisi.byTf ? durumBilgisi.byTf['1m'] : null
+    const varMi = !!(satir && Number(satir.count) > 0)
+    state.writeTf = varMi ? '1m' : tf
+    if (varMi) {
+      logLine('Canli barlar 1 dakikalik depoya yaziliyor, ' + tf + ' serisi ondan turetiliyor.')
+    }
+  } catch (err) {
+    state.writeTf = tf
+  }
 }
 
 function stopTimer() {
@@ -258,7 +293,13 @@ async function tick() {
     const provider = getProviderById(providerId)
     const apiKey = (cfg.apiKeys && cfg.apiKeys[providerId]) || ''
     const tfmod = require('../core/tf')
-    const tfSec = tfmod.tfSeconds(tf)
+    // YAZIM ZAMAN DILIMI (V6): 1 dakikalik depo varsa canli akis 1 dakikalik
+    // bar ceker ve YALNIZCA 1m'ye yazar; grafigin zaman dilimi ondan
+    // turetilir. Onceden her zaman dilimi kendi dosyasina yaziliyordu ve
+    // dosyalar sessizce ayrisiyordu (olculdu: 5m 323 bar geride, 15m'de 181
+    // fazla / 95 eksik bar).
+    const yazimTf = state.writeTf || tf
+    const tfSec = tfmod.tfSeconds(yazimTf)
 
     // Kapanmis bar olcutu bu an uzerinden hesaplanir. Istegin GONDERILDIGI
     // ani kullaniriz: isci uzun bir isle mesgulse mesaj dakikalar sonra
@@ -317,6 +358,8 @@ async function tick() {
         close: fetched.close,
         volume: fetched.volume,
       },
+      // Grafik zaman dilimi (sinyal ve hafiza bunun uzerinden).
+      writeTf: yazimTf,
       isProxy: state.isProxy,
       // Hangi saglayicidan geldigi canli sinyal gunlugune yazilir: sonradan
       // "bu olcu hangi kaynakla alindi" sorusu cevaplanabilmeli.

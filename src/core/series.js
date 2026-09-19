@@ -377,10 +377,27 @@ function appendInPlace(dst, src) {
  * @param {number} toTfSec
  * @returns {Series}
  */
-function resample(s, toTfSec) {
+function resample(s, toTfSec, opts) {
   if (!(toTfSec > 0)) throw new Error('resample: hedef zaman dilimi pozitif olmali')
   const n = s.length
   if (n === 0) return emptySeries()
+
+  // KOVA CAPASI (V6, varsayilan KAPALI).
+  //
+  // Kovalar varsayilan olarak epoch katlarina hizalidir: 4 saatlik kovalar
+  // 00:00, 04:00, 08:00 UTC'de baslar. Spot altin gunu New York saatiyle
+  // 17:00'de kapanip 18:00'de acildigi icin bu hiza seansla ortusmez:
+  // olculdu, 28.006 adet 4 saatlik kovanin 1.611'i (%5,8) iki saatten az
+  // veri iceriyor ve 5.445 gunluk kovanin 896'si Pazar aksami acilisindan
+  // olusan yarim kova.
+  //
+  // `opts.capa = 'seans'` verilirse kovalar New York seans acilisindan
+  // (yaz saatinde 17:00, kista 18:00 yerel) sayilir. VARSAYILAN DEGIL:
+  // TradingView ile birebir eslestigi dogrulanana kadar acilmamali, cunku
+  // hizayi degistirmek butun 4 saatlik ve gunluk hafizayi gecersiz kilar.
+  const capa = opts && opts.capa === 'seans' && toTfSec >= 14400
+    ? require('./session').createSessionAnchor()
+    : null
 
   const st = s.time
   const so = s.open
@@ -414,7 +431,7 @@ function resample(s, toTfSec) {
   for (let i = 0; i < n; i++) {
     const t = st[i]
     if (!Number.isFinite(t)) continue
-    const bucket = Math.floor(t / toTfSec) * toTfSec
+    const bucket = capa ? capa(t, toTfSec) : Math.floor(t / toTfSec) * toTfSec
     if (bucket !== curStart) {
       if (m === time.length) {
         const need = m + 1

@@ -925,13 +925,85 @@ async function rebuildDerived(dataDir, symbol, tfs) {
   const liste = Array.isArray(tfs) && tfs.length ? tfs : TURETILEN_TF
   const taban = await binstore.readSeries(mumYolu(dataDir, '1m', symbol))
   if (!taban || taban.length === 0) return []
+  const kaynakOzet = {
+    sourceCount: taban.length,
+    sourceLastTime: taban.length ? taban.time[taban.length - 1] : 0,
+  }
   const sonuc = []
   for (const tf of liste) {
     const s = series.resample(taban, tfSeconds(tf))
     await binstore.writeSeries(mumYolu(dataDir, tf, symbol), s)
+    // TURETILMIS DOSYANIN KAYNAK IZI.
+    //
+    // Yukleyici, zaman dilimi dosyasi VARSA 1 dakikaliga hic bakmiyordu ve
+    // dosyalar birbirinden sessizce ayrisiyordu: olculdu, 1m'nin son bari
+    // 31 Agustos 22:12 iken 5m 28 Agustos 21:55'te kalmisti (323 bar eksik)
+    // ve 15m dosyasi 1m'den turetilmis haline gore 181 fazla, 95 eksik bar
+    // iceriyordu. Iz sayesinde yukleyici uyusmazligi gorup tazeleyebiliyor.
+    await turetilmisIzYaz(dataDir, tf, symbol, kaynakOzet)
     sonuc.push({ tf: tf, count: s.length, lastTime: s.length ? s.time[s.length - 1] : 0 })
   }
   return sonuc
+}
+
+/** Turetilmis dosyanin kaynak izinin yolu. */
+function turetilmisIzYolu(dataDir, tf, symbol) {
+  return mumYolu(dataDir, tf, symbol) + '.meta.json'
+}
+
+/** Kaynak izini yazar (hata olursa sessizce gecilir, iz zorunlu degildir). */
+async function turetilmisIzYaz(dataDir, tf, symbol, ozet) {
+  try {
+    await fsp.writeFile(
+      turetilmisIzYolu(dataDir, tf, symbol),
+      JSON.stringify({ kaynak: '1m', tf: tf, sourceCount: ozet.sourceCount,
+        sourceLastTime: ozet.sourceLastTime, yazildi: Math.floor(Date.now() / 1000) }),
+      'utf8'
+    )
+  } catch (err) {
+    // Iz yazilamazsa yukleyici her acilista yeniden ornekler; dogruluk bozulmaz.
+  }
+}
+
+/** Kaynak izini okur, yoksa null. */
+async function turetilmisIzOku(dataDir, tf, symbol) {
+  try {
+    const ham = await fsp.readFile(turetilmisIzYolu(dataDir, tf, symbol), 'utf8')
+    const govde = JSON.parse(ham)
+    return govde && typeof govde === 'object' ? govde : null
+  } catch (err) {
+    return null
+  }
+}
+
+/**
+ * Turetilmis dosya 1 dakikalikla uyusuyor mu.
+ * @returns {Promise<boolean|null>} 1 dakikalik yoksa null (karsilastirilamaz)
+ */
+async function turetilmisGuncelMi(dataDir, tf, symbol) {
+  let tabanStat = null
+  try {
+    tabanStat = await binstore.statSeries(mumYolu(dataDir, '1m', symbol))
+  } catch (err) {
+    tabanStat = null
+  }
+  if (!tabanStat || !tabanStat.count) return null
+  const iz = await turetilmisIzOku(dataDir, tf, symbol)
+  if (!iz) return false
+  return iz.sourceCount === tabanStat.count && iz.sourceLastTime === tabanStat.lastTime
+}
+
+/** Turetilmis dosyayi 1 dakikaliktan yeniden uretir. */
+async function turetilmisiTazele(dataDir, tf, symbol) {
+  const taban = await binstore.readSeries(mumYolu(dataDir, '1m', symbol))
+  if (!taban || taban.length === 0) return null
+  const s = series.resample(taban, tfSeconds(tf))
+  await binstore.writeSeries(mumYolu(dataDir, tf, symbol), s)
+  await turetilmisIzYaz(dataDir, tf, symbol, {
+    sourceCount: taban.length,
+    sourceLastTime: taban.time[taban.length - 1],
+  })
+  return s
 }
 
 /**
@@ -954,7 +1026,21 @@ async function loadSeries(opts) {
   const to = Number.isFinite(o.to) ? Math.floor(o.to) : undefined
 
   const dogrudan = await binstore.readSeries(mumYolu(o.dataDir, tf, o.symbol))
-  if (dogrudan && dogrudan.length > 0) return zamanaGoreDilimle(dogrudan, from, to)
+  if (dogrudan && dogrudan.length > 0) {
+    // TURETILMIS DOSYA 1 DAKIKALIKLA UYUSUYOR MU.
+    //
+    // Onceden dosya varsa 1 dakikaliga hic bakilmiyordu ve dosyalar sessizce
+    // ayrisiyordu (olculdu: 5m 323 bar geride, 15m'de 181 fazla / 95 eksik
+    // bar). Iz uyusmuyorsa dosya 1 dakikaliktan TAZELENIR.
+    if (tfSec !== 60) {
+      const tazeMi = await turetilmisGuncelMi(o.dataDir, tf, o.symbol)
+      if (tazeMi === false) {
+        const yenilenen = await turetilmisiTazele(o.dataDir, tf, o.symbol)
+        if (yenilenen) return zamanaGoreDilimle(yenilenen, from, to)
+      }
+    }
+    return zamanaGoreDilimle(dogrudan, from, to)
+  }
 
   if (tfSec === 60) return series.emptySeries()
 
@@ -985,6 +1071,10 @@ module.exports = {
   applyBasis: applyBasis,
   loadSeries: loadSeries,
   rebuildDerived: rebuildDerived,
+  // Turetilmis dosyanin kaynak izi (V6).
+  turetilmisGuncelMi: turetilmisGuncelMi,
+  turetilmisiTazele: turetilmisiTazele,
+  turetilmisIzYolu: turetilmisIzYolu,
   MIN_ORTAK_BAR: MIN_ORTAK_BAR,
   vekilAraligiKaydet: vekilAraligiKaydet,
   vekilAraliklariOku: vekilAraliklariOku,

@@ -229,3 +229,84 @@ test('varsayilan saat diliminde Londra acilisi her yil ayni yerel saate duser', 
   const istanbulKis = localHourArray(Float64Array.from([Date.UTC(2024, 0, 15, 8) / 1000]), 'Europe/Istanbul')[0]
   assert.equal(istanbulKis, 11, 'Istanbul 2024 kisinda 11 verir (bu yuzden varsayilan degil)')
 })
+
+// ---------------------------------------------------------------------------
+// V6 - KOVA CAPASI: 4 saatlik ve gunluk kovalar seans acilisindan baslar
+// ---------------------------------------------------------------------------
+// Epoch katlarina hizali kovalar spot altinin gunuyle ortusmuyor. Olculdu
+// (gercek 1 dakikalik depo, 6,1 milyon bar): 28.006 adet 4 saatlik kovanin
+// 1.611'i iki saatten az veri iceriyor; seans capasiyla bu sayi 150'ye
+// iniyor ve gunluk kova sayisi 5.445'ten 4.534'e duserek Pazar aksami
+// acilisi Pazartesi barina katiliyor.
+
+test('seans capasi: kovalar yerel 18:00 sinirindan sayilir', () => {
+  const { createSessionAnchor } = require('../src/core/session')
+  const capa = createSessionAnchor()
+
+  // 2026-01-15 Persembe, New York kis saati (UTC-5).
+  // Yerel 18:00 = 23:00 UTC. O andan itibaren gunun ilk 4 saatlik kovasi.
+  const acilis = Date.UTC(2026, 0, 15, 23) / 1000
+  assert.equal(capa(acilis, 4 * SAAT), acilis, 'acilis ani kendi kovasinin basidir')
+  assert.equal(capa(acilis + 3599, 4 * SAAT), acilis, 'ilk saat ayni kovada')
+  assert.equal(capa(acilis + 4 * SAAT, 4 * SAAT), acilis + 4 * SAAT, 'dort saat sonra yeni kova')
+  // Acilistan bir saniye once ONCEKI seans gunune aittir.
+  assert.ok(capa(acilis - 1, 4 * SAAT) < acilis)
+
+  // Gunluk kova: acilistan sonraki 24 saat tek kovadir.
+  assert.equal(capa(acilis, 86400), acilis)
+  assert.equal(capa(acilis + 23 * SAAT, 86400), acilis)
+  assert.equal(capa(acilis + 25 * SAAT, 86400), acilis + 86400)
+})
+
+test('seans capasi: yaz saatinde acilis bir saat kayar', () => {
+  const { createSessionAnchor } = require('../src/core/session')
+  const capa = createSessionAnchor()
+
+  // 2026-07-15 Carsamba, New York yaz saati (UTC-4): yerel 18:00 = 22:00 UTC.
+  const yazAcilis = Date.UTC(2026, 6, 15, 22) / 1000
+  assert.equal(capa(yazAcilis, 4 * SAAT), yazAcilis)
+  assert.ok(capa(yazAcilis - 1, 4 * SAAT) < yazAcilis)
+
+  // Kis ve yaz acilislarinin UTC karsiligi FARKLI olmali (epoch hizasi
+  // olsaydi ikisi de ayni saatte baslardi).
+  const kisAcilis = Date.UTC(2026, 0, 15, 23) / 1000
+  const kisSod = kisAcilis % 86400
+  const yazSod = yazAcilis % 86400
+  assert.notEqual(kisSod, yazSod, 'UTC karsiligi yaz saatiyle kaymali')
+})
+
+test('seans capasi 4 saatlik kovalarda yarim kova sayisini dusurur', () => {
+  const series = require('../src/core/series')
+  const { createSessionAnchor } = require('../src/core/session')
+
+  // Iki haftalik sentetik 1 dakikalik seri (piyasa saatleri suzulmemis).
+  const bas = Date.UTC(2026, 0, 5, 0) / 1000
+  const n = 14 * 24 * 60
+  const s = series.createSeries(n)
+  for (let i = 0; i < n; i++) {
+    s.time[i] = bas + i * 60
+    s.open[i] = 2000
+    s.high[i] = 2001
+    s.low[i] = 1999
+    s.close[i] = 2000
+    s.volume[i] = 1
+  }
+
+  const epoch = series.resample(s, 4 * SAAT)
+  const seans = series.resample(s, 4 * SAAT, { capa: 'seans' })
+  // Kesintisiz seride iki yontem de tam kovalar uretir; capali surumde
+  // kovalarin BASLANGICI epoch katina denk GELMEZ.
+  assert.ok(seans.length > 0)
+  const epochHizali = epoch.time[0] % (4 * SAAT) === 0
+  const seansHizali = seans.time[0] % (4 * SAAT) === 0
+  assert.ok(epochHizali, 'varsayilan kovalar epoch katinda baslar')
+  assert.ok(!seansHizali, 'seans capali kovalar epoch katinda BASLAMAZ')
+
+  // Capa yalnizca 4 saat ve ustunde uygulanir: 15 dakikalik ayni kalir.
+  const onbes = series.resample(s, 900, { capa: 'seans' })
+  assert.equal(onbes.time[0] % 900, 0, '15 dakikalik kovalar epoch hizasinda kalir')
+
+  // Gercek capa kullanildigi dogrulanir.
+  const capa = createSessionAnchor()
+  assert.equal(seans.time[0], capa(s.time[0], 4 * SAAT))
+})
