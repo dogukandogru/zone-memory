@@ -184,6 +184,8 @@ const SINIRLAR = {
   'signalCfg.minWinRate': [0, 1],
   'signalCfg.minRr': [0, 10],
   'signalCfg.minExpectancy': [-1, 5],
+  'signalCfg.priorStrength': [0, 200],
+  'signalCfg.minLift': [0, 0.5],
   'signalCfg.tp1Pct': [1, 99],
   'signalCfg.tp2Pct': [1, 99],
   'signalCfg.slPct': [1, 99],

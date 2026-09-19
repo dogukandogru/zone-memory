@@ -61,6 +61,15 @@ const DEFAULT_BACKTEST_CFG = {
   // zaman dilimlerinde testi anlamsiz kiliyordu: 4h'de 518 olayin 500'u
   // isinmaya gidiyor ve geriye 18 olay kaliyordu.
   warmupPerBucket: 100,
+  // DEGERLENDIRME PENCERESI (saniye, olay zamani). null ise tum donem.
+  //
+  // Pencere yalnizca OLCUMU daraltir: disarida kalan olaylar yine komsu
+  // havuzuna girer ve isinma sayaclarini isletir. Parametre aramasi (A1)
+  // esikleri gecmis bir dilimde secip baska bir dilimde dogrulamak icin
+  // bunu kullanir; ayni kosuyu iki kez kesip elle bolmek taban oranini ve
+  // istatistikleri yanlis hesaplardi.
+  evalFromTime: null,
+  evalToTime: null,
 }
 
 /**
@@ -208,6 +217,14 @@ function yuruyenIleriTest(memory, prototypes, cfg, onProgress, sinyalUret) {
     warmupPerBucket = DEFAULT_BACKTEST_CFG.warmupPerBucket
   }
 
+  // Degerlendirme penceresi: disi yalnizca hafiza olarak kullanilir.
+  // DIKKAT: Number(null) sifirdir, bu yuzden once acikca null/undefined
+  // elenir; yoksa "sinir yok" demek isteyen null butun olaylari elerdi.
+  const sinir = (x) => (x === null || x === undefined || x === '' || !Number.isFinite(Number(x))
+    ? null : Number(x))
+  const pencereBas = sinir(conf.evalFromTime)
+  const pencereSon = sinir(conf.evalToTime)
+
   const rawEvents = memory && Array.isArray(memory.events) ? memory.events : []
   if (rawEvents.length === 0) return emptyResult(0, 0, warmup, embargoSec)
 
@@ -345,6 +362,9 @@ function yuruyenIleriTest(memory, prototypes, cfg, onProgress, sinyalUret) {
       continue
     }
     kovaSayaci.set(kova, (kovaSayaci.get(kova) || 0) + 1)
+    // Pencere disi: olay havuza girdi, isinma sayildi, ama olculmez.
+    if (pencereBas !== null && ev.time < pencereBas) continue
+    if (pencereSon !== null && ev.time > pencereSon) continue
     if (evalFrom === null) evalFrom = ev.time
     evalTo = ev.time
 
@@ -882,6 +902,10 @@ function runBacktestFromCache(memory, cache, protos, cfg, onProgress) {
       if (olay === undefined) continue
       adaylar.push({ event: olay, similarity: sim[off + j] })
     }
+    // Havuzun taban orani onbellekten gelir: kalibrasyon (kuculutulmus oran)
+    // bunu kullanir, tasinmazsa onbellekli yol referans yoldan sapar.
+    const baseN = cache.baseN && cache.baseN.length > i ? cache.baseN[i] : 0
+    const baseWins = cache.baseWins && cache.baseWins.length > i ? cache.baseWins[i] : 0
     return decideFromCandidates(ev, adaylar, undefined, signalCfg, {
       features: ev.features || null,
       prototypes: protolar,
@@ -889,6 +913,8 @@ function runBacktestFromCache(memory, cache, protos, cfg, onProgress) {
       // ayni kalsin diye o andaki aday havuzunun boyu gecilir.
       scanned: poolMemory.events.length,
       beforeTime: beforeTime,
+      baseRate: baseN > 0 ? baseWins / baseN : null,
+      baseN: baseN,
     })
   }
 

@@ -191,6 +191,31 @@ test('isinma ve degerlendirilen donem ozete yazilir', () => {
   assert.equal(kova.summary.warning, 'yetersiz hafıza')
 })
 
+test('degerlendirme penceresi olcumu daraltir, hafizayi daraltmaz', () => {
+  const mem = hafizaKur(40, 30)
+  const tam = runBacktest(mem, [], CFG)
+  const kesme = mem.events[20].time
+
+  // ILK YARI: pencere sonu verilince yalnizca o ana kadarki olaylar olculur.
+  const ilk = runBacktest(mem, [], Object.assign({}, CFG, { evalToTime: kesme }))
+  assert.equal(ilk.summary.evalFrom, mem.events[5].time)
+  assert.equal(ilk.summary.evalTo, kesme)
+  assert.ok(ilk.summary.total < tam.summary.total)
+
+  // IKINCI YARI: pencere basi verilince oncesi yalnizca hafiza olarak kalir.
+  const son = runBacktest(mem, [], Object.assign({}, CFG, { evalFromTime: kesme + 1 }))
+  assert.ok(son.summary.evalFrom > kesme)
+  assert.equal(son.summary.evalTo, mem.events[39].time)
+  // Iki dilim, isinma disindaki olaylarin tamamini boler.
+  assert.equal(ilk.summary.total + son.summary.total, tam.summary.total)
+
+  // null "sinir yok" demektir; Number(null) sifir oldugu icin bu bir donem
+  // butun olaylari eliyordu.
+  const acik = runBacktest(mem, [], Object.assign({}, CFG, { evalFromTime: null, evalToTime: null }))
+  assert.equal(acik.summary.total, tam.summary.total)
+  assert.equal(acik.summary.fired, tam.summary.fired)
+})
+
 test('equity birikimli toplamdir ve islem sayisiyla ayni uzunluktadir', () => {
   const mem = hafizaKur(40, 30)
   const r = runBacktest(mem, [], CFG)

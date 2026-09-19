@@ -346,6 +346,13 @@ function knn (query, memory, opts) {
   }
   const qNorm = qKare > EPS ? Math.sqrt(qKare) : 0
 
+  // Cagiran `baseOut` verirse havuz sayaclari doldurulur (bkz. asagisi).
+  const tabanCikti = o.baseOut && typeof o.baseOut === 'object' ? o.baseOut : null
+  if (tabanCikti) {
+    tabanCikti.n = 0
+    tabanCikti.wins = 0
+  }
+
   const n = events.length
   const M = Math.min(n, k * ADAY_CARPANI)
   if (M <= 0) return []
@@ -406,6 +413,16 @@ function knn (query, memory, opts) {
       else if (r < -1) r = -1
       else if (r > 1) r = 1
     }
+    // HAVUZUN TABAN ORANI
+    // Bu olay tum suzgeclerden gecti, yani kNN'in secim yaptigi HAVUZA
+    // girdi. Havuzun kendi basari orani, secimin katma degerini olcmek icin
+    // dogru karsilastirma noktasidir: "gecmiste bu yapi %X tuttu" cumlesi
+    // ancak havuz orani %Y iken anlam tasir.
+    if (tabanCikti) {
+      tabanCikti.n++
+      if (ev.success === true || ev.outcome === 'respect') tabanCikti.wins++
+    }
+
     const shapeSim = (r + 1) / 2
     const ctxSim = query.ctx && f.ctx ? (cosine(query.ctx, f.ctx) + 1) / 2 : 0
     // On eleme puani: skorun DTW disindaki kismi.

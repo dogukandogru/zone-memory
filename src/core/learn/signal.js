@@ -40,6 +40,7 @@
 const { knn, DEFAULT_WEIGHTS } = require('./similarity')
 const { matchPrototype } = require('./cluster')
 const { zoneLevels, DEFAULT_OUTCOME_CFG } = require('./outcome')
+const { wilson } = require('./stats')
 
 // DIKKAT: Asagidaki varsayilanlar ESKI indikatorle (MASTER 1 TOUCH) ve ESKI
 // giris modeliyle (bar ici kenardan dolum) secildi. Yontem gecerlidir ve
@@ -80,6 +81,14 @@ const DEFAULT_SIGNAL_CFG = {
   // odul zaten bolge geometrisine bagli oldugu icin ek bir oran filtresi
   // yalnizca ornek sayisini azaltiyor. Isteyen Ayarlar'dan acabilir.
   minRr: 0.0,
+  // KALIBRASYON ONSELI: gosterilen oran havuz tabanina dogru bu kadar sanal
+  // gozlem agirliginda cekilir. 20, "20 kayitlik bir on bilgi" demektir;
+  // 5 eslesmelik bir oranin neredeyse tamamen tabana yakin kalmasini saglar.
+  priorStrength: 20,
+  // KATMA DEGER KAPISI: kuculutulmus oranin havuz tabanindan farki bu esigin
+  // altindaysa sinyal uretilmez. Varsayilan 0 (kapali): esik ancak
+  // dogrulama doneminde olculup secilirse acilmalidir (bkz. A1).
+  minLift: 0,
   // Asgari beklenen deger, risk birimi cinsinden:
   //   bd = winRate * rr - (1 - winRate)
   // Bu, isabet orani ile risk/odulu tek bir olcute baglar. 0 esigi baskabas,
@@ -232,7 +241,20 @@ function findCandidates (touch, features, memory, cfg, beforeTime) {
     time: time,
     queryTime: time,
   }
+  // Havuzun kendi basari orani: secimin katma degeri ancak buna gore olculur.
+  const taban = { n: 0, wins: 0 }
+  opts.baseOut = taban
   const raw = knn(features, memory, opts) || []
+  // Havuz bilgisi diziye SAYILAMAZ alan olarak takilir: cagiranlar diziyi
+  // kopyalayip karsilastiriyor, gorunur bir alan esitligi bozardi.
+  Object.defineProperty(candidates, 'baseRate', {
+    value: taban.n > 0 ? taban.wins / taban.n : null,
+    enumerable: false,
+    configurable: true,
+  })
+  Object.defineProperty(candidates, 'baseN', {
+    value: taban.n, enumerable: false, configurable: true,
+  })
   // Komsu dislama ve zaman filtresi burada bir kez daha uygulanir.
   for (let i = 0; i < raw.length; i++) {
     const r = raw[i]
@@ -364,7 +386,34 @@ function decideFromCandidates (ev, candidates, levels, cfg, ek) {
   const bestSimilarity = matchCount > 0
     ? num(matches[0].similarity, 0)
     : (adaylar.length > 0 ? num(adaylar[0].similarity, 0) : 0)
-  const winRate = matchCount > 0 ? wins / matchCount : 0
+  // KALIBRASYON
+  // Ham oran (wins / matchCount) kucuk orneklemde gurultudur: 5 eslesmede
+  // %60 demek 3 kayit demektir. Olculdu (gercek hafiza, 15m): sistem
+  // %70-80 dediginde gerceklesen %37,5; Brier skoru sabit taban tahmininden
+  // KOTU. Bu yuzden gosterilen oran, HAVUZUN taban oranina dogru
+  // kuculutulur (Beta onseli): az kayit varsa taban orana yakin kalir, cok
+  // kayit varsa ham orana yaklasir.
+  //   winRate = (wins + a * taban) / (matchCount + a)
+  // `a` (priorStrength) kac sanal gozlem kadar guvendigimizdir.
+  const winRateRaw = matchCount > 0 ? wins / matchCount : 0
+  // NOT: `adaylar` bir kopya (slice) oldugu icin ozel alanlar orada olmaz;
+  // havuz orani ORIJINAL aday listesinden okunur. `ek.baseRate` ile de
+  // verilebilir (onbellekli test yolu boyle gecer).
+  const havuzTabaniHam = candidates && Number.isFinite(candidates.baseRate)
+    ? candidates.baseRate
+    : (baglam && Number.isFinite(baglam.baseRate) ? baglam.baseRate : null)
+  const havuzTabani = havuzTabaniHam === null ? 0.5 : havuzTabaniHam
+  const onsel = Math.max(0, num(conf.priorStrength, DEFAULT_SIGNAL_CFG.priorStrength))
+  const winRate = matchCount > 0
+    ? (wins + onsel * havuzTabani) / (matchCount + onsel)
+    : 0
+  // Ham oranin %95 Wilson araligi: belirsizlik ekranda da gorunur.
+  const aralik = matchCount > 0 ? wilson(wins, matchCount) : null
+  const winRateLo = aralik ? aralik.lo : 0
+  const winRateHi = aralik ? aralik.hi : 0
+  // Katma deger: kuculutulmus oranin havuz tabanindan farki.
+  const lift = matchCount > 0 ? winRate - havuzTabani : 0
+
   const expectedMfeAtr = matchCount > 0 ? sumMfe / matchCount : 0
   const expectedMaeAtr = matchCount > 0 ? sumMae / matchCount : 0
 
@@ -497,17 +546,33 @@ function decideFromCandidates (ev, candidates, levels, cfg, ek) {
   // (1 - winRate)) zaman asimini TAM ZARAR sayiyordu, yani ufuk sonunda
   // sifira yakin kapanan islemler -1R gibi goruluyordu. Alan tasimayan eski
   // hafizada eski formule dusulur.
-  const pR = matchCount > 0 ? wins / matchCount : 0
-  const pB = matchCount > 0 ? breaks / matchCount : 0
+  // Oranlar KUCULUTULMUS orandan turetilir (bkz. kalibrasyon): ham oran
+  // kucuk orneklemde beklentinin isaretini bile degistirebiliyor.
+  const pR = matchCount > 0 ? winRate : 0
   const pT = matchCount > 0 ? timeouts / matchCount : 0
+  const pB = matchCount > 0 ? Math.max(0, 1 - pR - pT) : 0
   const mT = timeouts > 0 ? sumTimeoutR / timeouts : 0
-  const expectancy = matchCount > 0
+  // MALIYET: beklenen deger risk birimindedir, maliyet de oyle olmali.
+  // Maliyet fiyata oranli verilir, risk ise giris ile stop arasidir.
+  const maliyetOran = Math.max(0, num(conf.costPct, 0))
+  const maliyetSabit = Math.max(0, num(conf.costUsd, 0))
+  const riskFiyat = Math.abs(planEntry - sl)
+  const maliyetFiyat = maliyetOran > 0 ? Math.abs(planEntry) * maliyetOran : maliyetSabit
+  const kaymaR = Math.max(0, num(conf.slippageAtr, 0)) * atr
+  const costR = riskFiyat > 0 ? (maliyetFiyat + kaymaR) / riskFiyat : 0
+  const expectancyGross = matchCount > 0
     ? pR * rr - pB + pT * mT
     : winRate * rr - (1 - winRate)
+  const expectancy = expectancyGross - costR
   const rrOk = rr >= minRr
   const evOk = expectancy >= minExpectancy
+  // KATMA DEGER KAPISI: kuculutulmus oranin havuz tabanindan farki.
+  // Mutlak bir oran esigi turler arasinda anlamsizdir (olculdu: olusum
+  // tabani %39-50, dokunus tabani %23-28), fark ise karsilastirilabilir.
+  const minLift = num(conf.minLift, 0)
+  const liftOk = lift >= minLift
 
-  const fired = matchCount >= minMatches && winRate >= minWinRate && rrOk && evOk &&
+  const fired = matchCount >= minMatches && winRate >= minWinRate && liftOk && rrOk && evOk &&
     !formRiskBlocked
 
   // Gerekceler: sinyalin neden olustugu veya neden olusmadigi.
@@ -527,7 +592,10 @@ function decideFromCandidates (ev, candidates, levels, cfg, ek) {
         bestSimilarity.toFixed(2))
     } else {
       reasons.push(matchCount + ' benzer geçmiş kurulum bulundu (eşik ' + minMatches + ')')
-      reasons.push('Bu kurulumların %' + toPct(winRate) + ' sinde bölge tuttu')
+      reasons.push('Bu kurulumların %' + toPct(winRateRaw) + ' sinde bölge tuttu (ham oran), ' +
+        'havuz ortalaması %' + toPct(havuzTabani) + ', kalibre edilmiş oran %' + toPct(winRate))
+      reasons.push('Kalibre oranın %95 alt sınırı %' + toPct(winRateLo) +
+        ', tabana göre fark ' + (lift >= 0 ? '+' : '') + toPct(lift) + ' puan')
       reasons.push('Ortalama benzerlik ' + avgSimilarity.toFixed(2) + ', en yüksek ' + bestSimilarity.toFixed(2))
     }
     if (prototypeLabel) {
@@ -621,6 +689,17 @@ function decideFromCandidates (ev, candidates, levels, cfg, ek) {
     // Risk birimi cinsinden beklenen deger: winRate * rr - (1 - winRate).
     // Pozitifse kurulumun matematigi lehte.
     expectancy: expectancy,
+    // Kalibrasyon alanlari: ham oran, havuz tabani, kuculutulmus oranin
+    // guven araligi ve tabana gore fark. Arayuz bunlari birlikte gosterir;
+    // tek bir yuzde, belirsizligi gizliyordu.
+    winRateRaw: winRateRaw,
+    winRateLo: winRateLo,
+    winRateHi: winRateHi,
+    baseRate: havuzTabani,
+    baseN: candidates && Number.isFinite(candidates.baseN) ? candidates.baseN : null,
+    lift: lift,
+    expectancyGross: expectancyGross,
+    costR: costR,
     // Eslesmelerin sonuc dagilimi: tutma, kirilma, zaman asimi oranlari ve
     // zaman asimlarinin ortalama gerceklesen R'si.
     respectRate: pR,

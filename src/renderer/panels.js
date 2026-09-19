@@ -1033,6 +1033,35 @@ function yoldanSil(nesne, yol) {
   return nesne
 }
 
+/**
+ * Esik birlesimi hic sinyal uretemiyorsa uyarir.
+ *
+ * Kalibrasyon (onsel) gosterilen orani havuz tabanina dogru ceker: az
+ * eslesmede oran tabanin cok uzagina cikamaz. Bu yuzden "en az eslesme 5,
+ * onsel 20, en az tutma %60" gibi bir birlesim, kayitlarin TAMAMI tutmus
+ * olsa bile hicbir zaman saglanamaz. Uygulama bir donem bunu sessizce
+ * yapiyordu: kullanici sinyal beklerken ekran bos kaliyordu.
+ *
+ * @param {(yol:string)=>*} oku Yamayi da gozeten deger okuyucu
+ * @returns {string} Bos dize uyari yoksa
+ */
+function ulasilmazEsikUyarisi(oku) {
+  const sayi = (x, v) => (Number.isFinite(Number(x)) ? Number(x) : v)
+  const m = sayi(oku('signalCfg.minMatches'), 15)
+  const p = Math.max(0, sayi(oku('signalCfg.priorStrength'), 20))
+  const esik = sayi(oku('signalCfg.minWinRate'), 0.62)
+  if (!(m > 0) || p === 0) return ''
+  // Havuz tabani ancak testte bilinir; burada olculmus araligin ortasi
+  // (form %39-50, dokunus %23-28) temkinli bir varsayim olarak kullanilir.
+  const taban = 0.40
+  const enYuksek = (m + p * taban) / (m + p)
+  if (esik <= enYuksek) return ''
+  return 'Bu birleşim hiçbir sinyal üretemez: en az eşleşme ' + m + ' ve önsel ' + p +
+    ' ile, eşleşmelerin tamamı tutmuş olsa bile gösterilen oran en fazla %' +
+    Math.round(enYuksek * 100) + ' olur (havuz tabanı %40 varsayımıyla), eşiğiniz ise %' +
+    Math.round(esik * 100) + '. Eşleşme sayısını artırın, önseli düşürün ya da eşiği indirin.'
+}
+
 /** Ayar gruplari tanimi (sira arayuzdeki siradir). */
 function ayarGruplari(saglayiciSecenekleri) {
   return [
@@ -1178,7 +1207,15 @@ function ayarGruplari(saglayiciSecenekleri) {
         { yol: 'signalCfg.minExpectancy', ad: 'En az beklenen değer (R)', tip: 'sayi', adim: 0.05, min: -1, max: 5,
           not: 'Beklenen değer = tutma oranı x R/R - kırılma oranı + zaman aşımı katkısı. ' +
             'Yüksek isabet tek başına yetmez, matematiğin de olumlu olması gerekir.' },
+        { yol: 'signalCfg.priorStrength', ad: 'Kalibrasyon önseli (sanal gözlem)', tip: 'sayi', adim: 1, min: 0, max: 200,
+          not: 'Gösterilen oran, havuzun taban oranına doğru bu ağırlıkta çekilir. ' +
+            '20 değeri "20 kayıtlık bir ön bilgi" demektir ve 5 eşleşmelik bir oranın ' +
+            'neredeyse tamamen tabana yakın kalmasını sağlar. 0 kapatır, ham oran gösterilir.' },
+        { yol: 'signalCfg.minLift', ad: 'En az katma değer', tip: 'sayi', adim: 0.01, min: 0, max: 0.5,
+          not: 'Gösterilen oran, aynı türün taban oranından en az bu kadar yüksek ' +
+            'olmalı. 0 kapatır. Ölçülmeden açılmamalı: bkz. scripts/search-params.mjs.' },
       ],
+      capraz: ulasilmazEsikUyarisi,
     },
     {
       // Olcumun en belirleyici girdisi: maliyet. 1 dakikalikta brut edimin
@@ -1295,14 +1332,35 @@ export function renderSettings(el, settings, opts) {
   /** Bos birakilan alani yamadan cikarir ("degisiklik yok" anlamina gelir). */
   function yamadanCikar(yol) {
     yoldanSil(yama, yol)
+    caprazlariYenile()
     if (typeof o.onChange === 'function') {
       o.onChange({}, { path: yol, value: undefined, invalidatesMemory: false, patch: yama })
+    }
+  }
+
+  // Birden fazla alani birlikte degerlendiren kontroller (ornek: esik
+  // birlesimi hic sinyal uretemiyor mu). Her degisiklikte yeniden cizilir.
+  const caprazlar = []
+
+  /** Yamayi gozeterek yururlukteki degeri okur. */
+  function efektif(yol) {
+    const yamada = yoldanOku(yama, yol)
+    return yamada === undefined ? yoldanOku(s, yol) : yamada
+  }
+
+  /** Capraz kontrollerin metnini tazeler. */
+  function caprazlariYenile() {
+    for (let i = 0; i < caprazlar.length; i++) {
+      const metin = caprazlar[i].fn(efektif) || ''
+      caprazlar[i].el.textContent = metin
+      caprazlar[i].el.style.display = metin ? '' : 'none'
     }
   }
 
   /** Bir alan degistiginde yamayi gunceller ve onChange cagirir. */
   function degisti(yol, deger, bozarMi) {
     yolaYaz(yama, yol, deger)
+    caprazlariYenile()
     if (bozarMi) {
       bozuldu = true
       bozulmaUyarisi.style.display = ''
@@ -1326,6 +1384,14 @@ export function renderSettings(el, settings, opts) {
       const kanca = { degisti, gecerlilik, yamadanCikar }
       for (let i = 0; i < alanlar.length; i++) izgara.appendChild(alanDugumu(alanlar[i], s, grup.bozar, kanca))
       el.appendChild(izgara)
+    }
+
+    if (typeof grup.capraz === 'function') {
+      const kutu = uyariKutusu('')
+      kutu.style.color = 'var(--warn, ' + RENK.warn + ')'
+      kutu.style.display = 'none'
+      el.appendChild(kutu)
+      caprazlar.push({ el: kutu, fn: grup.capraz })
     }
 
     const onaylar = grup.onaylar || []
@@ -1352,6 +1418,7 @@ export function renderSettings(el, settings, opts) {
   kaydet.type = 'button'
   kaydetDugmesi = kaydet
   gecerliligiUygula()
+  caprazlariYenile()
   kaydet.addEventListener('click', () => {
     if (gecersizler.size > 0) return
     if (typeof o.onSave === 'function') o.onSave(yama)
@@ -1638,6 +1705,10 @@ export function renderBacktest(el, result, opts) {
     el.appendChild(kv('En az tutma oranı', formatPercent(sc.minWinRate, 0)))
     el.appendChild(kv('En az R/R', formatNumber(sc.minRr, 2)))
     el.appendChild(kv('En az beklenti', formatNumber(sc.minExpectancy, 2)))
+    // Kalibrasyon onseli gosterilen orani dogrudan degistirir, bu yuzden
+    // "hangi ayarla olculdu" listesinde yer almasi sart.
+    el.appendChild(kv('Kalibrasyon önseli', tam(sc.priorStrength) + ' sanal gözlem'))
+    if (Number(sc.minLift) > 0) el.appendChild(kv('En az katma değer', formatPercent(sc.minLift, 0)))
     el.appendChild(kv('Hedef (plan)', formatNumber(oc.targetAtr, 2) + ' ATR' +
       (kullanilan.sources && kullanilan.sources.plan ? ' (' + kullanilan.sources.plan + ')' : '')))
     el.appendChild(kv('Ufuk', tam(oc.horizonBars) + ' bar'))

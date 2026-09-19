@@ -56,7 +56,11 @@ const { DEFAULT_SIGNAL_CFG, findCandidates, yonBelirle, turBelirle } = require('
 const { DEFAULT_WEIGHTS } = require('./similarity')
 
 /** Onbellek bicim surumu. Bicim veya aday havuzu kurali degisirse artirilir. */
-const CANDCACHE_VERSION = 1
+// Surum 2: her olay icin HAVUZ SAYACLARI da saklanir (baseN, baseWins).
+// Sinyalin gosterdigi oran havuz tabanina dogru kuculutuldugu icin
+// (kalibrasyon), onbellekli yol bu sayilari tasimazsa referans yoldan
+// sapardi.
+const CANDCACHE_VERSION = 2
 
 /** Sihirli sayi: 'ZMCC' (Zone Memory Candidate Cache). */
 const MAGIC = 0x5a4d4343
@@ -202,6 +206,10 @@ function buildCandidates (memory, cfg, onProgress) {
   const n = events.length
   const idx = new Int32Array(n * k).fill(-1)
   const sim = new Float32Array(n * k)
+  // Havuz sayaclari: kNN'in secim yaptigi aday havuzunun buyuklugu ve o
+  // havuzdaki basari sayisi. Kalibrasyon bunlari kullanir.
+  const baseN = new Int32Array(n)
+  const baseWins = new Int32Array(n)
   const cache = {
     version: CANDCACHE_VERSION,
     key: cacheKey(memory, conf),
@@ -209,6 +217,8 @@ function buildCandidates (memory, cfg, onProgress) {
     k: k,
     idx: idx,
     sim: sim,
+    baseN: baseN,
+    baseWins: baseWins,
   }
   if (n === 0) return cache
 
@@ -259,6 +269,12 @@ function buildCandidates (memory, cfg, onProgress) {
       const adaylar = kova
         ? findCandidates(ev, ev.features, kova.memory, signalCfg, beforeTime)
         : []
+      // Havuzun taban orani (findCandidates sayilamaz alan olarak takar).
+      baseN[i] = Number.isFinite(adaylar.baseN) ? adaylar.baseN : 0
+      baseWins[i] = Number.isFinite(adaylar.baseRate) && adaylar.baseRate !== null
+        ? Math.round(adaylar.baseRate * baseN[i])
+        : 0
+
       const off = i * k
       const m = adaylar.length < k ? adaylar.length : k
       let yazilan = 0
@@ -353,7 +369,7 @@ function serialize (cache) {
   const anahtar = Buffer.from(String(cache.key === undefined || cache.key === null ? '' : cache.key), 'utf8')
   const dolgu = (4 - ((HEADER_FIXED + anahtar.length) % 4)) % 4
   const basBoyut = HEADER_FIXED + anahtar.length + dolgu
-  const buf = Buffer.alloc(basBoyut + hucre * 8)
+  const buf = Buffer.alloc(basBoyut + hucre * 8 + n * 8)
 
   buf.writeUInt32LE(MAGIC, 0)
   buf.writeUInt16LE(Math.round(sayi(cache.version, CANDCACHE_VERSION)), 4)
@@ -367,6 +383,13 @@ function serialize (cache) {
   if (hucre > 0) {
     baytGorunumu(cache.idx).copy(buf, basBoyut)
     baytGorunumu(cache.sim).copy(buf, basBoyut + hucre * 4)
+  }
+  // Havuz sayaclari (surum 2): olay basina iki Int32.
+  if (n > 0) {
+    const bn = cache.baseN instanceof Int32Array ? cache.baseN : new Int32Array(n)
+    const bw = cache.baseWins instanceof Int32Array ? cache.baseWins : new Int32Array(n)
+    baytGorunumu(bn).copy(buf, basBoyut + hucre * 8)
+    baytGorunumu(bw).copy(buf, basBoyut + hucre * 8 + n * 4)
   }
   return buf
 }
@@ -396,7 +419,10 @@ function deserialize (buf) {
   const dolgu = (4 - ((HEADER_FIXED + anahtarLen) % 4)) % 4
   const basBoyut = HEADER_FIXED + anahtarLen + dolgu
   const hucre = n * k
-  const beklenen = basBoyut + hucre * 8
+  // Bolum baslangiclari: once hucre dizileri (idx, sim), sonra havuz sayaclari.
+  const simBas = basBoyut + hucre * 4
+  const havuzBas = basBoyut + hucre * 8
+  const beklenen = havuzBas + n * 8
   if (b.length < beklenen) {
     throw new Error('candcache: dosya beklenenden kisa (' + b.length + ' < ' + beklenen + ')')
   }
@@ -408,16 +434,32 @@ function deserialize (buf) {
     // Hizalama sorunu olmasin diye taze dizilere KOPYALANIR; Buffer havuzdan
     // gelmisse byteOffset 4'un kati olmayabilir.
     const idxBayt = Buffer.from(idx.buffer, idx.byteOffset, hucre * 4)
-    idxBayt.set(b.subarray(basBoyut, basBoyut + hucre * 4))
+    idxBayt.set(b.subarray(basBoyut, simBas))
     const simBayt = Buffer.from(sim.buffer, sim.byteOffset, hucre * 4)
-    simBayt.set(b.subarray(basBoyut + hucre * 4, beklenen))
+    simBayt.set(b.subarray(simBas, havuzBas))
     if (!LITTLE_ENDIAN) {
       idxBayt.swap32()
       simBayt.swap32()
     }
   }
 
-  return { version: version, key: key, n: n, k: k, idx: idx, sim: sim }
+  const baseN = new Int32Array(n)
+  const baseWins = new Int32Array(n)
+  if (n > 0) {
+    const bnBayt = Buffer.from(baseN.buffer, baseN.byteOffset, n * 4)
+    bnBayt.set(b.subarray(havuzBas, havuzBas + n * 4))
+    const bwBayt = Buffer.from(baseWins.buffer, baseWins.byteOffset, n * 4)
+    bwBayt.set(b.subarray(havuzBas + n * 4, beklenen))
+    if (!LITTLE_ENDIAN) {
+      bnBayt.swap32()
+      bwBayt.swap32()
+    }
+  }
+
+  return {
+    version: version, key: key, n: n, k: k, idx: idx, sim: sim,
+    baseN: baseN, baseWins: baseWins,
+  }
 }
 
 module.exports = {
