@@ -2060,6 +2060,15 @@ function olaylariBagla() {
     kaynakDurumuYaz()
   })
 
+  // Bildirime tiklandi: ilgili sinyali sec ve Sinyaller sekmesini ac.
+  window.api.on('live:focus-signal', (veri) => {
+    if (!veri || veri.id === undefined || veri.id === null) return
+    const hedef = durum.signals.find((x) => x && String(x.id) === String(veri.id))
+    if (!hedef) return
+    panelSec('signals')
+    sinyalSec(hedef)
+  })
+
   window.api.on('live:gap', async (veri) => {
     if (!veri) return
     if (veri.tf && veri.tf !== durum.tf) return

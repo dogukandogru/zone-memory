@@ -20,6 +20,7 @@ const settings = require('./settings')
 const live = require('./live')
 const paths = require('./paths')
 const logfile = require('./logfile')
+const notify = require('./notify')
 
 /** @type {import('electron').BrowserWindow|null} */
 let mainWindow = null
@@ -205,6 +206,8 @@ function register(win) {
   registered = true
 
   live.setEmitter(send)
+  live.setNotifier((veri) => notify.signalGeldi(veri))
+  notify.init({ emit: send })
   engine.onLog((message) => {
     send('log', { source: 'engine', message: message, time: Math.floor(Date.now() / 1000) })
   })

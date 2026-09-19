@@ -97,6 +97,12 @@ function setEmitter(fn) {
   emitter = typeof fn === 'function' ? fn : null
 }
 
+/** Masaustu bildirimi kancasi (ipc.js kurar). */
+let notifier = null
+function setNotifier(fn) {
+  notifier = typeof fn === 'function' ? fn : null
+}
+
 function emitEvent(type, data) {
   if (!emitter) return
   try {
@@ -443,7 +449,17 @@ async function tick() {
       if (zaman !== null && zaman > state.sinceTime) state.sinceTime = zaman
       if (!olay.signal) continue
       state.signals += 1
-      emitEvent('live:signal', { tf: state.tf, signal: olay.signal, touch: olay.touch || null })
+      emitEvent('live:signal', { tf: tf, signal: olay.signal, touch: olay.touch || null })
+      // MASAUSTU BILDIRIMI: sinyal seyrek gelir, kacan her sinyal pahali.
+      // Kural katmani notify.js'te (yalnizca tetiklenen, gecikmemis ve
+      // kanitli turler).
+      if (notifier) {
+        try {
+          notifier({ tf: tf, signal: olay.signal })
+        } catch (err) {
+          // Bildirim gosterilemezse akis durmamali.
+        }
+      }
       const dir = olay.signal.direction === 'BUY' ? 'ALIS' : 'SATIS'
       if (olay.signal.fired) {
         const tur = olay.signal.kind === 'form' ? 'kutu olusumu' : 'bolge dokunusu'
@@ -478,6 +494,7 @@ async function tick() {
 
 module.exports = {
   setEmitter,
+  setNotifier,
   start,
   stop,
   status,

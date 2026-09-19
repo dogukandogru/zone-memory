@@ -12,6 +12,7 @@ const ipc = require('./ipc')
 const engine = require('./engine')
 const live = require('./live')
 const logfile = require('./logfile')
+const notify = require('./notify')
 
 const IS_MAC = process.platform === 'darwin'
 const IS_DEV = process.argv.includes('--dev')
@@ -64,6 +65,11 @@ function createWindow() {
   mainWindow.on('closed', () => {
     mainWindow = null
     ipc.setWindow(null)
+  })
+
+  // Pencere odaklaninca okunmamis bildirim rozeti sifirlanir.
+  mainWindow.on('focus', () => {
+    notify.okundu()
   })
 
   // Arayuz sureci cokerse ekran bosalir ve hicbir iz kalmazdi.
@@ -224,6 +230,20 @@ function buildMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
 }
 
+/**
+ * Pencereyi one getirir; macOS'ta pencere kapatilmissa yeniden olusturur.
+ * Bildirime tiklandiginda cagrilir.
+ */
+function pencereyiGoster() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow()
+    return
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.show()
+  mainWindow.focus()
+}
+
 // SURECI DUSUREN HATALAR DOSYAYA YAZILIR.
 //
 // Bunlar olustugunda uygulama ya kapaniyor ya da pencere bosaliyor; ekrandaki
@@ -262,6 +282,9 @@ if (!gotLock) {
     paths.ensureDirs()
     // Eski gunlukleri temizle ve klasoru kur.
     logfile.init()
+    // Bildirime tiklaninca pencere one gelsin (macOS'ta pencere kapaliysa
+    // yeniden olusturulur).
+    notify.init({ showWindow: pencereyiGoster })
     buildMenu()
     ipc.register()
     engine.start()

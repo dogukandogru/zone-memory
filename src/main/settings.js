@@ -56,6 +56,10 @@ const DEFAULTS = {
     // Tur ve yon basina asgari aday sayisi (isinma olcutu).
     warmupPerBucket: 100,
   },
+  // MASAUSTU BILDIRIMI (C5).
+  // `onlyProven` varsayilan acik: kanitlanmamis bir sinyal icin bildirim
+  // gondermek, olculmemis bir seyi acil gibi gostermek olurdu.
+  notify: { desktop: true, sound: true, onlyFired: true, onlyProven: true },
   livePollSeconds: 20,
   // Uygulama acilir acilmaz canli takibi kendiliginden baslatir. Kapatmak
   // istersen Ayarlar ekranindan kapatabilirsin; basarisiz olursa uygulama

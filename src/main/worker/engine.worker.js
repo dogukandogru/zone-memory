@@ -1531,6 +1531,7 @@ async function turetilmisIzleriGecersizKil () {
  */
 async function canliAnalizSerisi (tf, yazimTf, kuyrukBar) {
   if (yazimTf === tf) return await getSeries(tf, false)
+  const seriesMod = core('series')
   const taban = await getSeries(yazimTf, false)
   if (!taban || taban.length === 0) return seriesMod.emptySeries()
   const tfSn = core('tf').tfSeconds(tf)
@@ -1645,14 +1646,26 @@ handlers['engine:live-tick'] = async function (payload) {
   // baska hacimler uretir ve iki yol sessizce ayrisirdi. Duzeltme her turda
   // bastan hesaplanir (olculdu: 8 haftalik 1 dakikalik pencerede yaklasik
   // 10 ms, 20 saniyelik dongu icin onemsiz).
+  // YAZIM ZAMAN DILIMI GRAFIKTEN FARKLI OLABILIR (V6).
+  //
+  // Canli akis 1 dakikalik depo varken 1 dakikalik bar ceker ve YALNIZCA
+  // 1m'ye yazar; grafigin zaman dilimi ondan turetilir. Onceden her zaman
+  // dilimi kendi dosyasina yaziyordu ve dosyalar sessizce ayrisiyordu
+  // (olculdu: 5m 323 bar geride, 15m'de 181 fazla / 95 eksik bar).
+  const yazimTf = typeof payload.writeTf === 'string' && payload.writeTf ? payload.writeTf : tf
+  const yazimSn = yazimTf === tf ? tfSec : core('tf').tfSeconds(yazimTf)
+
   let basisYas = null
   if (payload.isProxy) {
     const loader = core('data/loader')
     try {
-      const stored = await getSeries(tf, false)
+      // KARSILASTIRMA YAZIM ZAMAN DILIMINDE YAPILIR. Canli 1 dakikalik bar
+      // cekerken grafik serisiyle (15m) karsilastirmak ortak zaman damgasi
+      // birakmaz ve duzeltme her tikte basarisiz olur.
+      const stored = await getSeries(yazimTf, false)
       const duzeltme = loader.normalizeProxy(stored, inc, {
-        tfSec: tfSec,
-        proxyRanges: await loader.vekilAraliklariOku(paths.dataDir(), tf),
+        tfSec: yazimSn,
+        proxyRanges: await loader.vekilAraliklariOku(paths.dataDir(), yazimTf),
       })
       if (duzeltme.ok) {
         basis = duzeltme.basis
@@ -1698,14 +1711,6 @@ handlers['engine:live-tick'] = async function (payload) {
   // testle mesgulken (1m testi 53-60 sn) cekim aninda acik olan bar aksi
   // halde kapanmis sayilip yarim OHLCV ile kalici yaziliyordu.
   const fetchedAt = num(payload.fetchedAt, Math.floor(Date.now() / 1000))
-  // YAZIM ZAMAN DILIMI GRAFIKTEN FARKLI OLABILIR (V6).
-  //
-  // Canli akis 1 dakikalik depo varken 1 dakikalik bar ceker ve YALNIZCA
-  // 1m'ye yazar; grafigin zaman dilimi ondan turetilir. Onceden her zaman
-  // dilimi kendi dosyasina yaziyordu ve dosyalar sessizce ayrisiyordu
-  // (olculdu: 5m 323 bar geride, 15m'de 181 fazla / 95 eksik bar).
-  const yazimTf = typeof payload.writeTf === 'string' && payload.writeTf ? payload.writeTf : tf
-  const yazimSn = yazimTf === tf ? tfSec : core('tf').tfSeconds(yazimTf)
   const closedEnd = seriesMod.closedEndIndex(inc.time, yazimSn, fetchedAt, inc.length)
 
   let added = 0

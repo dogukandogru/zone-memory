@@ -1467,6 +1467,9 @@ function ayarGruplari(saglayiciSecenekleri) {
       onaylar: [
         { yol: 'autoStartLive', ad: 'Program açılınca canlı takibi başlat' },
         { yol: 'autoPrepareOnTfChange', ad: 'Zaman dilimi değişince eksikleri tamamla' },
+        { yol: 'notify.desktop', ad: 'Sinyal gelince masaüstü bildirimi göster' },
+        { yol: 'notify.sound', ad: 'Bildirimde ses çal' },
+        { yol: 'notify.onlyProven', ad: 'Yalnızca kanıtlı sinyal türlerinde bildir' },
       ],
       alanlar: [
         { yol: 'providers.history', ad: 'Geçmiş kaynağı', tip: 'secim', secenekler: saglayiciSecenekleri,
