@@ -177,7 +177,12 @@ async function syncHistory(opts) {
   if (!o.dataDir) throw new Error('syncHistory: dataDir parametresi gerekli')
   const tf = o.tf || '1m'
   const tfSec = tfSeconds(tf)
-  const saglayici = getProvider(o.providerId)
+  // Saglayici NESNESI dogrudan da verilebilir. Testin sahte bir saglayici
+  // gecirebilmesi icin gerekli: modul `getProvider`i yukleme aninda yakaladigi
+  // icin sonradan yamalamak ise yaramiyor.
+  const saglayici = (o.providerObject && typeof o.providerObject.fetchCandles === 'function')
+    ? o.providerObject
+    : getProvider(o.providerId)
   const anahtar = o.apiKey ? String(o.apiKey).trim() : ''
   if (saglayici.needsKey && !anahtar) {
     throw new Error(
@@ -279,12 +284,28 @@ async function syncHistory(opts) {
       ? Math.max(r.from - ortakSaniye, varOlan.firstTime)
       : r.from
 
+    // ARTIMLI YAZMA (V7): vekil OLMAYAN kaynaklarda saglayici her parcayi
+    // (HistData'da her ayi) teslim ettikce depoya yazariz. Tam gecmis 210
+    // aylik zip demek ve tek bir ag hatasi saatler suren indirmenin tamamini
+    // kaybettiriyordu. Vekil kaynakta bu yapilamaz: duzeltme (basis ve hacim
+    // eslestirmesi) tum parca elde olmadan hesaplanamaz.
+    let parcaEklenen = 0
+    const parcaYaz = vekil ? null : async function (parca) {
+      if (!parca || parca.length === 0) return
+      const sonuc = await binstore.appendSeries(dosya, parca)
+      parcaEklenen += sonuc.added
+      toplamCekilen += parca.length
+      bildir(o.onProgress, taban + pay * 0.9,
+        parcaEklenen + ' mum depoya yazildi')
+    }
+
     let yeni = await saglayici.fetchCandles({
       tfSec: tfSec,
       from: cekBaslangic,
       to: r.to,
       apiKey: anahtar,
       symbol: o.symbol,
+      onChunk: parcaYaz === null ? undefined : parcaYaz,
       onProgress: function (pct, msg) {
         bildir(o.onProgress, taban + (pct * pay) / 100, msg)
       },
@@ -331,6 +352,13 @@ async function syncHistory(opts) {
       // Depoda zaten olan barlari atarak yalnizca yeni kismi birakiriz.
       const ilkYeni = series.firstIndexAtOrAfter(yeni, varOlan.lastTime + 1)
       yeni = ilkYeni < 0 ? series.emptySeries() : series.sliceSeries(yeni, ilkYeni, yeni.length)
+    }
+
+    // Parca parca yazildiysa `yeni` bos doner ve sayim zaten yapilmistir.
+    if (parcaEklenen > 0) {
+      r.bars = parcaEklenen
+      toplamEklenen += parcaEklenen
+      continue
     }
 
     r.bars = yeni ? yeni.length : 0

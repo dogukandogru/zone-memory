@@ -322,3 +322,60 @@ test('httpRequest: 401 ve 403 "anahtar gecersiz" der', async () => {
     global.fetch = asilFetch
   }
 })
+
+// ---------------------------------------------------------------------------
+// V7 - ARTIMLI YAZMA: hata oncesindeki aylar depoda kalir
+// ---------------------------------------------------------------------------
+// Tam gecmis yaklasik 210 aylik zip demek. Onceden hepsi tek tamponda birikip
+// en sonda yaziliyordu: tek bir ag hatasi saatler suren indirmenin tamamini
+// kaybettiriyordu.
+
+test('syncHistory: parca parca yazar, hata oncesi parcalar depoda kalir', async () => {
+  const fs = require('node:fs')
+  const os = require('node:os')
+  const path = require('node:path')
+  const binstore = require('../src/core/store/binstore')
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'zm-onchunk-'))
+  const T0 = Date.UTC(2026, 0, 5, 10) / 1000
+
+  function parcaSeri(bas, adet) {
+    const x = series.createSeries(adet)
+    for (let i = 0; i < adet; i++) {
+      const p = 2000 + i * 0.1
+      x.time[i] = bas + i * 60
+      x.open[i] = p
+      x.high[i] = p + 0.5
+      x.low[i] = p - 0.5
+      x.close[i] = p
+      x.volume[i] = 100
+    }
+    return x
+  }
+
+  // Uc parca teslim edip dorduncude hata firlatan sahte SPOT saglayici.
+  const sahte = {
+    id: 'sahte-spot', name: 'Sahte Spot', needsKey: false, caps: ['history'], isProxy: false,
+    fetchCandles: async (o) => {
+      for (let ay = 0; ay < 4; ay++) {
+        if (ay === 3) throw new Error('ag hatasi (dorduncu parca)')
+        if (o.onChunk) await o.onChunk(parcaSeri(T0 + ay * 1000 * 60, 1000))
+      }
+      return series.emptySeries()
+    },
+  }
+  try {
+    await assert.rejects(
+      () => loader.syncHistory({
+        dataDir: dir, tf: '1m', providerId: 'sahte-spot', providerObject: sahte,
+        from: T0, to: T0 + 5000 * 60,
+      }),
+      /ag hatasi/
+    )
+    const stat = await binstore.statSeries(path.join(dir, 'XAUUSD_1m.bin'))
+    assert.ok(stat, 'hata olsa bile dosya olusmali')
+    assert.strictEqual(stat.count, 3000, 'hata oncesindeki uc parca depoda kalmali')
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
