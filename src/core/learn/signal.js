@@ -88,6 +88,17 @@ const DEFAULT_SIGNAL_CFG = {
   // altindaysa sinyal uretilmez. Varsayilan 0 (kapali): esik ancak
   // dogrulama doneminde olculup secilirse acilmalidir (bkz. A1).
   minLift: 0,
+  // ZAMAN AGIRLIGI (yil cinsinden yariomur). null veya 0 ise kapali ve
+  // davranis birebir eskisi gibi kalir. Acikken eski eslesmeler daha az
+  // agirlik alir ve etkin orneklem (nEff) kucultme ile Wilson araliginda
+  // matchCount yerine kullanilir. Varsayilan kapali: dogrulama doneminde
+  // Brier iyilesmesi olculmeden acilmamali.
+  halfLifeYears: null,
+  // KALIBRASYON TABANININ PENCERESI (yil). null veya 0 ise tum gecmis.
+  // Yillik taban belirgin oynuyor (15m dokunusta 2018'de %15,5, 2020'de
+  // %33,1 ve araliklar ortusmuyor); pencere bunu sinirlar. Komsu secimini
+  // DEGISTIRMEZ, yalnizca kuculutme tabanini degistirir.
+  baseWindowYears: null,
   // Asgari beklenen deger, risk birimi cinsinden:
   //   bd = winRate * rr - (1 - winRate)
   // Bu, isabet orani ile risk/odulu tek bir olcute baglar. 0 esigi baskabas,
@@ -248,6 +259,10 @@ function findCandidates (touch, features, memory, cfg, beforeTime) {
     // Sozlesmede yok ama komsu dislama icin gerekli: sorgunun zamani.
     time: time,
     queryTime: time,
+    // TABAN PENCERESI (S9, varsayilan kapali): havuz orani yalnizca son N yila
+    // bakilarak hesaplanir. Komsu SECIMINI etkilemez, yalnizca kalibrasyon
+    // tabanini etkiler; bu yuzden onbellek anahtarina girmez.
+    baseWindowYears: num(conf.baseWindowYears, 0),
   }
   // Havuzun kendi basari orani: secimin katma degeri ancak buna gore olculur.
   const taban = { n: 0, wins: 0 }
@@ -372,10 +387,33 @@ function decideFromCandidates (ev, candidates, levels, cfg, ek) {
   }
 
   const matchCount = matches.length
+  // ZAMAN AGIRLIGI (S9, varsayilan KAPALI).
+  //
+  // knn zamani yalnizca filtre olarak kullaniyor: 2023 sonrasi sorgularda
+  // eslesmelerin ortalama yasi 15m'de 8,2 yil ve yarisi 8 yildan eski.
+  // Yillik taban da belirgin oynuyor (15m dokunusta 2018'de %15,5, 2020'de
+  // %33,1 ve araliklar ortusmuyor), yani eski donemin istatistigi hem canli
+  // sinyali hem kalibrasyon tabanini baskiliyor.
+  //
+  // `halfLifeYears` verilirse her eslesme yariomurlu bir agirlik alir. Etkin
+  // orneklem nEff = (Σw)² / Σw² olur ve kuculutme ile Wilson araligi bu
+  // sayiyi kullanir; boylece "10 eslesme ama hepsi 10 yillik" durumu
+  // istatistikte de zayif gorunur.
+  //
+  // Varsayilan null: DOGRULAMA doneminde olculup Brier iyilesmesi
+  // gosterilmeden acilmamali (bkz. scripts/search-params.mjs --ablation).
+  const yariomur = num(conf.halfLifeYears, 0)
+  const agirlikli = yariomur > 0
+  const yariomurSn = yariomur * 365.25 * 86400
   let sumSim = 0
   let wins = 0
   let sumMfe = 0
   let sumMae = 0
+  // Agirlikli toplamlar: agirlik kapaliyken her w = 1 olur ve bu sayilar
+  // ham sayimlarla BIREBIR ayni cikar.
+  let wToplam = 0
+  let wKareToplam = 0
+  let wWins = 0
   // Sonuc dagilimi: tutma, kirilma ve zaman asimi ORANLARI ayri tutulur.
   // Beklenen deger hesabinda zaman asimini tam zarar saymak yanlisti; o
   // olaylarda ufuk sonunda cikiliyor ve ortalama sonuc sifira yakin.
@@ -386,7 +424,13 @@ function decideFromCandidates (ev, candidates, levels, cfg, ek) {
     const m = matches[i]
     sumSim += num(m.similarity, 0)
     const ev = m.event
-    if (ev.success === true || ev.outcome === 'respect') wins++
+    const yas = agirlikli ? Math.max(0, time - num(ev.time, time)) : 0
+    const w = agirlikli ? Math.pow(0.5, yas / yariomurSn) : 1
+    wToplam += w
+    wKareToplam += w * w
+    const kazandi = ev.success === true || ev.outcome === 'respect'
+    if (kazandi) wWins += w
+    if (kazandi) wins++
     else if (ev.outcome === 'timeout') {
       timeouts++
       sumTimeoutR += num(ev.realizedR, 0)
@@ -415,7 +459,9 @@ function decideFromCandidates (ev, candidates, levels, cfg, ek) {
   // kayit varsa ham orana yaklasir.
   //   winRate = (wins + a * taban) / (matchCount + a)
   // `a` (priorStrength) kac sanal gozlem kadar guvendigimizdir.
-  const winRateRaw = matchCount > 0 ? wins / matchCount : 0
+  // Etkin orneklem: agirlik kapaliyken matchCount'a esittir.
+  const nEff = wKareToplam > 0 ? (wToplam * wToplam) / wKareToplam : 0
+  const winRateRaw = matchCount > 0 ? (agirlikli ? wWins / wToplam : wins / matchCount) : 0
   // NOT: `adaylar` bir kopya (slice) oldugu icin ozel alanlar orada olmaz;
   // havuz orani ORIJINAL aday listesinden okunur. `ek.baseRate` ile de
   // verilebilir (onbellekli test yolu boyle gecer).
@@ -424,11 +470,17 @@ function decideFromCandidates (ev, candidates, levels, cfg, ek) {
     : (baglam && Number.isFinite(baglam.baseRate) ? baglam.baseRate : null)
   const havuzTabani = havuzTabaniHam === null ? 0.5 : havuzTabaniHam
   const onsel = Math.max(0, num(conf.priorStrength, DEFAULT_SIGNAL_CFG.priorStrength))
+  // Kuculutme ve guven araligi ETKIN orneklemi kullanir: agirlikli modda
+  // "10 eslesme ama hepsi cok eski" durumu burada zayif gorunmeli.
+  const etkinN = agirlikli ? nEff : matchCount
+  const etkinWins = agirlikli ? winRateRaw * etkinN : wins
   const winRate = matchCount > 0
-    ? (wins + onsel * havuzTabani) / (matchCount + onsel)
+    ? (etkinWins + onsel * havuzTabani) / (etkinN + onsel)
     : 0
   // Ham oranin %95 Wilson araligi: belirsizlik ekranda da gorunur.
-  const aralik = matchCount > 0 ? wilson(wins, matchCount) : null
+  const aralik = matchCount > 0
+    ? wilson(Math.round(etkinWins), Math.max(1, Math.round(etkinN)))
+    : null
   const winRateLo = aralik ? aralik.lo : 0
   const winRateHi = aralik ? aralik.hi : 0
   // Katma deger: kuculutulmus oranin havuz tabanindan farki.
@@ -756,6 +808,8 @@ function decideFromCandidates (ev, candidates, levels, cfg, ek) {
     // guven araligi ve tabana gore fark. Arayuz bunlari birlikte gosterir;
     // tek bir yuzde, belirsizligi gizliyordu.
     winRateRaw: winRateRaw,
+    // Etkin orneklem: zaman agirligi kapaliyken matchCount ile ayni.
+    nEff: etkinN,
     winRateLo: winRateLo,
     winRateHi: winRateHi,
     baseRate: havuzTabani,

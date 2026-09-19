@@ -348,6 +348,15 @@ function knn (query, memory, opts) {
 
   // Cagiran `baseOut` verirse havuz sayaclari doldurulur (bkz. asagisi).
   const tabanCikti = o.baseOut && typeof o.baseOut === 'object' ? o.baseOut : null
+  // TABAN PENCERESI (S9, varsayilan kapali): havuz oranini yalnizca son N yila
+  // bakarak hesaplar. Rejim degistiginde (yillik taban 15m dokunusta 2018'de
+  // %15,5, 2020'de %33,1) eski donemin orani kalibrasyon tabanini baskiliyor.
+  const tabanPencereYil = Number.isFinite(o.baseWindowYears) && o.baseWindowYears > 0
+    ? o.baseWindowYears
+    : 0
+  const tabanEnErken = (tabanPencereYil > 0 && Number.isFinite(o.queryTime))
+    ? o.queryTime - tabanPencereYil * 365.25 * 86400
+    : null
   if (tabanCikti) {
     tabanCikti.n = 0
     tabanCikti.wins = 0
@@ -418,7 +427,7 @@ function knn (query, memory, opts) {
     // girdi. Havuzun kendi basari orani, secimin katma degerini olcmek icin
     // dogru karsilastirma noktasidir: "gecmiste bu yapi %X tuttu" cumlesi
     // ancak havuz orani %Y iken anlam tasir.
-    if (tabanCikti) {
+    if (tabanCikti && (tabanEnErken === null || Number(ev.time) >= tabanEnErken)) {
       tabanCikti.n++
       if (ev.success === true || ev.outcome === 'respect') tabanCikti.wins++
     }

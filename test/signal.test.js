@@ -557,3 +557,51 @@ test('topMatches uc degerli sonucu ve sonuca kadarki hareketi tasir', () => {
       'eslesme sonuca kadarki hareket alanlarini tasimali')
   }
 })
+
+// ---------------------------------------------------------------------------
+// S9 - ZAMAN AGIRLIGI (varsayilan KAPALI)
+// ---------------------------------------------------------------------------
+
+test('zaman agirligi kapaliyken davranis birebir ayni kalir', () => {
+  const esik = { minMatches: 5, minWinRate: 0.30 }
+  const mem = hafizaKur(20, 12, 'BUY')
+  const kapali = evaluateTouch(dokunus('BUY'), ozellik(), mem, [], esik, null)
+  const acikAmaSifir = evaluateTouch(dokunus('BUY'), ozellik(), mem, [],
+    Object.assign({}, esik, { halfLifeYears: 0 }), null)
+  assert.equal(kapali.winRate, acikAmaSifir.winRate)
+  assert.equal(kapali.winRateRaw, acikAmaSifir.winRateRaw)
+  // Etkin orneklem, agirlik kapaliyken eslesme sayisina esittir.
+  assert.equal(kapali.nEff, kapali.matchCount)
+})
+
+test('zaman agirligi: eski eslesmeler daha az agirlik alir, etkin orneklem duser', () => {
+  const esik = { minMatches: 3, minWinRate: 0.30, halfLifeYears: 4 }
+  const YIL = 365.25 * 86400
+  // Iki eslesme: biri BUGUN kazandi, biri 4 YIL once kaybetti. Yariomur 4 yil
+  // oldugu icin eski kaydin agirligi tam yarim olur, yani oran 1/(1+0,5) = 2/3.
+  const mem = {
+    tf: '15m',
+    events: [
+      // Zamanlar `excludeWithinSec` (varsayilan 3 gun) penceresinin DISINDA:
+      // sorguya cok yakin kayitlar kendi kendine eslesmeyi onlemek icin elenir.
+      fixtures.olay({ i: 0, basarili: false, yon: 'BUY', time: T_SORGU - 4 * YIL, features: ozellik() }),
+      fixtures.olay({ i: 1, basarili: true, yon: 'BUY', time: T_SORGU - 10 * 86400, features: ozellik() }),
+      fixtures.olay({ i: 2, basarili: true, yon: 'BUY', time: T_SORGU - 20 * 86400, features: ozellik() }),
+    ],
+  }
+  const s = evaluateTouch(dokunus('BUY'), ozellik(), mem, [], esik, null)
+  assert.equal(s.matchCount, 3)
+  // Ham oran agirlikli: iki yeni kazanan (w~1) ve bir eski kaybeden (w=0,5).
+  assert.ok(s.winRateRaw > 2 / 3 - 0.02 && s.winRateRaw < 0.82,
+    'agirlikli oran 0,67 ile 0,82 arasinda olmali: ' + s.winRateRaw)
+  // Etkin orneklem 3'ten KUCUK: agirliklar esit degil.
+  assert.ok(s.nEff < 3 && s.nEff > 2, 'etkin orneklem 2 ile 3 arasinda olmali: ' + s.nEff)
+
+  // Ayni hafiza, agirlik kapali: ham oran tam 2/3 (uc kayittan ikisi).
+  const kapali = evaluateTouch(dokunus('BUY'), ozellik(), mem, [],
+    Object.assign({}, esik, { halfLifeYears: null }), null)
+  assert.ok(Math.abs(kapali.winRateRaw - 2 / 3) < 1e-9)
+  assert.equal(kapali.nEff, 3)
+  assert.ok(s.winRateRaw > kapali.winRateRaw,
+    'eski kaybeden hafifledigi icin agirlikli oran daha yuksek olmali')
+})

@@ -952,7 +952,29 @@ Varsayılan değerler:
 | `minExpectancy` | 0,10 | Asgari beklenen değer, risk birimi cinsinden |
 | `minRr` | 0 (kapalı) | Asgari risk/ödül oranı |
 | `useZoneStop` | açık | TP1 ve SL bölge geometrisinden alınır |
-| `tp2Pct` | 70 | Uzatma hedefi için MFE dağılımının yüzdeliği |
+| `tp2Pct` | 70 | Uzatma hedefi için, **tutmuş** komşuların risk birimi başına gittiği yolun yüzdeliği |
+| `priorStrength` | 20 | Kalibrasyon önseli: gösterilen oran havuz tabanına bu ağırlıkta çekilir |
+| `minLift` | 0 (kapalı) | Kalibre oranın tabandan en az farkı |
+| `halfLifeYears` | null (kapalı) | Zaman ağırlığı: eski eşleşmelerin yarı ömrü |
+| `baseWindowYears` | null (kapalı) | Kalibrasyon tabanı yalnızca son N yıldan |
+
+**Zaman ağırlığı neden kapalı.** kNN zamanı yalnızca filtre olarak kullanıyor:
+2023 sonrası sorgularda eşleşmelerin ortalama yaşı 15m'de 8,2 yıl. Yıllık taban
+da belirgin oynuyor (15m dokunuşta 2018'de %15,5, 2020'de %33,1, aralıklar
+örtüşmüyor). Ölçüldü (`node scripts/search-params.mjs --tf 15m --ablation`),
+doğrulama dilimi:
+
+| Varyant | 15m Brier (taban) | 1h Brier (taban) |
+| --- | --- | --- |
+| kapalı | 0,226 (0,229) | 0,207 (0,231) |
+| yarı ömür 8 yıl | 0,224 (0,227) | 0,205 (0,227) |
+| yarı ömür 2 yıl | 0,219 (0,220) | 0,212 (0,228) |
+| taban 3 yıl | 0,222 (0,224) | 0,216 (0,231) |
+
+Kazanç en iyi durumda 0,002 Brier, yani ölçüm hatasının içinde; 15m'de en iyi
+1/5 dilimin net sonucu ağırlıkla **kötüleşiyor** (-0,023 R'den -0,084 R'ye).
+Bu yüzden seçenek kodda var ama varsayılan kapalı. Açmadan önce kendi
+verinizde bu ablasyonu çalıştırın.
 
 Hazır ayar katmanı bu üç alanı zaman dilimine göre ezer
 (`src/core/learn/presets.js`):

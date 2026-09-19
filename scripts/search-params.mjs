@@ -30,6 +30,7 @@ const backtest = require('../src/core/learn/backtest.js')
 const candcache = require('../src/core/learn/candcache.js')
 const cluster = require('../src/core/learn/cluster.js')
 const presets = require('../src/core/learn/presets.js')
+const stats = require('../src/core/learn/stats.js')
 const { argumanlariAyristir, sayiBicim } = require('../src/core/util/cli.js')
 
 /**
@@ -59,6 +60,7 @@ const IZGARALAR = {
 
 const yuzde = (x, h = 1) => (Number.isFinite(x) ? (x * 100).toFixed(h) + '%' : '-')
 const say = (x, h = 3) => (Number.isFinite(x) ? (x >= 0 ? '+' : '') + x.toFixed(h) : '-')
+const oran = (x, h = 3) => (Number.isFinite(x) ? x.toFixed(h) : '-')
 const gun = (t) => (Number.isFinite(t) ? new Date(t * 1000).toISOString().slice(0, 10) : '-')
 
 /** Kullanicinin kayitli ayar yamasi (Electron olmadan okunur). */
@@ -120,6 +122,96 @@ function ayarMetni (c) {
     (c.minLift > 0 ? ' katki ' + yuzde(c.minLift, 0) : '')
 }
 
+/**
+ * ZAMAN AGIRLIGI ABLASYONU (S9)
+ *
+ * Sorusu: eski eslesmeleri hafifletmek ya da kalibrasyon tabanini son yillara
+ * sinirlamak GOSTERILEN ORANI daha dogru yapiyor mu. Bu bir esik sorusu
+ * degildir, bu yuzden esikler kasten gevsek tutulur ve her olay olculur;
+ * karsilastirma olcutu Brier (kalibrasyon) ve AUC (ayirt etme).
+ *
+ * Varsayilanin degismesi icin DOGRULAMA dilimindeki Brier iyilesmesi gerekir.
+ */
+const ABLASYON = [
+  { ad: 'kapali (mevcut)', halfLifeYears: null, baseWindowYears: null },
+  { ad: 'yariomur 8 yil', halfLifeYears: 8, baseWindowYears: null },
+  { ad: 'yariomur 4 yil', halfLifeYears: 4, baseWindowYears: null },
+  { ad: 'yariomur 2 yil', halfLifeYears: 2, baseWindowYears: null },
+  { ad: 'taban 3 yil', halfLifeYears: null, baseWindowYears: 3 },
+  { ad: 'yariomur 4 + taban 3', halfLifeYears: 4, baseWindowYears: 3 },
+]
+
+/** Ablasyon olcutleri: kalibrasyon ve ayirt etme. */
+function ablasyonOlcut (sonuc) {
+  const kayitlar = sonuc.trades.map((t) => ({ pred: t.winRate, win: t.win === true }))
+  const taban = sonuc.summary.baselineWinRate
+  const a = stats.auc(kayitlar)
+  const b = stats.brier(kayitlar, Number.isFinite(taban) ? taban : undefined)
+  const sirali = sonuc.trades.slice().sort((x, y) => (Number(y.winRate) || 0) - (Number(x.winRate) || 0))
+  const dilim = sirali.slice(0, Math.max(1, Math.floor(sirali.length / 5)))
+  let dilimR = 0
+  let dilimKazanan = 0
+  for (const t of dilim) {
+    dilimR += Number(t.pnlR) || 0
+    if (t.win) dilimKazanan++
+  }
+  return {
+    n: sonuc.trades.length,
+    auc: a ? a.auc : null,
+    brier: b.model,
+    brierBase: b.base,
+    topN: dilim.length,
+    topWinRate: dilim.length > 0 ? dilimKazanan / dilim.length : null,
+    topR: dilim.length > 0 ? dilimR / dilim.length : null,
+  }
+}
+
+/** Ablasyon modu: zaman agirligi ve taban penceresi varyantlari. */
+async function ablasyonKosusu (mem, protos, cfgc, temelCfg, kesme, arg) {
+  const satirlar = []
+  const sonuclar = []
+  for (let i = 0; i < ABLASYON.length; i++) {
+    const v = ABLASYON[i]
+    const signalCfg = Object.assign({}, cfgc.signalCfg, {
+      // Her olay olculsun: olculen sey karar degil, gosterilen oranin dogrulugu.
+      minSimilarity: 0, minMatches: 1, minWinRate: 0, minRr: 0, minExpectancy: -1, minLift: 0,
+      halfLifeYears: v.halfLifeYears,
+      baseWindowYears: v.baseWindowYears,
+    })
+    process.stderr.write('(' + (i + 1) + '/' + ABLASYON.length + ') ' + v.ad + '\n')
+    // Taban penceresi onbellekteki havuz sayaclarini degistirir, bu yuzden
+    // her varyantta onbellek yeniden kurulur. Yariomur komsulari
+    // degistirmez ama ayni yoldan gecmek karsilastirmayi basit tutuyor.
+    const cache = candcache.buildCandidates(mem, Object.assign({}, temelCfg, { signalCfg: signalCfg }))
+    const secim = backtest.runBacktestFromCache(mem, cache, protos,
+      Object.assign({}, temelCfg, { signalCfg: signalCfg, evalToTime: kesme }))
+    const dogrulama = backtest.runBacktestFromCache(mem, cache, protos,
+      Object.assign({}, temelCfg, { signalCfg: signalCfg, evalFromTime: kesme + 1 }))
+    sonuclar.push({ ad: v.ad, cfg: v, is: ablasyonOlcut(secim), oos: ablasyonOlcut(dogrulama) })
+  }
+
+  if (arg.json) return { mod: 'ablasyon', splitTime: kesme, sonuclar: sonuclar }
+
+  satirlar.push('ZAMAN AGIRLIGI ABLASYONU (S9)')
+  satirlar.push('Esikler kasten gevsek: olculen sey karar degil, gosterilen oranin dogrulugu.')
+  satirlar.push('')
+  satirlar.push('varyant               | SECIM Brier | DOGRULAMA: n     AUC   Brier  (taban)  | en iyi 1/5: isabet  net R')
+  for (const r of sonuclar) {
+    satirlar.push([
+      r.ad.padEnd(21),
+      oran(r.is.brier).padStart(11),
+      String(r.oos.n).padStart(5) + ' ' + oran(r.oos.auc).padStart(6) + ' ' + oran(r.oos.brier).padStart(6) +
+        ' (' + oran(r.oos.brierBase) + ')',
+      (Number.isFinite(r.oos.topWinRate) ? (r.oos.topWinRate * 100).toFixed(1) + '%' : '-').padStart(7) +
+        ' ' + say(r.oos.topR).padStart(7),
+    ].join(' | '))
+  }
+  satirlar.push('')
+  satirlar.push('Brier kucuk daha iyidir; parantez icindeki sayi sabit taban tahmininin Brier\'i.')
+  satirlar.push('Varsayilan ancak DOGRULAMA dilimindeki Brier belirgin olarak iyilesirse degismeli.')
+  return satirlar.join('\n') + '\n'
+}
+
 async function main () {
   const arg = argumanlariAyristir(process.argv.slice(2))
   if (arg.help || arg.h) {
@@ -129,6 +221,7 @@ async function main () {
       '  --tf 15m           Zaman dilimi (varsayilan: ayardaki)',
       '  --split 0.6        Secim diliminin orani (varsayilan 0.6)',
       '  --grid kaba|ince   Izgara yogunlugu (varsayilan kaba)',
+      '  --ablation         Esik aramasi yerine zaman agirligi ablasyonu (S9)',
       '  --min-trades 30    Bir ayarin sayilmasi icin asgari islem (her iki dilimde)',
       '  --top 8            Kac ayar listelenecek',
       '  --warmup 500       Isinma olay sayisi alt siniri',
@@ -170,6 +263,15 @@ async function main () {
     warmupEvents: warmup,
     warmupPerBucket: Number.isFinite(Number(arg.bucket)) ? Number(arg.bucket) : undefined,
     outcomeCfg: cfgc.planOutcomeCfg,
+  }
+
+  // ABLASYON MODU: esik aramasi yerine zaman agirligi varyantlari.
+  if (arg.ablation) {
+    const cikti = await ablasyonKosusu(mem, protos, cfgc, temelCfg, kesme, arg)
+    const metin = typeof cikti === 'string' ? cikti : JSON.stringify(cikti, null, 2) + '\n'
+    if (arg.out && arg.out !== true) fs.writeFileSync(String(arg.out), metin, 'utf8')
+    else process.stdout.write(metin)
+    return
   }
 
   process.stderr.write(tf + ': ' + sayiBicim(mem.events.length) + ' olay, komsu onbellegi kuruluyor...\n')
