@@ -192,7 +192,10 @@
           <div class="panel-head">
             <span class="panel-title">Hafıza</span>
             <span class="panel-actions">
-              <button type="button" class="btn mini" id="memoryExtendBtn">Güncelle</button>
+              <!-- "Güncelle" kaldırıldı: "Yeniden Kur" ile aynı işi yapıyordu
+                   (artımlı tarama yok, bkz. C3) ve iki düğme kullanıcıyı
+                   yanıltıyordu. -->
+              <button type="button" class="btn mini" id="memoryExportBtn" title="Hafıza olaylarını CSV olarak kaydet">CSV</button>
               <button type="button" class="btn mini btn-primary" id="memoryBuildBtn">Yeniden Kur</button>
               <button type="button" class="btn mini btn-danger" id="memoryDeleteBtn">Sil</button>
             </span>
@@ -223,6 +226,7 @@
               <label class="field inline mini" for="testWarmup"><span>Isınma</span>
                 <input type="number" id="testWarmup" class="input mini" value="500" min="0" step="50">
               </label>
+              <button type="button" class="btn mini" id="testExportBtn" title="Test işlemlerini CSV olarak kaydet" disabled>CSV</button>
               <button type="button" class="btn mini btn-primary" id="testRunBtn">Çalıştır</button>
             </span>
           </div>
@@ -293,6 +297,8 @@ ANA ALAN
   #chartLegend          sol ust efsane kutusu
   #legendSymbol #legendTf #legendO #legendH #legendL #legendC #legendChange
   #goLatestBtn          gecmis pencereden guncel mumlara donus
+  #memoryExportBtn      hafiza olaylarini CSV olarak kaydet
+  #testExportBtn        test islemlerini CSV olarak kaydet
   #chartEmpty           veri yokken gosterilen kutu
   #chartLoading         yuklenirken gosterilen kutu
   #tvPanel              TradingView gorunumu (baslangicta hidden)

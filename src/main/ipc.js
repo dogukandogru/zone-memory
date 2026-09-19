@@ -13,7 +13,7 @@
  * Istisnalar renderer'a sizmaz; hepsi yakalanip mesaja cevrilir.
  */
 
-const { ipcMain, app } = require('electron')
+const { ipcMain, app, dialog } = require('electron')
 
 const engine = require('./engine')
 const settings = require('./settings')
@@ -163,6 +163,23 @@ async function dispatch(cmd, payload) {
       if (anahtar) yuk.apiKey = anahtar
       return await engine.call(cmd, yuk, (pct, msg) => {
         send('progress', { cmd: cmd, pct: pct, msg: msg })
+      })
+    }
+
+    // CSV DOKUMU: dosya secimi ANA SURECTE yapilir (renderer'in dosya
+    // sistemine erisimi yok) ve yol isciye iletilir.
+    case 'export:csv': {
+      const ne = p.what === 'trades' ? 'trades' : 'events'
+      const tf = p.tf ? String(p.tf) : ''
+      const ad = 'XAUUSD_' + tf + (ne === 'trades' ? '_islemler' : '_olaylar') + '.csv'
+      const secim = await dialog.showSaveDialog(mainWindow || undefined, {
+        title: ne === 'trades' ? 'İşlem dökümünü kaydet' : 'Hafıza olaylarını kaydet',
+        defaultPath: ad,
+        filters: [{ name: 'CSV', extensions: ['csv'] }],
+      })
+      if (secim.canceled || !secim.filePath) return { cancelled: true }
+      return await engine.call('engine:export-csv', {
+        tf: tf, what: ne, filePath: secim.filePath,
       })
     }
 

@@ -37,6 +37,15 @@ const DEFAULT_TAIL_BARS = 4000
 const coreCache = new Map()
 
 /**
+ * Son geriye testin KIRPILMAMIS sonucu (CSV dokumu icin).
+ *
+ * Diske yazilan ozet islem listesini icermez; arayuz de yalnizca son 3000
+ * islemi gorur. Dokum ise TAM olmali, cunku amac kullanicinin sayilari
+ * bagimsiz dogrulayabilmesi. Tarama ve hafiza silme bunu temizler.
+ */
+let sonBacktest = null
+
+/**
  * `src/core` altindaki bir modulu tembel yukler.
  * @param {string} rel 'series', 'store/binstore', 'learn/memory' gibi
  */
@@ -932,6 +941,8 @@ handlers['data:import'] = async function (payload, ctx) {
 handlers['engine:scan'] = async function (payload, ctx) {
   const tf = requireTf(payload.tf)
   const force = !!payload.force
+  // Hafiza yeniden kuruluyor: elde tutulan islem dokumu ESKI etiketlere ait.
+  sonBacktest = null
   ctx.progress(0, 'Mumlar okunuyor')
   const s = await getSeries(tf, force)
   if (!s || s.length < 200) {
@@ -1135,6 +1146,111 @@ handlers['engine:touches'] = async function (payload) {
     total: total,
     truncated: total > slice.length,
   }
+}
+
+/**
+ * HAFIZA VE ISLEM DOKUMUNU CSV OLARAK YAZAR.
+ *
+ * Neden: kullanici sistemin iddialarini (tur tabani, isabet, net beklenti,
+ * kalibrasyon) Excel ya da Python ile BAGIMSIZ dogrulayamiyordu; bu inceleme
+ * bile her olcum icin ayri betik yazmak zorunda kaldi. Arayuz testin yalnizca
+ * son islemlerini gosteriyor, brut sonuc ve maliyet diske hic yazilmiyordu.
+ *
+ * Yanina ayni adla bir `.meta.json` yazilir: hangi ayar, hangi surum ve hangi
+ * hafiza ile uretildigi olmadan dokum tek basina dogrulanamaz.
+ */
+handlers['engine:export-csv'] = async function (payload) {
+  const tf = requireTf(payload.tf)
+  const ne = payload.what === 'trades' ? 'trades' : 'events'
+  const dosya = String(payload.filePath || '')
+  if (!dosya) throw new Error('Dosya yolu verilmedi.')
+  const csv = core('csv')
+
+  let satirlar = []
+  let sutunlar = []
+  let ozet = null
+  let kullanilanAyar = null
+  let cfgHash = null
+
+  if (ne === 'trades') {
+    if (!sonBacktest || sonBacktest.tf !== tf) {
+      throw new Error('Once bu zaman diliminde Test sekmesinden olcum calistirin.')
+    }
+    satirlar = sonBacktest.trades
+    ozet = sonBacktest.summary
+    kullanilanAyar = sonBacktest.usedCfg
+    cfgHash = sonBacktest.cfgHash
+    // Gerekce ve komsu listesi CSV'ye SIGMAZ (cok satirli metin ve dizi);
+    // sayisal dogrulama icin de gerekmiyor.
+    const atla = { reasons: 1, topMatches: 1 }
+    const anahtarlar = new Set()
+    for (const t of satirlar) {
+      for (const k of Object.keys(t)) if (!atla[k]) anahtarlar.add(k)
+    }
+    sutunlar = csv.zamanSutunlari('time').concat(
+      Array.from(anahtarlar).filter((k) => k !== 'time').map((k) => ({ key: k, header: k })))
+  } else {
+    const mem = await getMemory(tf, false)
+    if (!mem || !mem.events || mem.events.length === 0) {
+      throw new Error('Bu zaman diliminde hafiza yok.')
+    }
+    const ctxAdlari = Array.isArray(mem.ctxNames) ? mem.ctxNames : []
+    satirlar = mem.events.map((e) => {
+      const hafif = lightEvent(e)
+      // Skor bilesenleri duzlestirilir; ic ice nesne CSV'de sutun olamaz.
+      const parts = e.parts || {}
+      for (const ad of Object.keys(parts)) hafif['part_' + ad] = parts[ad] ? 1 : 0
+      // Baglam vektoru adlandirilmis sutunlara acilir (sekil ve getiri HARIC:
+      // 48 sutun daha eklemek dosyayi okunmaz yapar ve dogrulamaya katkisi yok).
+      const ctx = e.features && e.features.ctx ? e.features.ctx : null
+      if (ctx) {
+        for (let i = 0; i < ctxAdlari.length && i < ctx.length; i++) {
+          hafif['ctx_' + ctxAdlari[i]] = ctx[i]
+        }
+      }
+      return hafif
+    })
+    const anahtarlar = new Set()
+    for (const r of satirlar) for (const k of Object.keys(r)) anahtarlar.add(k)
+    sutunlar = csv.zamanSutunlari('time').concat(
+      Array.from(anahtarlar).filter((k) => k !== 'time').map((k) => ({ key: k, header: k })))
+    cfgHash = mem.meta && mem.meta.cfgHash ? mem.meta.cfgHash : null
+  }
+
+  // Her satira ayar izi: dosya baska bir ayarla karistirilamasin.
+  if (cfgHash) {
+    for (const r of satirlar) r.cfgHash = cfgHash
+    sutunlar = sutunlar.concat([{ key: 'cfgHash', header: 'cfgHash' }])
+  }
+
+  const damga = buildDamgasi()
+  let yazilan = 0
+  const parcalar = []
+  for (const parca of csv.csvChunks(satirlar, sutunlar)) {
+    parcalar.push(parca)
+  }
+  await fsp.writeFile(dosya, parcalar.join(''), 'utf8')
+  yazilan = satirlar.length
+
+  try {
+    await writeJsonAtomic(dosya.replace(/\.csv$/i, '') + '.meta.json', {
+      tf: tf,
+      what: ne,
+      rows: yazilan,
+      zaman: new Date().toISOString(),
+      cfgHash: cfgHash,
+      usedCfg: kullanilanAyar,
+      summary: ozet,
+      memory: sonBacktest && sonBacktest.tf === tf ? sonBacktest.memory : null,
+      appVersion: damga.appVersion || null,
+      buildCommit: damga.buildCommit,
+      buildSrcHash: damga.buildSrcHash,
+    })
+  } catch (err) {
+    log('CSV yan bilgisi yazilamadi: ' + (err && err.message ? err.message : String(err)))
+  }
+
+  return { tf: tf, what: ne, rows: yazilan, filePath: dosya }
 }
 
 /** Gecmis icin uretilmis sinyaller (geriye testte olusur). */
@@ -1363,6 +1479,19 @@ handlers['engine:backtest'] = async function (payload, ctx) {
     log('Test ozeti diske yazilamadi: ' + (err && err.message ? err.message : String(err)))
   }
 
+  // CSV DISA AKTARIMI ICIN: kirpilmamis islem listesi bellekte tutulur.
+  // Arayuz yalnizca son 3000 islemi goruyor; dosyaya yazilan dokum ise TAM
+  // olmali, yoksa kullanici kendi hesabini yapamaz.
+  sonBacktest = {
+    tf: tf,
+    zaman: Math.floor(Date.now() / 1000),
+    trades: trades,
+    summary: ozet,
+    usedCfg: kullanilanAyar,
+    cfgHash: hafizaIz || etkinIz,
+    memory: hafizaOzeti,
+  }
+
   ctx.progress(100, 'Test tamamlandi')
   return {
     tf: tf,
@@ -1424,6 +1553,9 @@ handlers['engine:clear-cache'] = async function (payload) {
  * "Hafizayi Sil" dugmesi bunu cagirir; ardindan yeniden tarama gerekir.
  */
 handlers['engine:memory-delete'] = async function (payload) {
+  // Hafiza silindi: elde tutulan islem dokumu artik hangi hafizaya ait
+  // oldugu bilinmeyen bir kalinti olurdu.
+  sonBacktest = null
   const tf = requireTf(payload.tf)
   const memstore = core('store/memstore')
   const taban = paths.memoryPath(tf)

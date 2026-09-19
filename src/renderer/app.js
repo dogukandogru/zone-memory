@@ -1396,6 +1396,27 @@ function canliAnahtariniIsaretle() {
 }
 
 /**
+ * Hafiza olaylarini ya da test islemlerini CSV olarak kaydeder.
+ *
+ * Amac kullanicinin sistemin iddialarini (tur tabani, isabet, net beklenti,
+ * kalibrasyon) Excel ya da Python ile BAGIMSIZ dogrulayabilmesi.
+ *
+ * @param {'events'|'trades'} ne
+ */
+async function csvDisaAktar(ne) {
+  const sonuc = await cagirGuvenli('export:csv', { tf: durum.tf, what: ne },
+    'CSV yazılamadı')
+  if (!sonuc || sonuc.cancelled) return
+  bildir(formatNumber(sayi(sonuc.rows, 0), 0) + ' satır yazıldı: ' + String(sonuc.filePath))
+}
+
+/** Test CSV dugmesi yalnizca elde olcum varken etkin. */
+function csvDugmeleriniTazele() {
+  const testCsv = el('testExportBtn')
+  if (testCsv) testCsv.disabled = !(durum.testSonucu && durum.testSonucu.tf === durum.tf)
+}
+
+/**
  * Gecmis pencereden GUNCEL mumlara doner.
  *
  * Onceden guncele donmenin tek yolu zaman dilimi degistirmekti.
@@ -2037,6 +2058,7 @@ function testPaneliniCiz() {
   // Test ozetinin ALTINA canli gunluk bolumu eklenir: "olculen" ile "canlida
   // olan" yan yana durmadikca aradaki sapma gorunmez.
   renderLiveLog(kap, durum.canliGunluk, { test: durum.testSonucu })
+  csvDugmeleriniTazele()
 }
 
 /** Yuruyen ileri testi calistirir. */
@@ -2338,6 +2360,11 @@ function dugmeleriBagla() {
   const guncele = el('goLatestBtn')
   if (guncele) guncele.addEventListener('click', () => guncelMumlaraDon())
 
+  const hafizaCsv = el('memoryExportBtn')
+  if (hafizaCsv) hafizaCsv.addEventListener('click', () => csvDisaAktar('events'))
+  const testCsv = el('testExportBtn')
+  if (testCsv) testCsv.addEventListener('click', () => csvDisaAktar('trades'))
+
   const iptal = el('cancelBtn')
   if (iptal) {
     iptal.addEventListener('click', async () => {
@@ -2360,9 +2387,6 @@ function dugmeleriBagla() {
 
   const kur = el('memoryBuildBtn')
   if (kur) kur.addEventListener('click', () => taramaCalistir())
-
-  const guncelle = el('memoryExtendBtn')
-  if (guncelle) guncelle.addEventListener('click', () => taramaCalistir())
 
   const sil = el('memoryDeleteBtn')
   if (sil) {
