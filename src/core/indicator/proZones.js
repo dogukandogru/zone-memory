@@ -3,7 +3,9 @@
 // ============================================================================
 // PRO ZONES - "proje son versiyon 3" Pine v6 indikatorunun JavaScript portu
 // ----------------------------------------------------------------------------
-// Kaynak: ~/Downloads/son pro.txt  (indicator("proje son versiyon 3"))
+// Kaynak: docs/pine/son_pro.pine  (indicator("proje son versiyon 3"))
+// Yaninda docs/pine/son_pro_export.pine var: ayni mantik, kutu cizmek yerine
+// bar bar sayi yayinlar; test/tv-parity.test.js onun ciktisiyla karsilastirir.
 //
 // Ozet mantik (Pine'daki hali):
 //   1. Pivot high / pivot low barlarinda bir bolge adayi dogar.
@@ -259,6 +261,10 @@ function fillHtfTrend (s, p, tfSec, bullTrend, bearTrend) {
  * @param {object} [params] DEFAULT_PARAMS uzerine yazilir
  * @param {number} tfSec    Serinin zaman dilimi (saniye)
  * @param {(pct:number, msg:string)=>void} [onProgress]
+ * @param {(bar:number, live:Array<object>, ek:{pivHigh:number,pivLow:number})=>void} [trace]
+ *   A4: her barin SONUNDA cagrilir, o anki aktif kutu listesiyle. Pine'in
+ *   ayni bardaki `display.data_window` ciktisiyla karsilastirmak icin;
+ *   `live` dizisi CANLI nesneleri tasir, degistirilmemelidir.
  * @returns {{zones: Array, touches: Array, context: object, stats: object}}
  *          `touches`, geriye uyumluluk icin bu adi tasir; icinde hem 'form'
  *          hem 'touch' turunde olaylar vardir, ayrimi `kind` alani yapar.
@@ -287,7 +293,7 @@ const PINE_ARALIKLARI = {
   bbMult: [0.1, 50],
 }
 
-function runIndicator (s, params, tfSec, onProgress) {
+function runIndicator (s, params, tfSec, onProgress, trace) {
   const p = Object.assign({}, DEFAULT_PARAMS, params || {})
   // Pine araliklarina kirp.
   const paramsClamped = {}
@@ -826,6 +832,11 @@ function runIndicator (s, params, tfSec, onProgress) {
       }
       live = kalan
     }
+
+    // A4: BAR SONU IZI. Pine'in `display.data_window` ciktisiyla bar bar
+    // karsilastirma yapabilmek icin. Verilmezse tek bir kosul kontrolu
+    // disinda maliyeti yoktur.
+    if (trace) trace(i, live, { pivHigh: pivHigh[i], pivLow: pivLow[i] })
   }
 
   // Seri bitiminde hayatta kalan kutular son durumlariyla ciktiya alinir.

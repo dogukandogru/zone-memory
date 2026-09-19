@@ -1,0 +1,292 @@
+//@version=6
+indicator("proje son versiyon 3", overlay=true, max_boxes_count=500)
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// MODÜL AÇMA / KAPAMA
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+showZones         = input.bool(true, "Bölge/Kutu Sistemi Göster", group="Modüller")
+useVolumeFilter   = input.bool(true, "Volume Filtresi Kullan", group="Modüller")
+useBBFilter       = input.bool(true, "Bollinger Band Filtresi Kullan", group="Modüller")
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BÖLGE AYARLARI
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+pivotLen        = input.int(5, "Pivot Hassasiyeti", minval=2, maxval=20, group="Bölge Ayarları")
+atrLen          = input.int(14, "ATR Length", minval=5, maxval=100, group="Bölge Ayarları")
+zoneAtrMult     = input.float(0.35, "Zone Kalınlığı / ATR", minval=0.05, maxval=2.0, step=0.05, group="Bölge Ayarları")
+mergeAtrMult    = input.float(0.55, "Yakın Bölgeleri Birleştir / ATR", minval=0.10, maxval=3.0, step=0.05, group="Bölge Ayarları")
+maxZones        = input.int(24, "Maksimum Aktif Bölge", minval=5, maxval=100, group="Bölge Ayarları")
+maxAgeBars      = input.int(100, "Bölge Ömrü / Bar", minval=50, maxval=5000, group="Bölge Ayarları")
+touchCooldown   = input.int(12, "Aynı Bölge Temas Aralığı", minval=1, maxval=100, group="Bölge Ayarları")
+boxLengthBars   = input.int(100, "Kutu Uzunluğu (Mum)", minval=1, maxval=5000, group="Bölge Ayarları")
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// VOLUME AYARLARI
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+volumeLen       = input.int(50, "Volume Ortalama", minval=10, maxval=300, group="Volume Ayarları")
+minVolRatio     = input.float(1.05, "Minimum Volume Gücü", minval=0.1, maxval=5.0, step=0.05, group="Volume Ayarları")
+minFlowToShow   = input.float(6.0, "Minimum Flow Değeri", minval=1.0, maxval=10.0, step=0.1, group="Volume Ayarları")
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BOLLINGER BAND AYARLARI
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+bbLen           = input.int(20, "Bollinger Band Periyot", minval=1, group="Bollinger Band")
+bbMult          = input.float(2.0, "Bollinger Band Std Sapma", minval=0.1, step=0.1, group="Bollinger Band")
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ANA HESAPLAMALAR
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+atr   = ta.atr(atrLen)
+volMA = ta.sma(volume, volumeLen)
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BOLLINGER BAND HESAPLAMA
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+bbBasis = ta.sma(close, bbLen)
+bbDev   = bbMult * ta.stdev(close, bbLen)
+bbUpper = bbBasis + bbDev
+bbLower = bbBasis - bbDev
+
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ARRAY SİSTEMİ
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+var box[]   zones      = array.new_box()
+var float[] zTop       = array.new_float()
+var float[] zBot       = array.new_float()
+var float[] zScore     = array.new_float()
+var bool[]  zSupport   = array.new_bool()
+var bool[]  zBroken    = array.new_bool()
+var int[]   zBorn      = array.new_int()
+var int[]   zLastTouch = array.new_int()
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// FONKSİYONLAR
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+f_transp(float _score) =>
+    int(math.max(35, math.min(88, 92 - _score * 5.0)))
+
+f_text(bool _support, float _score) =>
+    sideTxt = _support ? "BUY LIQUIDITY" : "SELL LIQUIDITY"
+    sideTxt + "\nFlow: " + str.tostring(_score, "#.0")
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// PİVOTLAR
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ph = ta.pivothigh(high, pivotLen, pivotLen)
+pl = ta.pivotlow(low, pivotLen, pivotLen)
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// DİRENÇ / SELL LIQUIDITY
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+if not na(ph) and not na(atr[pivotLen])
+    zH    = atr[pivotLen] * zoneAtrMult
+    top   = ph + zH
+    bot   = ph - zH * 0.25
+    vDen  = not na(volMA[pivotLen]) and volMA[pivotLen] > 0 ? volMA[pivotLen] : volume[pivotLen]
+    vR    = vDen > 0 ? volume[pivotLen] / vDen : 1.0
+    score = math.min(10.0, math.max(1.0, vR * 3.0))
+
+    volOK    = not useVolumeFilter or (vR >= minVolRatio and score >= minFlowToShow)
+    bbSellOK = not useBBFilter or (not na(bbUpper[pivotLen]) and ph >= bbUpper[pivotLen])
+
+    if volOK and bbSellOK
+        merged = false
+
+        if array.size(zones) > 0
+            for j = 0 to array.size(zones) - 1
+                sameSide = not array.get(zSupport, j)
+                midOld   = (array.get(zTop, j) + array.get(zBot, j)) / 2.0
+                nearZone = math.abs(ph - midOld) <= atr * mergeAtrMult
+
+                if sameSide and nearZone
+                    oldScore = array.get(zScore, j)
+                    newScore = math.min(10.0, oldScore + score * 0.25)
+                    newTop   = math.max(array.get(zTop, j), top)
+                    newBot   = math.min(array.get(zBot, j), bot)
+
+                    array.set(zScore, j, newScore)
+                    array.set(zTop, j, newTop)
+                    array.set(zBot, j, newBot)
+                    array.set(zBroken, j, false)
+
+                    bx = array.get(zones, j)
+                    box.set_top(bx, newTop)
+                    box.set_bottom(bx, newBot)
+                    box.set_text(bx, showZones ? f_text(false, newScore) : "")
+
+                    merged := true
+
+        if not merged
+            transp = f_transp(score)
+            b = box.new(
+                 left=bar_index - pivotLen,
+                 top=top,
+                 right=bar_index,
+                 bottom=bot,
+                 xloc=xloc.bar_index,
+                 extend=extend.none,
+                 bgcolor=showZones ? color.new(color.red, transp) : color.new(color.red, 100),
+                 border_color=showZones ? color.new(color.orange, math.max(transp - 10, 0)) : color.new(color.orange, 100),
+                 text=showZones ? f_text(false, score) : "",
+                 text_color=showZones ? color.white : color.new(color.white, 100),
+                 text_size=size.tiny)
+
+            array.push(zones, b)
+            array.push(zTop, top)
+            array.push(zBot, bot)
+            array.push(zScore, score)
+            array.push(zSupport, false)
+            array.push(zBroken, false)
+            array.push(zBorn, bar_index - pivotLen)
+            array.push(zLastTouch, na)
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// DESTEK / BUY LIQUIDITY
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+if not na(pl) and not na(atr[pivotLen])
+    zH    = atr[pivotLen] * zoneAtrMult
+    top   = pl + zH * 0.25
+    bot   = pl - zH
+    vDen  = not na(volMA[pivotLen]) and volMA[pivotLen] > 0 ? volMA[pivotLen] : volume[pivotLen]
+    vR    = vDen > 0 ? volume[pivotLen] / vDen : 1.0
+    score = math.min(10.0, math.max(1.0, vR * 3.0))
+
+    volOK   = not useVolumeFilter or (vR >= minVolRatio and score >= minFlowToShow)
+    bbBuyOK = not useBBFilter or (not na(bbLower[pivotLen]) and pl <= bbLower[pivotLen])
+
+    if volOK and bbBuyOK
+        merged = false
+
+        if array.size(zones) > 0
+            for j = 0 to array.size(zones) - 1
+                sameSide = array.get(zSupport, j)
+                midOld   = (array.get(zTop, j) + array.get(zBot, j)) / 2.0
+                nearZone = math.abs(pl - midOld) <= atr * mergeAtrMult
+
+                if sameSide and nearZone
+                    oldScore = array.get(zScore, j)
+                    newScore = math.min(10.0, oldScore + score * 0.25)
+                    newTop   = math.max(array.get(zTop, j), top)
+                    newBot   = math.min(array.get(zBot, j), bot)
+
+                    array.set(zScore, j, newScore)
+                    array.set(zTop, j, newTop)
+                    array.set(zBot, j, newBot)
+                    array.set(zBroken, j, false)
+
+                    bx = array.get(zones, j)
+                    box.set_top(bx, newTop)
+                    box.set_bottom(bx, newBot)
+                    box.set_text(bx, showZones ? f_text(true, newScore) : "")
+
+                    merged := true
+
+        if not merged
+            transp = f_transp(score)
+            b = box.new(
+                 left=bar_index - pivotLen,
+                 top=top,
+                 right=bar_index,
+                 bottom=bot,
+                 xloc=xloc.bar_index,
+                 extend=extend.none,
+                 bgcolor=showZones ? color.new(color.teal, transp) : color.new(color.teal, 100),
+                 border_color=showZones ? color.new(color.aqua, math.max(transp - 10, 0)) : color.new(color.aqua, 100),
+                 text=showZones ? f_text(true, score) : "",
+                 text_color=showZones ? color.white : color.new(color.white, 100),
+                 text_size=size.tiny)
+
+            array.push(zones, b)
+            array.push(zTop, top)
+            array.push(zBot, bot)
+            array.push(zScore, score)
+            array.push(zSupport, true)
+            array.push(zBroken, false)
+            array.push(zBorn, bar_index - pivotLen)
+            array.push(zLastTouch, na)
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// FAZLA BÖLGE TEMİZLEME (sadece takipten çıkar, kutu grafikte kalır)
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+while array.size(zones) > maxZones
+    oldBox  = array.shift(zones)
+    oldBorn = array.shift(zBorn)
+
+    box.set_right(oldBox, math.min(bar_index, oldBorn + boxLengthBars))
+
+    array.shift(zTop)
+    array.shift(zBot)
+    array.shift(zScore)
+    array.shift(zSupport)
+    array.shift(zBroken)
+    array.shift(zLastTouch)
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BÖLGELERİ GÜNCELLEME
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+if array.size(zones) > 0
+    int i = array.size(zones) - 1
+
+    while i >= 0
+        bx     = array.get(zones, i)
+        top    = array.get(zTop, i)
+        bot    = array.get(zBot, i)
+        score  = array.get(zScore, i)
+        sup    = array.get(zSupport, i)
+        born   = array.get(zBorn, i)
+        broken = array.get(zBroken, i)
+        lastT  = array.get(zLastTouch, i)
+
+        tooOld = bar_index - born > maxAgeBars
+
+        if tooOld
+            box.set_right(bx, math.min(bar_index, born + boxLengthBars))
+
+            array.remove(zones, i)
+            array.remove(zTop, i)
+            array.remove(zBot, i)
+            array.remove(zScore, i)
+            array.remove(zSupport, i)
+            array.remove(zBroken, i)
+            array.remove(zBorn, i)
+            array.remove(zLastTouch, i)
+        else
+            rightEdge = math.min(bar_index, born + boxLengthBars)
+            box.set_right(bx, rightEdge)
+
+            touched     = low <= top and high >= bot
+            canAddTouch = na(lastT) or bar_index - lastT >= touchCooldown
+
+            if touched and canAddTouch and not broken
+                newScore = math.min(10.0, score + 0.35)
+                array.set(zScore, i, newScore)
+                array.set(zLastTouch, i, bar_index)
+                score := newScore
+
+            breakSupport = sup and close < bot - atr * 0.15
+            breakResist  = not sup and close > top + atr * 0.15
+            newBroken    = broken or breakSupport or breakResist
+
+            array.set(zBroken, i, newBroken)
+
+            transp = f_transp(score)
+            bgCol  = showZones ? (sup ? color.new(color.teal, transp) : color.new(color.red, transp)) : color.new(color.white, 100)
+            brCol  = showZones ? (sup ? color.new(color.aqua, math.max(transp - 10, 0)) : color.new(color.orange, math.max(transp - 10, 0))) : color.new(color.white, 100)
+
+            box.set_bgcolor(bx, bgCol)
+            box.set_border_color(bx, brCol)
+            box.set_text(bx, showZones ? f_text(sup, score) : "")
+
+            if newBroken
+                box.set_right(bx, math.min(bar_index, born + boxLengthBars))
+                array.remove(zones, i)
+                array.remove(zTop, i)
+                array.remove(zBot, i)
+                array.remove(zScore, i)
+                array.remove(zSupport, i)
+                array.remove(zBroken, i)
+                array.remove(zBorn, i)
+                array.remove(zLastTouch, i)
+
+        i := i - 1

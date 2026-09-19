@@ -310,3 +310,241 @@ test('seans capasi 4 saatlik kovalarda yarim kova sayisini dusurur', () => {
   const capa = createSessionAnchor()
   assert.equal(seans.time[0], capa(s.time[0], 4 * SAAT))
 })
+
+// ===========================================================================
+// A4 EK KILIT - YAZ SAATI GECIS GUNLERI (Europe/Athens)
+// ===========================================================================
+// session.js yerel saat ve gun hesabini Europe/Athens ile yapar; kullaniciya
+// gosterilen saat hala Europe/Istanbul'dur. Iki sey kilitlenir:
+//
+//   1. Athens gecis gunlerinde (AB kurali: Mart'in son Pazari 01:00 UTC ileri,
+//      Ekim'in son Pazari 01:00 UTC geri) ofsetin ve yerel saatin gecisin
+//      HEMEN oncesi ile sonrasinda dogru kaydigi. Beklenen degerler ELLE
+//      YAZILMAZ: Intl.DateTimeFormat'in `timeZoneName: 'longOffset'` cikisindan
+//      bagimsiz olarak cozulur. Bu, session.js'in kullandigi yoldan (yerel
+//      takvim alanlarini UTC gibi yorumlayip fark almak) FARKLI bir yoldur,
+//      yani test hesabin kendisini tekrarlamiyor.
+//   2. Turkiye 2016 Eylul'unde yaz saatini kalici biraktigi icin ayni piyasa
+//      ani Istanbul'da 2016 oncesi ve sonrasi FARKLI yerel saate duser, Athens
+//      ise AB kuralini kesintisiz surdurdugu icin AYNI saate duser. Seans saati
+//      referansinin neden Athens oldugunun olculmus gerekcesi budur.
+
+const ATHENS = 'Europe/Athens'
+const ISTANBUL = 'Europe/Istanbul'
+
+/** Verilen ayin (0 tabanli) son Pazar gununun ayin kacinci gunu oldugu. */
+function sonPazar (yil, ayIdx) {
+  // Ayin son gunu: bir sonraki ayin 0. gunu.
+  const d = new Date(Date.UTC(yil, ayIdx + 1, 0))
+  d.setUTCDate(d.getUTCDate() - d.getUTCDay())
+  return d.getUTCDate()
+}
+
+const longOffsetFmt = new Map()
+
+/**
+ * Ofseti session.js'ten BAGIMSIZ yoldan cozer: Intl'in longOffset alani
+ * ("GMT+03:00") dogrudan okunur.
+ * @param {number} tSec
+ * @param {string} tz
+ * @returns {number} saniye
+ */
+function bagimsizOfset (tSec, tz) {
+  let f = longOffsetFmt.get(tz)
+  if (f === undefined) {
+    f = new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'longOffset' })
+    longOffsetFmt.set(tz, f)
+  }
+  let metin = ''
+  for (const p of f.formatToParts(new Date(tSec * 1000))) {
+    if (p.type === 'timeZoneName') metin = p.value
+  }
+  if (metin === 'GMT') return 0
+  const m = /^GMT([+-])(\d{2}):(\d{2})$/.exec(metin)
+  assert.ok(m !== null, 'Intl longOffset cozulemedi: ' + metin)
+  return (m[1] === '-' ? -1 : 1) * (+m[2] * 3600 + +m[3] * 60)
+}
+
+const saatFmt = new Map()
+
+/**
+ * Yerel saati (0..23) session.js'ten bagimsiz olarak Intl ile okur.
+ * @param {number} tSec
+ * @param {string} tz
+ * @returns {number}
+ */
+function bagimsizYerelSaat (tSec, tz) {
+  let f = saatFmt.get(tz)
+  if (f === undefined) {
+    f = new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', hour: '2-digit' })
+    saatFmt.set(tz, f)
+  }
+  let h = -1
+  for (const p of f.formatToParts(new Date(tSec * 1000))) {
+    if (p.type === 'hour') h = +p.value
+  }
+  assert.ok(h >= 0, 'Intl saat alani okunamadi')
+  return h === 24 ? 0 : h
+}
+
+test('Athens yaz saati gecis gunleri: gecisin hemen oncesi ve sonrasi dogru kayar', () => {
+  const off = createOffsetLookup(ATHENS)
+  const olcumler = []
+  let kontrol = 0
+
+  for (const yil of [2016, 2021, 2025]) {
+    for (const ayIdx of [2, 9]) {              // Mart ve Ekim
+      const gun = sonPazar(yil, ayIdx)
+      // AB kurali gerceklesmis mi: gun Pazar olmali.
+      assert.equal(new Date(Date.UTC(yil, ayIdx, gun)).getUTCDay(), 0,
+        yil + '-' + (ayIdx + 1) + ' son Pazar hesabi bozuk: ' + gun)
+
+      const gecis = Date.UTC(yil, ayIdx, gun, 1) / 1000   // 01:00 UTC
+      const beklenenOnce = bagimsizOfset(gecis - 1, ATHENS)
+      const beklenenSonra = bagimsizOfset(gecis, ATHENS)
+
+      // 1. Ofset gecisin iki yaninda Intl ile birebir ayni.
+      assert.equal(off(gecis - 1), beklenenOnce,
+        yil + '-' + (ayIdx + 1) + ' gecisten bir saniye once ofset')
+      assert.equal(off(gecis), beklenenSonra,
+        yil + '-' + (ayIdx + 1) + ' gecis aninda ofset')
+      // 2. Kayma tam bir saat ve dogru yonde.
+      const fark = beklenenSonra - beklenenOnce
+      assert.equal(fark, ayIdx === 2 ? SAAT : -SAAT,
+        yil + '-' + (ayIdx + 1) + ' kayma bir saat olmali, olculen ' + fark)
+      // 3. Gecis ANI gercekten burada: bir saat oncesi hala eski ofsette,
+      //    gunun sonu yeni ofsette.
+      assert.equal(off(gecis - SAAT), beklenenOnce)
+      assert.equal(off(gecis + 20 * SAAT), beklenenSonra)
+
+      // 4. Gecis gununun 24 UTC saatinin TAMAMI: yerel saat Intl ile birebir.
+      //    Ayrica yapisal isaret: Athens gecisi yerel 03:00'te olur, yani Mart
+      //    gununde yerel 03 HIC yasanmaz, Ekim gununde IKI KEZ yasanir.
+      const gunBasi = Date.UTC(yil, ayIdx, gun) / 1000
+      const zamanlar = saatDizisi(gunBasi, 24)
+      const saatler = localHourArray(zamanlar, ATHENS)
+      let ucSayisi = 0
+      for (let i = 0; i < zamanlar.length; i++) {
+        const beklenen = bagimsizYerelSaat(zamanlar[i], ATHENS)
+        assert.equal(saatler[i], beklenen,
+          yil + '-' + (ayIdx + 1) + '-' + gun + ' ' + i + '. UTC saatinde yerel saat ' +
+          saatler[i] + ', Intl ' + beklenen + ' diyor')
+        if (saatler[i] === 3) ucSayisi++
+        kontrol++
+      }
+      assert.equal(ucSayisi, ayIdx === 2 ? 0 : 2,
+        yil + '-' + (ayIdx + 1) + ': yerel 03 saati ' + ucSayisi + ' kez gorundu, ' +
+        (ayIdx === 2 ? 'ileri gecis gununde hic gorunmemeli' : 'geri gecis gununde iki kez gorunmeli'))
+
+      olcumler.push(yil + '-' + (ayIdx + 1) + '-' + gun +
+        ' 01:00Z: UTC' + (beklenenOnce / SAAT >= 0 ? '+' : '') + (beklenenOnce / SAAT) +
+        ' -> UTC' + (beklenenSonra / SAAT >= 0 ? '+' : '') + (beklenenSonra / SAAT))
+    }
+  }
+
+  console.log('[session] Athens gecisleri: %s', olcumler.join(' | '))
+  assert.equal(olcumler.length, 6, 'uc yil x iki gecis beklenir')
+  assert.equal(kontrol, 6 * 24)
+})
+
+test('Athens gecis gunlerinde seans etiketi yerel saatle tutarli kalir', () => {
+  // Gecis gunu seans siniflandirmasini bozmamali: her barin seansi o barin
+  // Intl ile okunan yerel saatinden turemis olmali.
+  for (const yil of [2016, 2021, 2025]) {
+    for (const ayIdx of [2, 9]) {
+      const gun = sonPazar(yil, ayIdx)
+      const zamanlar = saatDizisi(Date.UTC(yil, ayIdx, gun) / 1000 - 2 * SAAT, 28)
+      const seanslar = sessionIndexArray(zamanlar, ATHENS)
+      for (let i = 0; i < zamanlar.length; i++) {
+        const beklenen = sessionName(bagimsizYerelSaat(zamanlar[i], ATHENS))
+        assert.equal(SESSIONS[seanslar[i]], beklenen,
+          yil + '-' + (ayIdx + 1) + ' ' + i + '. barda seans ' + SESSIONS[seanslar[i]] +
+          ', yerel saate gore ' + beklenen + ' olmali')
+      }
+      assert.ok(new Set(Array.from(seanslar)).size >= 3, 'gun icinde birkac seans beklenir')
+    }
+  }
+})
+
+test('seans referansi Athens: ayni piyasa ani Athens\'te sabit, Istanbul\'da kayar', () => {
+  // Londra acilisi: kisin 08:00 UTC, yazin 07:00 UTC. AYNI piyasa anidir.
+  const anlar = []
+  for (const yil of [2010, 2012, 2015, 2017, 2021, 2025]) {
+    anlar.push({ yil, mevsim: 'kis', t: Date.UTC(yil, 0, 15, 8) / 1000 })
+    anlar.push({ yil, mevsim: 'yaz', t: Date.UTC(yil, 6, 15, 7) / 1000 })
+  }
+
+  const athensSaatleri = new Set()
+  const istanbulSaatleri = new Set()
+  const istanbulKis = new Map()
+  for (const a of anlar) {
+    const ath = localHourArray(Float64Array.from([a.t]), ATHENS)[0]
+    const ist = localHourArray(Float64Array.from([a.t]), ISTANBUL)[0]
+    // Ikisi de Intl ile bagimsiz dogrulanir.
+    assert.equal(ath, bagimsizYerelSaat(a.t, ATHENS), a.yil + ' ' + a.mevsim + ' Athens')
+    assert.equal(ist, bagimsizYerelSaat(a.t, ISTANBUL), a.yil + ' ' + a.mevsim + ' Istanbul')
+    athensSaatleri.add(ath)
+    istanbulSaatleri.add(ist)
+    if (a.mevsim === 'kis') istanbulKis.set(a.yil, ist)
+  }
+
+  console.log('[session] Londra acilisi yerel saat kumesi -> Athens %j, Istanbul %j; ' +
+    'Istanbul kis saatleri %j',
+  Array.from(athensSaatleri).sort(), Array.from(istanbulSaatleri).sort(),
+  Array.from(istanbulKis.entries()))
+
+  // ATHENS: butun yillarda ve iki mevsimde de TEK bir yerel saat.
+  assert.equal(athensSaatleri.size, 1,
+    'Athens ayni piyasa anini tek yerel saate esler, bulunan: ' +
+    Array.from(athensSaatleri).join(','))
+  assert.ok(athensSaatleri.has(10), 'Athens icin beklenen yerel saat 10')
+
+  // ISTANBUL: iki farkli yerel saat, ayrim tam 2016'dan geciyor.
+  assert.equal(istanbulSaatleri.size, 2,
+    'Istanbul iki farkli yerel saat vermeli, bulunan: ' +
+    Array.from(istanbulSaatleri).join(','))
+  for (const yil of [2010, 2012, 2015]) {
+    assert.equal(istanbulKis.get(yil), 10, yil + ' kisinda Istanbul yerel 10 olmali')
+  }
+  for (const yil of [2017, 2021, 2025]) {
+    assert.equal(istanbulKis.get(yil), 11,
+      yil + ' kisinda Istanbul yerel 11 olmali (2016 Eylul kalici yaz saati)')
+  }
+  // Kayma tam bir saat.
+  assert.equal(istanbulKis.get(2017) - istanbulKis.get(2015), 1)
+})
+
+test('Athens ile Istanbul ofset farki 2016 Eylul\'unden sonra kislari 1 saat acilir', () => {
+  const athens = createOffsetLookup(ATHENS)
+  const istanbul = createOffsetLookup(ISTANBUL)
+  const satirlar = []
+
+  // Kis (Ocak) ve yaz (Temmuz) icin ofset farki. 2016 oncesi iki ulke ayni
+  // kurali uyguluyordu, fark her mevsimde 0'di.
+  const beklenen = {
+    2015: { kis: 0, yaz: 0 },
+    2016: { kis: 0, yaz: 0 },     // Eylul'den ONCE, Ocak ve Temmuz hala ayni
+    2017: { kis: SAAT, yaz: 0 },  // Istanbul kalici +3, Athens kisin +2
+    2025: { kis: SAAT, yaz: 0 },
+  }
+  for (const yil of Object.keys(beklenen).map(Number)) {
+    const kis = U(yil, 0, 15, 12)
+    const yaz = U(yil, 6, 15, 12)
+    const kisFark = istanbul(kis) - athens(kis)
+    const yazFark = istanbul(yaz) - athens(yaz)
+    // Bagimsiz dogrulama.
+    assert.equal(kisFark, bagimsizOfset(kis, ISTANBUL) - bagimsizOfset(kis, ATHENS))
+    assert.equal(yazFark, bagimsizOfset(yaz, ISTANBUL) - bagimsizOfset(yaz, ATHENS))
+    assert.equal(kisFark, beklenen[yil].kis, yil + ' kis ofset farki')
+    assert.equal(yazFark, beklenen[yil].yaz, yil + ' yaz ofset farki')
+    satirlar.push(yil + ': kis ' + (kisFark / SAAT) + 'sa, yaz ' + (yazFark / SAAT) + 'sa')
+  }
+  console.log('[session] Istanbul - Athens ofset farki -> %s', satirlar.join(' | '))
+
+  // Turkiye'nin 2016 Ekim'inde ARTIK gecis yapmadigi, Athens'in yaptigi.
+  const ekim2016 = Date.UTC(2016, 9, sonPazar(2016, 9), 1) / 1000
+  assert.equal(istanbul(ekim2016 - 1), istanbul(ekim2016),
+    'Istanbul 2016 Ekim\'inde geri donmez')
+  assert.notEqual(athens(ekim2016 - 1), athens(ekim2016),
+    'Athens 2016 Ekim\'inde geri doner')
+})

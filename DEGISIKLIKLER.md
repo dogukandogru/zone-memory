@@ -76,6 +76,13 @@ olay geldiginde ayni turdeki en benzer gecmis olaylarla karsilastirilip
 | Alt serit mesaj gecmisi (`#messageLog`) | Son 50 mesaj saklaniyor, hata 12 saniye boyunca ezilmiyor, hata varken motor satiri kirmizi kaliyor. |
 | Klavye kisayollari | Esc, J/K (onceki/sonraki sinyal), 1-6 zaman dilimi, L canli, End guncele don. |
 | Isaret anahtari (`#chartMarkerKey`) | Grafikteki "OL"/"DK" oneklerinin ne demek oldugu artik grafigin kosesinde yaziyor. |
+| Pine kaynagi depoda (`docs/pine/son_pro.pine`) | Portun neye gore yazildigi artik indirilenler klasorunde degil, surum kontrolunde. |
+| Disa aktarim betigi (`docs/pine/son_pro_export.pine`) | Ayni mantik, kutu cizmez; her barda aktif kutu sayisini ve toplamlari yayinlar, TradingView'den CSV olarak alinabilir. |
+| TradingView sadakat testi (`test/tv-parity.test.js`) | Fixture konunca portu BAR BAR karsilastirir; fixture yoksa kendini atlar ve nasil uretilecegini yazar. |
+| Veri kaynagi karsilastirmasi (`scripts/tv-compare.mjs`) | TradingView mumlari ile deponun mumlari ayni indikatorden gecirilip kutu kumeleri eslestirilir; eksik kutularin kaci HACIM kapisinda takildigi raporlanir. |
+| Indikator iz kancasi (`runIndicator(..., trace)`) | Her barin sonunda aktif kutu listesini verir; verilmezse maliyeti yoktur. |
+| Ileriye bakma sizinti testi (`test/leak.test.js`) | Karar barindan sonraki barlar bozulunca olay alanlarinin degismedigini kilitler. |
+| Bagimsiz Pine referansi (`test/helpers/pineRef.js`) | Kutu mantigi Pine metninden AYRICA yazildi; port onunla karsilastiriliyor. |
 
 ## Duzeltilen hatalar (olcumu veya veriyi etkileyenler)
 
@@ -218,6 +225,36 @@ net gosteriyordu. O sayi bir DUZELTMEYE dayanamadi: seans ve saat ozellikleri
 Atina saatine tasinip "ust zaman dilimi trendi" gercekten ust dilimden
 hesaplaninca ayni olcum +1,0 puana indi. Yuz civari islemde gorunen bir fark,
 ozellik tanimindaki bir degisiklige dayanmiyorsa gurultudur.
+
+**Port Pine'a uyuyor, bu artik olculdu.** Kutu mantigi Pine kaynagindan
+(`docs/pine/son_pro.pine`) AYRICA, porta bakilmadan yeniden yazildi
+(`test/helpers/pineRef.js`) ve 5 tohum x 10.000 bar x 5 ayar kumesi = 25
+kosuda karsilastirildi: kutu sayisi, kenarlar, dogum/kirilma/bitis barlari,
+dokunus sayisi ve flow skoru BIREBIR ayni. Kilitlerin gercekten kilitledigi
+mutasyon testiyle dogrulandi (birlestirme dongusune `break` koymak, cooldown
+kosulunu kaldirmak, `live.shift()` yerine `live.pop()`, bar ici sirayi
+degistirmek, mesafeyi `atr[pivotLen]` ile olcmek: besi de yakalandi).
+DIKKAT: bu, portun Pine METNINE uydugunu gosterir; TradingView'in gercek
+calismasiyla karsilastirma icin fixture gerekiyor (README 7.12).
+
+**Pivot esitlik kurali olculdu.** Port "kesin" kurali varsayiyor (merkez bar
+komsularindan kesinlikle buyuk/kucuk, esitlikte pivot yok). Esitlik dahil
+edilseydi varsayilan ayarda bes tohumda 170 yerine 174 kutu cikiyordu;
+kapilar kapaliyken fark tohum basina +1 ile +8 arasinda. Yani bu bir kagit
+uzeri ayrinti degil.
+
+**Ileriye bakma sizintisi aranip bulunamadi.** Karar barindan sonraki barlar
+bozulup her sey yeniden hesaplandiginda hicbir olay alani degismiyor. Testin
+ilk hali, kasitli yerlestirilmis BIR BARLIK bir ileriye bakmayi yakalayamadi
+(sabit uc kesme noktasiyla kuruldugu icin); K her olayin kendi karar barina
+esitlenince iki ayri kasitli hata da yakalandi.
+
+**`ta.stdev` uzun seride birikim yapmiyor ama iptal (cancellation) var.**
+25.000 barda bagil hata 5,3e-14. Ancak sapma fiyat seviyesinin yaninda
+kuculdukce anlamli basamak eriyor: 4800 dolarlik fiyatta 0,05 genlikte bagil
+hata 4,85e-4. Mutlak hata en fazla 4,76e-6 dolar, yani tikin iki binde biri.
+DUZELTILMEDI: TradingView de ayni kayan toplam formulunu kullaniyor,
+Welford'a gecmek Pine'dan UZAKLASTIRABILIR.
 
 Ayrica olculen uc sey:
 

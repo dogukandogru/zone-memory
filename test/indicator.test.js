@@ -765,3 +765,178 @@ test('kuyruk penceresiyle hesaplanan olaylar tam seriyle AYNI cikar', () => {
   // yalnizca olcumu gorunur kilar, kosul degildir.
   assert.ok(kisaFark >= 0)
 })
+
+// ---------------------------------------------------------------------------
+// PINE KURALLARININ KILITLERI
+// ---------------------------------------------------------------------------
+// Asagidaki dort test, docs/pine/son_pro.pine icinde KOLAY GOZDEN KACAN dort
+// kurali sabitler. Hepsi tohum gerektirmeyen, elle kurulmus serilerdir; sayilar
+// olculup yazildi, yani kural bozulursa test kirmiziya doner. Genel parite
+// (10.000 barlik tohumlu seriler, Pine'in bagimsiz referansi) test/
+// pine-parity.test.js dosyasindadir; bu dordu ise TEK kurali yalitir.
+
+// 1) COKLU BIRLESME (Pine 96-118 / 161-183)
+// Birlestirme dongusu ilk eslesmede BREAK ETMEZ: bir pivot, kosula uyan BUTUN
+// ayni yonlu kutulara birlesir. Break eklenirse yalnizca ilk kutu genisler,
+// ikincisi oldugu yerde kalir; bu test o farki yakalar.
+test('coklu birlesme: bir pivot yakin olan TUM ayni yonlu kutulara birlesir', () => {
+  // Uc dip: A = 95,00 ve B = 94,55 birbirinden uzak oldugu icin ayri dogar
+  // (aradaki mesafe birlesme siniri olan atr * 0,55 = ~0,32'nin ustunde).
+  // C = 94,69 tam ortadadir, ikisinin de orta noktasina yakindir.
+  // Hacim 250: flow skoru 7,28 cikar, yani tavan olan 10'un altinda kalir ve
+  // birlesmenin skoru artirdigi GORULEBILIR (20000 hacimde skor zaten 10 olur
+  // ve artis gizlenir).
+  const kur = () => {
+    const d = taslak(600, () => 100)
+    dipEkle(d, 250, 5.00, 250)
+    dipEkle(d, 300, 5.45, 250)
+    dipEkle(d, 350, 5.31, 250)
+    return d
+  }
+  // Kutular birlesme anina kadar yasasin: varsayilan 100 barlik omurde A,
+  // ucuncu pivot onaylanmadan once dusuyor.
+  const par = { maxAgeBars: 5000 }
+
+  const kapali = runIndicator(series.fromArrays(kur()), Object.assign({ mergeAtrMult: 0 }, par), ADIM)
+  assert.equal(kapali.zones.length, 3, 'birlestirme kapaliyken uc ayri kutu olmali')
+
+  const r = runIndicator(series.fromArrays(kur()), par, ADIM)
+  assert.equal(r.zones.length, 2, 'ucuncu pivot yeni kutu acmamali')
+  // Pivot bir kez sayilir, kac kutu genisledigine bakilmaz.
+  assert.equal(r.stats.zonesMerged, 1)
+
+  const [a, b] = r.zones
+  assert.equal(a.pivotBar, 250)
+  assert.equal(b.pivotBar, 300)
+  // ASIL KILIT: dongu durmadigi icin IKI kutu da birlesmeyi gormus olmali.
+  assert.equal(a.mergeCount, 1, 'birinci kutu birlesmeliydi')
+  assert.equal(b.mergeCount, 1, 'IKINCI kutu da birlesmeliydi (dongu break etmez)')
+
+  // Ikisi de genisledi: A asagi dogru (bot 94,77 -> 94,45), B yukari dogru
+  // (top 94,61 -> 94,75).
+  assert.ok(a.bottom < kapali.zones[0].bottom - 0.3,
+    'A kutusu asagi genislemeli: ' + a.bottom + ' < ' + kapali.zones[0].bottom)
+  assert.equal(a.top, kapali.zones[0].top, 'A kutusunun tavani degismez (max alinir)')
+  assert.ok(b.top > kapali.zones[1].top + 0.1,
+    'B kutusu yukari genislemeli: ' + b.top + ' > ' + kapali.zones[1].top)
+  assert.equal(b.bottom, kapali.zones[1].bottom, 'B kutusunun tabani degismez (min alinir)')
+
+  // Ikisinin de skoru ayni miktarda arti: newScore = min(10, old + score * 0,25).
+  const artis = 7.2815533980582524 * 0.25
+  assert.ok(Math.abs((a.flow - kapali.zones[0].flow) - artis) < 1e-9,
+    'A kutusunun skoru score * 0,25 kadar artmali: ' + (a.flow - kapali.zones[0].flow))
+  assert.ok(Math.abs((b.flow - kapali.zones[1].flow) - artis) < 1e-9,
+    'B kutusunun skoru score * 0,25 kadar artmali: ' + (b.flow - kapali.zones[1].flow))
+})
+
+// 2) touchCooldown (Pine 258-265)
+// canAddTouch = na(lastT) or bar_index - lastT >= touchCooldown. Cooldown
+// icindeki dokunus ne skoru artirir ne de touchCount'u.
+test('touchCooldown: cooldown icindeki ikinci dokunus skoru ARTIRMAZ', () => {
+  const kur = () => {
+    const d = taslak(400, () => 100)
+    dipEkle(d, 250, 5, 250)      // kutu: top 95,0575  bot 94,7700  flow 7,2816
+    dipEkle(d, 300, 4.95)        // 1. dokunus (low 95,05)
+    dipEkle(d, 305, 4.95)        // cooldown ICINDE (5 < 12): saymamali
+    dipEkle(d, 320, 4.95)        // cooldown DISINDA (20 >= 12): saymali
+    return d
+  }
+  // Not: 300 ve 305 birbirinin pivot penceresinde ve hacimleri normal, yani
+  // bu dipler yeni kutu acmaz; yalnizca dokunus uretirler.
+
+  const r = runIndicator(series.fromArrays(kur()), {}, ADIM)
+  assert.equal(r.zones.length, 1)
+  const z = r.zones[0]
+  assert.equal(z.touchCount, 2, '300 ve 320 sayilir, 305 cooldown icinde kalir')
+  assert.ok(Math.abs(z.flow - (z.flowAtBirth + 0.70)) < 1e-9,
+    'iki dokunus = +0,70 flow: ' + z.flow + ' (dogum ' + z.flowAtBirth + ')')
+
+  // Cooldown kisalirsa ucuncu dokunus da sayilir: farki yaratan tek sey ayar.
+  const kisa = runIndicator(series.fromArrays(kur()), { touchCooldown: 4 }, ADIM)
+  const zk = kisa.zones[0]
+  assert.equal(zk.touchCount, 3, 'cooldown 4 iken 305 de sayilir')
+  assert.ok(Math.abs(zk.flow - (zk.flowAtBirth + 1.05)) < 1e-9,
+    'uc dokunus = +1,05 flow: ' + zk.flow)
+
+  // Tavan 10 asilmaz (Pine: math.min(10.0, score + 0.35)).
+  const tavan = runIndicator(series.fromArrays((() => {
+    const d = kur()
+    d.volume[250] = 20000          // dogumda flow zaten 10
+    return d
+  })()), { touchCooldown: 1 }, ADIM)
+  assert.equal(tavan.zones[0].flow, 10, 'flow tavani 10 olmali')
+})
+
+// 3) maxZones KIRPMASI ILE BIRLESTIRMENIN ETKILESIMI (Pine 212-223)
+// array.shift takipten CIKARIR; kirpilan kutu grafikte kalir ama artik
+// birlesme dongusunde gorunmez. Bu yuzden ayni seviyeye gelen yeni bir pivot
+// o kutuya birlesemez, YENI kutu acar.
+test('maxZones: kirpilan kutuya sonradan gelen pivot birlesemez, yeni kutu acilir', () => {
+  const kur = () => {
+    const d = taslak(700, () => 100)
+    // Alti ayri destek: her biri digerinden uzak (95, 92, 89, 86, 83, 80).
+    const dipler = [200, 250, 300, 350, 400, 450]
+    for (let k = 0; k < dipler.length; k++) dipEkle(d, dipler[k], 5 + k * 3, 20000)
+    // Yedinci pivot, EN ESKI kutunun (95,00) tam uzerine gelir.
+    dipEkle(d, 500, 5.0, 20000)
+    return d
+  }
+  const par = { maxAgeBars: 5000, boxLengthBars: 5000 }
+
+  // maxZones = 5: altinci kutu dogarken (bar 455) en eski kutu takipten duser.
+  const dar = runIndicator(series.fromArrays(kur()), Object.assign({ maxZones: 5 }, par), ADIM)
+  assert.equal(dar.zones.length, 7, 'kirpilan kutu ciktida kalir, yedinci kutu da acilir')
+  assert.equal(dar.zones[0].endBar, 455, 'en eski kutu altinci kutu dogarken takipten duser')
+  assert.equal(dar.stats.zonesMerged, 0, 'takipten dusen kutuya birlesme olmaz')
+  assert.equal(dar.zones[0].mergeCount, 0)
+  assert.equal(dar.zones[6].pivotBar, 500, 'yedinci pivot YENI kutu acar')
+  assert.equal(dar.zones[6].isSupport, true)
+
+  // maxZones = 24: ayni seri, tek fark kirpma olmamasi. Simdi ayni pivot
+  // birlesiyor ve yedinci kutu HIC acilmiyor.
+  const genis = runIndicator(series.fromArrays(kur()), Object.assign({ maxZones: 24 }, par), ADIM)
+  assert.equal(genis.zones.length, 6, 'kirpma olmayinca yedinci pivot birlesir')
+  assert.equal(genis.stats.zonesMerged, 1)
+  assert.equal(genis.zones[0].mergeCount, 1, 'en eski kutu hala takipte oldugu icin birlesir')
+  assert.ok(genis.zones[0].top > dar.zones[0].top,
+    'birlesen kutu genislemis olmali: ' + genis.zones[0].top + ' > ' + dar.zones[0].top)
+  for (let i = 1; i < 6; i++) {
+    assert.equal(genis.zones[i].mergeCount, 0, i + '. kutu uzakta, birlesmemeli')
+  }
+})
+
+// 4) KIRILMIS KUTUYA DOKUNUS (Pine 261: `touched and canAddTouch and not broken`)
+// Kirilan kutu takipten duser ve skoru bir daha artmaz. Ama kirildigi BARDA
+// dokunus hala sayilir, cunku Pine once dokunusu isler sonra kirilmayi yazar.
+test('kirilmis kutuya yapilan dokunus skoru ARTIRMAZ', () => {
+  // 270. barda fiyat 90'a dusuyor: kapanis 90,15, kutu tabani 94,77, yani
+  // kirilma kesin. O barin tepesi (90,30) kutunun tabaninin ALTINDA oldugu icin
+  // kirilma bari ayni zamanda dokunus DEGILDIR.
+  const d = taslak(400, (i) => (i === 270 ? 90 : 100))
+  dipEkle(d, 250, 5, 250)
+  dipEkle(d, 300, 4.95)        // kirilmadan SONRA kutunun icine giren bar
+  dipEkle(d, 320, 4.95)        // ve bir tane daha
+  const r = runIndicator(series.fromArrays(d), {}, ADIM)
+
+  assert.equal(r.zones.length, 1)
+  const z = r.zones[0]
+  assert.equal(z.broken, true)
+  assert.equal(z.brokenBar, 270)
+  assert.equal(z.touchCount, 0, 'kirilmadan once dokunus yok, sonra da sayilmaz')
+  assert.equal(z.flow, z.flowAtBirth, 'kirilmis kutunun skoru artmaz')
+  assert.equal(r.touches.filter((t) => t.kind === 'touch').length, 0)
+
+  // KIRILDIGI BAR: dokunus ile kirilma ayni barda olursa dokunus SAYILIR.
+  // 270. barda seviye 94,50 (low 94,50 / high 94,80 / close 94,65): tepe kutu
+  // tabaninin (94,77) ustunde oldugu icin dokunus var, kapanis ise
+  // 94,77 - atr * 0,15 = 94,66 esiginin altinda oldugu icin kirilma da var.
+  const e = taslak(400, (i) => (i === 270 ? 94.5 : 100))
+  dipEkle(e, 250, 5, 250)
+  const r2 = runIndicator(series.fromArrays(e), {}, ADIM)
+  const z2 = r2.zones[0]
+  assert.equal(z2.broken, true)
+  assert.equal(z2.brokenBar, 270)
+  assert.equal(z2.touchCount, 1, 'kirildigi barda dokunus hala sayilir (once dokunus, sonra kirilma)')
+  assert.ok(Math.abs(z2.flow - (z2.flowAtBirth + 0.35)) < 1e-9,
+    'kirilma barindaki dokunus +0,35 verir: ' + z2.flow)
+})

@@ -403,6 +403,13 @@ module.exports = {
 `high[c] > max(high[c+1..c+right])` ise `out[c+right] = high[c]`. Esitlikte pivot
 YOKTUR (kesin buyukluk). `pivotLow` simetrigidir.
 
+BU KURAL BIR VARSAYIMDIR ve TradingView'de dogrulanmamistir. Farki olculdu
+(`test/pine-parity.test.js`): esitlik dahil edilseydi varsayilan ayarda bes
+tohumda 170 yerine 174 kutu, kapilar kapaliyken tohum basina +1 ile +8 kutu
+cikiyordu. Yani 0,01 tike yuvarlanmis gercek seride bu bir kagit uzeri
+ayrinti degildir. `test/helpers/pineRef.js` kurali `{ pivotEsitlik }`
+secenegiyle degistirilebilir birakir.
+
 ## 8. `src/core/session.js` (A2)
 
 Seans hesabi VARSAYILAN olarak Europe/Athens saatine gore yapilir (ekranda
@@ -439,7 +446,13 @@ module.exports = {
 > ICIN GECERLI DEGILDIR ve yeniden olculmesi gerekir.
 
 Kullanicinin Pine v6 indikatorunun ("proje son versiyon 3") JavaScript portu.
-Pine kaynagi: `~/Downloads/son pro.txt`.
+Pine kaynagi DEPODA: `docs/pine/son_pro.pine`. Yaninda `son_pro_export.pine`
+var: ayni mantik, kutu cizmez, her barda aktif kutu sayisini ve top/bot/score
+toplamlarini `display.data_window` ile yayinlar. TradingView'de calistirilip
+"Export chart data" ile alinan CSV `test/fixtures/tv_xauusd_<tf>.csv.gz`
+olarak konur ve `test/tv-parity.test.js` portu BAR BAR karsilastirir. Fixture
+yoksa test kendini atlar. Farkli VERI KAYNAKLARININ urettigi kutu farki ayri
+bir sorudur, onu `scripts/tv-compare.mjs` olcer.
 
 Ozet mantik:
 
@@ -1567,7 +1580,8 @@ yollarin bulunmayacagi varsayilmalidir.
 
 Su anda kullanilan indikatorun kaynagi:
 
-- `~/Downloads/son pro.txt` - Pine v6, "proje son versiyon 3".
+- `docs/pine/son_pro.pine` - Pine v6, "proje son versiyon 3" (depoda).
+- `docs/pine/son_pro_export.pine` - ayni mantigin disa aktarim surumu.
   `src/core/indicator/proZones.js` bunun portudur.
 
 Asagidakiler ESKI indikatore (MASTER 1 TOUCH) aittir. Yontem referansi olarak

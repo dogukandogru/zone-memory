@@ -211,3 +211,154 @@ test('isinma bolgeleri sifir degil NaN (sozlesme genel kurali)', () => {
     }
   }
 })
+
+// ===========================================================================
+// A4 EK KILIT - ta.stdev UZUN SERIDE KAYAN NOKTA BIRIKIMI
+// ===========================================================================
+// stdev, KAYAN TOPLAM kullanir: her barda pencereden cikan degeri `sum` ve
+// `sumSq` toplamlarindan cikarir, gireni ekler. Bu O(n) hiz kazandirir ama iki
+// hata kaynagi acar:
+//
+//   1. BIRIKIM. Cikarma ve ekleme yuvarlamalari toplamda birikir. src/core/ta.js
+//      bunu RESYNC_MASK = 4095 ile sinirlar: (i & 4095) === 0 olan barlarda
+//      toplam sifirdan yeniden hesaplanir. Yani birikim en fazla 4096 barlik bir
+//      blokta buyur. Bu testin 4096'dan UZUN olmasi tam bu yuzden gerekli:
+//      daha kisa bir seri resync'i hic sinamaz.
+//   2. IPTAL (cancellation). Varyans `sumSq / L - mean * mean` ile bulunur. Iki
+//      buyuk ve birbirine cok yakin sayinin farki alindigi icin sonucun anlamli
+//      basamaklari erir. Bu, seri uzunlugundan BAGIMSIZDIR; olculdu ve ikinci
+//      testte ayrica raporlanir.
+//
+// Referans DOGRUDAN (iki gecisli) hesaplanir: once pencere ortalamasi, sonra
+// sapma kareleri toplami. Pine'in ta.stdev'i NUFUS (population) sapmasidir,
+// yani L'ye bolunur, L-1'e DEGIL; src/core/ta.js de `sumSq / L - mean * mean`
+// ile ayni seyi yapar (yukaridaki "rollingMean ve stdev: bilinen degerler"
+// testi bunu kucuk ornekte kilitliyor). Referans da bu yuzden L'ye boler.
+
+/** Deterministik PRNG (mulberry32). Testin her kosuda ayni seriyi gormesi icin. */
+function prng (tohum) {
+  let a = tohum >>> 0
+  return function () {
+    a = (a + 0x6D2B79F5) >>> 0
+    let t = a
+    t = Math.imul(t ^ (t >>> 15), t | 1)
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+
+/** Iki gecisli NUFUS standart sapmasi: pencere [i-L+1 .. i]. */
+function dogrudanStdev (a, i, L) {
+  let sum = 0
+  for (let j = i - L + 1; j <= i; j++) sum += a[j]
+  const mean = sum / L
+  let acc = 0
+  for (let j = i - L + 1; j <= i; j++) {
+    const d = a[j] - mean
+    acc += d * d
+  }
+  return Math.sqrt(acc / L)
+}
+
+/**
+ * Kayan toplamli stdev ile iki gecisli referansi butun pencerelerde karsilastirir.
+ * @returns {{maxRel:number, maxAbs:number, bar:number, ref:number}}
+ */
+function stdevSapmasi (src, L) {
+  const out = ta.stdev(src, L)
+  let maxRel = 0
+  let maxAbs = 0
+  let bar = -1
+  let ref = 0
+  for (let i = L - 1; i < src.length; i++) {
+    const beklenen = dogrudanStdev(src, i, L)
+    const abs = Math.abs(out[i] - beklenen)
+    const rel = beklenen > 0 ? abs / beklenen : abs
+    if (rel > maxRel) { maxRel = rel; maxAbs = abs; bar = i; ref = beklenen }
+  }
+  return { maxRel, maxAbs, bar, ref }
+}
+
+test('stdev: 25.000 barlik buyuk ve degisken seride iki gecisli hesapla ortusur', () => {
+  const N = 25000        // 4096'nin alti katindan fazla: resync birkac kez calisir
+  const L = 20
+  const r = prng(987654321)
+  const src = new Float64Array(N)
+  for (let i = 0; i < N; i++) src[i] = 1000 + r() * 4000   // 1000..5000
+
+  const s = stdevSapmasi(src, L)
+  console.log('[ta.stdev] N=%d L=%d en buyuk BAGIL hata %s (mutlak %s, bar %d, referans %s)',
+    N, L, s.maxRel.toExponential(3), s.maxAbs.toExponential(3), s.bar, s.ref.toExponential(3))
+
+  assert.ok(s.bar >= 0, 'karsilastirma yapilmadi')
+  assert.ok(s.maxRel < 1e-9,
+    'kayan toplam birikimi tolerasi asti: bagil hata ' + s.maxRel.toExponential(3) +
+    ' (bar ' + s.bar + ')')
+
+  // Seri gercekten 4096 barlik resync blogunu birkac kez asmali, yoksa test
+  // birikimi hic sinamaz.
+  assert.ok(N > 4096 * 5)
+  // Isinma kurali uzun seride de gecerli.
+  isinmaNaN(ta.stdev(src, L), L - 1, 'stdev')
+})
+
+test('stdev: NUFUS sapmasidir, ORNEK sapmasi DEGIL (uzun seride de)', () => {
+  const N = 20000
+  const L = 20
+  const r = prng(31337)
+  const src = new Float64Array(N)
+  for (let i = 0; i < N; i++) src[i] = 1000 + r() * 4000
+
+  const out = ta.stdev(src, L)
+  // Ornek (sample) sapmasi nufus sapmasinin sqrt(L/(L-1)) katidir: %2,6 fark.
+  const kat = Math.sqrt(L / (L - 1))
+  for (const i of [L - 1, 4095, 4096, 12345, N - 1]) {
+    const nufus = dogrudanStdev(src, i, L)
+    const ornek = nufus * kat
+    yakin(out[i], nufus, Math.max(1e-9, nufus * 1e-9))
+    assert.ok(Math.abs(out[i] - ornek) > nufus * 0.02,
+      i + '. bar ornek sapmasina yakin cikti, Pine nufus sapmasi ister')
+  }
+  assert.ok(kat > 1.02 && kat < 1.03)
+})
+
+test('stdev: sessiz piyasada (stdev << fiyat) iptal hatasi olculur ve raporlanir', () => {
+  // BULGU, duzeltme DEGIL. `sumSq / L - mean * mean` formulu, pencere sapmasi
+  // fiyat seviyesinin yaninda kuculdukce anlamli basamak kaybeder. Olculdu
+  // (L = 20, fiyat 4800 civari):
+  //   genlik 5.00  -> stdev ~0,96   en buyuk bagil hata ~3e-8
+  //   genlik 0.50  -> stdev ~0,093  en buyuk bagil hata ~4e-6
+  //   genlik 0.05  -> stdev ~0,010  en buyuk bagil hata ~5e-4
+  // Bu, seri uzunlugundan degil iptalden gelir: ayni hata 500 barlik seride de
+  // olusur (1,4e-4), yani RESYNC_MASK tazelemesi bunu duzeltmez. Duzeltmesi
+  // Welford ya da iki gecisli hesaba gecmektir, karar kullanicinindir.
+  //
+  // NEDEN TESTI KIRMIZI BIRAKMIYORUZ: hata MUTLAK olarak 5e-6 dolarin
+  // altindadir, mintick 0,01'in yaklasik iki binde biri. Bollinger bandini
+  // (basis +- 2 * stdev) bir tikten kucuk bir miktar kaydirir, yani
+  // proZones'un `pv <= bbLower` kapisinin sonucunu degistiremez. Bu yuzden
+  // kilit MUTLAK hatanin tik altinda kalmasi uzerine kurulu.
+  const N = 25000
+  const L = 20
+  const MINTICK = 0.01
+  const satirlar = []
+  for (const genlik of [5, 0.5, 0.05]) {
+    const r = prng(4242)
+    const src = new Float64Array(N)
+    for (let i = 0; i < N; i++) src[i] = 4800 + (r() - 0.5) * genlik
+
+    const s = stdevSapmasi(src, L)
+    satirlar.push('genlik ' + genlik + ': stdev~' + s.ref.toExponential(2) +
+      ' bagil ' + s.maxRel.toExponential(3) + ' mutlak ' + s.maxAbs.toExponential(3))
+
+    assert.ok(s.maxAbs < MINTICK / 100,
+      'sessiz piyasada stdev hatasi tikin yuzde birini asti (genlik ' + genlik +
+      '): mutlak ' + s.maxAbs.toExponential(3))
+    // Bulgu kaybolmasin: dusuk genlikte bagil hata gercekten 1e-9'un uzerinde.
+    if (genlik <= 0.05) {
+      assert.ok(s.maxRel > 1e-9,
+        'iptal hatasi kaybolmus, yorumdaki bulgu guncellenmeli: ' + s.maxRel.toExponential(3))
+    }
+  }
+  console.log('[ta.stdev] sessiz piyasa iptal hatasi -> %s', satirlar.join(' | '))
+})

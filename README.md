@@ -28,7 +28,10 @@ destek kutusunda ALIŞ, direnç kutusunda SATIŞ.
 Bu sinyallerin bir kısmı tutar, bir kısmı tutmaz. Zone Memory tam olarak bu
 farkı öğrenir:
 
-1. 2009'dan bugüne kadarki tüm XAUUSD mumlarında indikatörü **birebir** çalıştırır.
+1. 2009'dan bugüne kadarki tüm XAUUSD mumlarında indikatörün **JavaScript portunu**
+   çalıştırır. Pine kaynağı depoda (`docs/pine/son_pro.pine`) ve portun sadakati
+   testlerle kilitlidir. TradingView'in kendi çıktısıyla birebir karşılaştırma
+   henüz yapılmadı, nasıl yapılacağı 7. bölümün 12. maddesinde yazıyor.
 2. Her kutu için en fazla bir oluşum ve bir dokunuş olayı kaydeder
    (sistemin öğrenme birimi budur).
 3. Her olayın sonucunu geriye dönük etiketler: bölge tuttu mu (`respect`),
@@ -1272,7 +1275,18 @@ Bunlar açıkça bilinen ve kabul edilmiş sınırlardır:
    bu saatler HistData kaynağında da yok. Böyle bir pencerede kalan olaylar
    hafızaya alınmaz, yani o dönem fiilen ölçüm dışıdır. Deponuzun durumunu
    `node scripts/data-doctor.mjs` ile görün.
-12. **Bu bir karar destek aracıdır, yatırım tavsiyesi değildir.** Emir
+12. **Port TradingView ile birebir karşılaştırılmadı.** Bütün hafıza ve bütün
+   ölçüm, portun Pine ile aynı kutuları ürettiği varsayımına dayanır. Bu
+   varsayımı sınayan altyapı hazır ama son adımı sizin atmanız gerekiyor:
+   `docs/pine/son_pro_export.pine` betiğini kendi TradingView hesabınızda
+   XAUUSD'ye ekleyip "Export chart data" ile aldığınız CSV'yi
+   `test/fixtures/tv_xauusd_15m.csv.gz` olarak koyun; `npm test` o andan
+   itibaren portu **bar bar** karşılaştırır. Fixture yokken o test kendini
+   atlar. Veri kaynağı kaynaklı fark ayrı bir sorudur ve
+   `node scripts/tv-compare.mjs --csv <dosya> --tf 15m` ile ölçülür: rapor,
+   eksik kutuların kaçının **hacim kapısında** takıldığını söyler, çünkü
+   oradaki fark porttan değil brokerin hacminden gelir.
+13. **Bu bir karar destek aracıdır, yatırım tavsiyesi değildir.** Emir
    göndermez, pozisyon açmaz. Verdiği sayılar geçmiş verinin istatistiğidir,
    gelecek vaadi değildir. Alım satım kararları ve sonuçları kullanıcıya aittir.
 

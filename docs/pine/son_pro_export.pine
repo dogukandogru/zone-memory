@@ -1,0 +1,249 @@
+//@version=6
+// ============================================================================
+// proje son versiyon 3 - DISA AKTARIM SURUMU (A4)
+// ----------------------------------------------------------------------------
+// Bu betik `son_pro.pine` ile AYNI kutu mantigini calistirir, ama hicbir kutu
+// CIZMEZ. Bunun yerine her barda birkac sayiyi `plot(..., display.data_window)`
+// ile yayinlar; TradingView'in "Export chart data" ozelligi bu degerleri CSV
+// sutunu olarak verir.
+//
+// NEDEN
+// Uygulamanin JavaScript portu (src/core/indicator/proZones.js) Pine ile AYNI
+// kutulari urettigi VARSAYIMI uzerine kurulu: butun hafiza, butun istatistik
+// ve butun olcum bu varsayima dayaniyor. Ama depoda hicbir TradingView verisi
+// yoktu, yani varsayim hic sinanmamisti. Birlestirme kuralindaki bir fark bu
+// yuzden uzun sure fark edilmeden kalmisti.
+//
+// NASIL KULLANILIR
+//  1. TradingView'da KENDI kullandigin XAUUSD sembolunu ac (hangi broker
+//     oldugu onemli: hacim brokere gore degisir ve kutu kapisi hacme bagli).
+//  2. Zaman dilimini 15m yap, bu betigi grafige ekle.
+//  3. Ayarlari `son_pro.pine` ile AYNI birak (hepsi varsayilan).
+//  4. Sag ustteki menuden "Export chart data" -> "ISO time" yerine UNIX
+//     secilirse daha iyi, ama ISO de kabul edilir.
+//  5. CSV'de su sutunlarin geldigini gozle dogrula: zAktif, zTopTop, zBotTop,
+//     zScoreTop, zAcilan, zBirlesen, zKirilan, pvH, pvL.
+//  6. Dosyayi gzip'leyip depoya koy:
+//       test/fixtures/tv_xauusd_15m.csv.gz
+//     (1h icin tv_xauusd_1h.csv.gz, 5m icin tv_xauusd_5m.csv.gz)
+//  7. `node --test test/tv-parity.test.js` calistir. Fixture yoksa test
+//     kendini atlar, varsa bar bar karsilastirir.
+//
+// NOT: toplamlar (zTopTop, zBotTop, zScoreTop) kutu SIRASINDAN bagimsiz olsun
+// diye TOPLAM olarak yayinlanir; boylece iki uygulamanin kutulari ayni sirada
+// tutmasi gerekmez, yalnizca AYNI KUME olmasi yeter.
+// ============================================================================
+indicator("proje son versiyon 3 - disa aktarim", overlay=false)
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// AYARLAR (son_pro.pine ile birebir ayni)
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+useVolumeFilter   = input.bool(true, "Volume Filtresi Kullan", group="Modüller")
+useBBFilter       = input.bool(true, "Bollinger Band Filtresi Kullan", group="Modüller")
+
+pivotLen        = input.int(5, "Pivot Hassasiyeti", minval=2, maxval=20, group="Bölge Ayarları")
+atrLen          = input.int(14, "ATR Length", minval=5, maxval=100, group="Bölge Ayarları")
+zoneAtrMult     = input.float(0.35, "Zone Kalınlığı / ATR", minval=0.05, maxval=2.0, step=0.05, group="Bölge Ayarları")
+mergeAtrMult    = input.float(0.55, "Yakın Bölgeleri Birleştir / ATR", minval=0.10, maxval=3.0, step=0.05, group="Bölge Ayarları")
+maxZones        = input.int(24, "Maksimum Aktif Bölge", minval=5, maxval=100, group="Bölge Ayarları")
+maxAgeBars      = input.int(100, "Bölge Ömrü / Bar", minval=50, maxval=5000, group="Bölge Ayarları")
+touchCooldown   = input.int(12, "Aynı Bölge Temas Aralığı", minval=1, maxval=100, group="Bölge Ayarları")
+boxLengthBars   = input.int(100, "Kutu Uzunluğu (Mum)", minval=1, maxval=5000, group="Bölge Ayarları")
+
+volumeLen       = input.int(50, "Volume Ortalama", minval=10, maxval=300, group="Volume Ayarları")
+minVolRatio     = input.float(1.05, "Minimum Volume Gücü", minval=0.1, maxval=5.0, step=0.05, group="Volume Ayarları")
+minFlowToShow   = input.float(6.0, "Minimum Flow Değeri", minval=1.0, maxval=10.0, step=0.1, group="Volume Ayarları")
+
+bbLen           = input.int(20, "Bollinger Band Periyot", minval=1, group="Bollinger Band")
+bbMult          = input.float(2.0, "Bollinger Band Std Sapma", minval=0.1, step=0.1, group="Bollinger Band")
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ANA HESAPLAMALAR (son_pro.pine ile birebir ayni)
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+atr   = ta.atr(atrLen)
+volMA = ta.sma(volume, volumeLen)
+
+bbBasis = ta.sma(close, bbLen)
+bbDev   = bbMult * ta.stdev(close, bbLen)
+bbUpper = bbBasis + bbDev
+bbLower = bbBasis - bbDev
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// DIZI SISTEMI. Kutu nesnesi YOK, yalnizca sayilar.
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+var float[] zTop       = array.new_float()
+var float[] zBot       = array.new_float()
+var float[] zScore     = array.new_float()
+var bool[]  zSupport   = array.new_bool()
+var bool[]  zBroken    = array.new_bool()
+var int[]   zBorn      = array.new_int()
+var int[]   zLastTouch = array.new_int()
+
+// Bu barda ne oldu (her barin basinda sifirlanir).
+var int acilan   = 0
+var int birlesen = 0
+var int kirilan  = 0
+acilan   := 0
+birlesen := 0
+kirilan  := 0
+
+ph = ta.pivothigh(high, pivotLen, pivotLen)
+pl = ta.pivotlow(low, pivotLen, pivotLen)
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// DIRENC
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+if not na(ph) and not na(atr[pivotLen])
+    zH    = atr[pivotLen] * zoneAtrMult
+    top   = ph + zH
+    bot   = ph - zH * 0.25
+    vDen  = not na(volMA[pivotLen]) and volMA[pivotLen] > 0 ? volMA[pivotLen] : volume[pivotLen]
+    vR    = vDen > 0 ? volume[pivotLen] / vDen : 1.0
+    score = math.min(10.0, math.max(1.0, vR * 3.0))
+
+    volOK    = not useVolumeFilter or (vR >= minVolRatio and score >= minFlowToShow)
+    bbSellOK = not useBBFilter or (not na(bbUpper[pivotLen]) and ph >= bbUpper[pivotLen])
+
+    if volOK and bbSellOK
+        merged = false
+        if array.size(zTop) > 0
+            for j = 0 to array.size(zTop) - 1
+                sameSide = not array.get(zSupport, j)
+                midOld   = (array.get(zTop, j) + array.get(zBot, j)) / 2.0
+                nearZone = math.abs(ph - midOld) <= atr * mergeAtrMult
+                if sameSide and nearZone
+                    array.set(zScore, j, math.min(10.0, array.get(zScore, j) + score * 0.25))
+                    array.set(zTop, j, math.max(array.get(zTop, j), top))
+                    array.set(zBot, j, math.min(array.get(zBot, j), bot))
+                    array.set(zBroken, j, false)
+                    merged := true
+                    birlesen := birlesen + 1
+        if not merged
+            array.push(zTop, top)
+            array.push(zBot, bot)
+            array.push(zScore, score)
+            array.push(zSupport, false)
+            array.push(zBroken, false)
+            array.push(zBorn, bar_index - pivotLen)
+            array.push(zLastTouch, na)
+            acilan := acilan + 1
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// DESTEK
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+if not na(pl) and not na(atr[pivotLen])
+    zH    = atr[pivotLen] * zoneAtrMult
+    top   = pl + zH * 0.25
+    bot   = pl - zH
+    vDen  = not na(volMA[pivotLen]) and volMA[pivotLen] > 0 ? volMA[pivotLen] : volume[pivotLen]
+    vR    = vDen > 0 ? volume[pivotLen] / vDen : 1.0
+    score = math.min(10.0, math.max(1.0, vR * 3.0))
+
+    volOK   = not useVolumeFilter or (vR >= minVolRatio and score >= minFlowToShow)
+    bbBuyOK = not useBBFilter or (not na(bbLower[pivotLen]) and pl <= bbLower[pivotLen])
+
+    if volOK and bbBuyOK
+        merged = false
+        if array.size(zTop) > 0
+            for j = 0 to array.size(zTop) - 1
+                sameSide = array.get(zSupport, j)
+                midOld   = (array.get(zTop, j) + array.get(zBot, j)) / 2.0
+                nearZone = math.abs(pl - midOld) <= atr * mergeAtrMult
+                if sameSide and nearZone
+                    array.set(zScore, j, math.min(10.0, array.get(zScore, j) + score * 0.25))
+                    array.set(zTop, j, math.max(array.get(zTop, j), top))
+                    array.set(zBot, j, math.min(array.get(zBot, j), bot))
+                    array.set(zBroken, j, false)
+                    merged := true
+                    birlesen := birlesen + 1
+        if not merged
+            array.push(zTop, top)
+            array.push(zBot, bot)
+            array.push(zScore, score)
+            array.push(zSupport, true)
+            array.push(zBroken, false)
+            array.push(zBorn, bar_index - pivotLen)
+            array.push(zLastTouch, na)
+            acilan := acilan + 1
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// FAZLA BOLGE TEMIZLEME (en eskisi takipten cikar)
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+while array.size(zTop) > maxZones
+    array.shift(zTop)
+    array.shift(zBot)
+    array.shift(zScore)
+    array.shift(zSupport)
+    array.shift(zBroken)
+    array.shift(zBorn)
+    array.shift(zLastTouch)
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BOLGELERI GUNCELLEME (sondan basa)
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+if array.size(zTop) > 0
+    int i = array.size(zTop) - 1
+    while i >= 0
+        top    = array.get(zTop, i)
+        bot    = array.get(zBot, i)
+        score  = array.get(zScore, i)
+        sup    = array.get(zSupport, i)
+        born   = array.get(zBorn, i)
+        broken = array.get(zBroken, i)
+        lastT  = array.get(zLastTouch, i)
+
+        tooOld = bar_index - born > maxAgeBars
+
+        if tooOld
+            array.remove(zTop, i)
+            array.remove(zBot, i)
+            array.remove(zScore, i)
+            array.remove(zSupport, i)
+            array.remove(zBroken, i)
+            array.remove(zBorn, i)
+            array.remove(zLastTouch, i)
+        else
+            touched     = low <= top and high >= bot
+            canAddTouch = na(lastT) or bar_index - lastT >= touchCooldown
+
+            if touched and canAddTouch and not broken
+                newScore = math.min(10.0, score + 0.35)
+                array.set(zScore, i, newScore)
+                array.set(zLastTouch, i, bar_index)
+                score := newScore
+
+            breakSupport = sup and close < bot - atr * 0.15
+            breakResist  = not sup and close > top + atr * 0.15
+            newBroken    = broken or breakSupport or breakResist
+            array.set(zBroken, i, newBroken)
+
+            if newBroken
+                kirilan := kirilan + 1
+                array.remove(zTop, i)
+                array.remove(zBot, i)
+                array.remove(zScore, i)
+                array.remove(zSupport, i)
+                array.remove(zBroken, i)
+                array.remove(zBorn, i)
+                array.remove(zLastTouch, i)
+        i := i - 1
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// YAYIN. Hepsi yalnizca veri penceresine, grafige cizilmez.
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+f_toplam(float[] a) =>
+    float t = 0.0
+    if array.size(a) > 0
+        for j = 0 to array.size(a) - 1
+            t := t + array.get(a, j)
+    t
+
+plot(array.size(zTop),      "zAktif",    display=display.data_window)
+plot(f_toplam(zTop),        "zTopTop",   display=display.data_window)
+plot(f_toplam(zBot),        "zBotTop",   display=display.data_window)
+plot(f_toplam(zScore),      "zScoreTop", display=display.data_window)
+plot(acilan,                "zAcilan",   display=display.data_window)
+plot(birlesen,              "zBirlesen", display=display.data_window)
+plot(kirilan,               "zKirilan",  display=display.data_window)
+plot(na(ph) ? 0.0 : ph,     "pvH",       display=display.data_window)
+plot(na(pl) ? 0.0 : pl,     "pvL",       display=display.data_window)
