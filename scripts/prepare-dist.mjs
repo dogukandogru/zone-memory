@@ -43,6 +43,8 @@ const { argumanlariAyristir } = require('../src/core/util/cli.js')
 const KOK = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const ANAHTAR_DOSYASI = path.join(KOK, 'src', 'main', 'apiKeys.local.json')
 const GOMULU_KLASOR = path.join(KOK, 'build', 'bundled-data')
+/** Gomulu ayar yamasinin paket icindeki adi. */
+const AYAR_DOSYASI = 'settings.bundled.json'
 
 /**
  * Pakete GIRMEYECEK dosyalar.
@@ -90,6 +92,38 @@ function anahtariKur(polygon, twelvedata) {
   // Anahtarin TAMAMI HICBIR ZAMAN yazdirilmaz: bu cikti ekrana, CI gunlugune
   // ve terminal gecmisine duser.
   yaz('  API anahtari: gomuldu (' + gorunen.join(', ') + ')')
+}
+
+/**
+ * AYAR YAMASINI DA PAKETE KOYAR.
+ *
+ * NEDEN ZORUNLU: hafiza, bu makinedeki ayarlarla kuruldu ve kendi ayar izini
+ * (cfgHash) tasiyor. Musteri fabrika ayarlariyla acinca iz TUTMUYOR; uygulama
+ * da dogru davranip gonderilen olcumu "eski ayara ait" sayiyor, otomatik
+ * tarama hafizayi bastan kuruyor ve test sinyallerini siliyor. Olculdu:
+ * 5m'de 990 yayinlanan sinyal ilk acilista silindi ve liste bos gorundu.
+ *
+ * API anahtarlari BU DOSYAYA GIRMEZ; onlar ayri bir yoldan (apiKeys.local.json)
+ * gomuluyor, iki yerde birden tasimanin anlami yok.
+ */
+function ayarlariKopyala(userDir) {
+  const kaynak = path.join(userDir, 'settings.json')
+  if (!fs.existsSync(kaynak)) {
+    yaz('  Ayarlar: bu makinede kayitli ayar yok, gomulmedi')
+    return false
+  }
+  let ham = null
+  try {
+    ham = JSON.parse(fs.readFileSync(kaynak, 'utf8'))
+  } catch (err) {
+    yaz('  Ayarlar: dosya okunamadi, gomulmedi (' + (err && err.message) + ')')
+    return false
+  }
+  delete ham.apiKeys
+  fs.writeFileSync(path.join(GOMULU_KLASOR, AYAR_DOSYASI), JSON.stringify(ham, null, 2) + '\n')
+  const alanlar = Object.keys(ham).filter((a) => a !== 'settingsVersion')
+  yaz('  Ayarlar: gomuldu (' + (alanlar.length ? alanlar.join(', ') : 'yalnizca surum') + ')')
+  return true
 }
 
 /** Veri klasorunu gomulu klasore kopyalar. */
@@ -158,6 +192,8 @@ function main() {
     yaz('  Veri: gomulmedi (--no-data)')
   } else {
     veriyiKopyala(kaynakDir)
+    // Ayar yamasi verinin YANINDA gitmek zorunda, yoksa hafiza izi tutmaz.
+    ayarlariKopyala(path.dirname(kaynakDir))
   }
 
   if (kuruMu) {

@@ -126,3 +126,74 @@ test('kopyalanamayan dosya digerlerini durdurmaz', () => {
   assert.strictEqual(sonuc.kopyalandi, 3)
   assert.strictEqual(sonuc.atlanan, 1)
 })
+
+// ---------------------------------------------------------------------------
+// GOMULU AYARLAR
+// ---------------------------------------------------------------------------
+// Hafiza, paketi hazirlayan makinedeki ayarlarla kuruldu ve kendi ayar izini
+// tasiyor. Ayarlar gitmezse musteride iz tutmuyor, otomatik tarama hafizayi
+// bastan kuruyor ve test sinyalleri siliniyor. Gercekte oldu: 5m'de 990
+// yayinlanan sinyal ilk acilista silindi ve liste bos gorundu.
+
+test('gomulu ayarlar kurulur ve veri klasorune SIZMAZ', () => {
+  const { userDir, dataDir, gomulu, firstrun } = tazeKurulum()
+  gomuluDoldur(gomulu)
+  fs.writeFileSync(path.join(gomulu, 'settings.bundled.json'),
+    JSON.stringify({ timeframe: '1h', signalCfg: { minMatches: 20 } }))
+
+  const sonuc = firstrun.kur(gomulu)
+  assert.strictEqual(sonuc.durum, 'kuruldu')
+  assert.strictEqual(sonuc.ayar, 'kuruldu')
+
+  const yazilan = JSON.parse(fs.readFileSync(path.join(userDir, 'settings.json'), 'utf8'))
+  assert.strictEqual(yazilan.timeframe, '1h')
+  assert.strictEqual(yazilan.signalCfg.minMatches, 20)
+
+  // Ayar dosyasi VERI degildir, veri klasorune kopyalanmamali.
+  assert.ok(!fs.existsSync(path.join(dataDir, 'settings.bundled.json')))
+  assert.ok(!fs.existsSync(path.join(dataDir, 'settings.json')))
+})
+
+test('musterinin kendi ayarlari varsa USTUNE YAZILMAZ', () => {
+  const { userDir, gomulu, firstrun } = tazeKurulum()
+  gomuluDoldur(gomulu)
+  fs.writeFileSync(path.join(gomulu, 'settings.bundled.json'),
+    JSON.stringify({ timeframe: '1h' }))
+  fs.writeFileSync(path.join(userDir, 'settings.json'),
+    JSON.stringify({ timeframe: '15m', kendi: true }))
+
+  const sonuc = firstrun.kur(gomulu)
+  assert.strictEqual(sonuc.ayar, 'ayar-zaten-var')
+  const kalan = JSON.parse(fs.readFileSync(path.join(userDir, 'settings.json'), 'utf8'))
+  assert.strictEqual(kalan.timeframe, '15m', 'musterinin ayari degismemeli')
+  assert.strictEqual(kalan.kendi, true)
+})
+
+test('bozuk gomulu ayar dosyasi yazilmaz', () => {
+  const { userDir, gomulu, firstrun } = tazeKurulum()
+  gomuluDoldur(gomulu)
+  fs.writeFileSync(path.join(gomulu, 'settings.bundled.json'), '{ bozuk json')
+
+  const sonuc = firstrun.kur(gomulu)
+  assert.strictEqual(sonuc.ayar, 'hata')
+  assert.ok(!fs.existsSync(path.join(userDir, 'settings.json')),
+    'bozuk ayar yazilmaktansa hic yazilmamali')
+  assert.ok(!fs.existsSync(path.join(userDir, 'settings.json.yukleniyor')),
+    'yarim dosya birakilmamali')
+})
+
+test('veri zaten varken bile ayarlar kurulur', () => {
+  const { userDir, dataDir, gomulu, firstrun } = tazeKurulum()
+  gomuluDoldur(gomulu)
+  fs.writeFileSync(path.join(gomulu, 'settings.bundled.json'), JSON.stringify({ timeframe: '1h' }))
+  fs.mkdirSync(dataDir, { recursive: true })
+  fs.writeFileSync(path.join(dataDir, 'XAUUSD_15m.bin'), 'MUSTERI VERISI')
+
+  // Kullanici veriyi elle koymus ama ayarlari koymamis olabilir; o durumda
+  // da iz tutmaz, yani ayar kurulumu veriden BAGIMSIZ olmali.
+  const sonuc = firstrun.kur(gomulu)
+  assert.strictEqual(sonuc.durum, 'veri-zaten-var')
+  assert.strictEqual(sonuc.ayar, 'kuruldu')
+  assert.strictEqual(
+    JSON.parse(fs.readFileSync(path.join(userDir, 'settings.json'), 'utf8')).timeframe, '1h')
+})

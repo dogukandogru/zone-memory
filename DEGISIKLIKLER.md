@@ -85,7 +85,8 @@ olay geldiginde ayni turdeki en benzer gecmis olaylarla karsilastirilip
 | Bagimsiz Pine referansi (`test/helpers/pineRef.js`) | Kutu mantigi Pine metninden AYRICA yazildi; port onunla karsilastiriliyor. |
 | Pakete gomulu API anahtari (`src/main/apiKeys.local.json`) | Musteriye kurulu halde teslim edilen yapida anahtar hazir gelir. Dosya git'te degildir. SIR SAKLAMA DEGILDIR: asar sifrelenmemistir, kuran herkes anahtari cikarabilir. |
 | Kuruluma gomulu veri (`build/bundled-data` + `src/main/firstrun.js`) | Mum deposu ve hafiza kurulumun icinde geliyor, ilk acilista yerine konuyor. Musteri saatlerce indirip taramak zorunda degil. Var olan verinin USTUNE YAZILMAZ. |
-| Tek komutla teslim paketi (`scripts/prepare-dist.mjs`) | Anahtari yazar, veriyi yedekler haric toplar, paketler. Elle dosya olusturmak ve klasor kopyalamak gerekmiyor. |
+| Tek komutla teslim paketi (`scripts/prepare-dist.mjs`) | Anahtari yazar, veriyi yedekler haric toplar, ayar yamasini ekler, paketler. Elle dosya olusturmak ve klasor kopyalamak gerekmiyor. |
+| Ayar yamasi da paketleniyor | Hafiza, paketi hazirlayan makinenin ayarlariyla kuruldu ve kendi izini tasiyor; ayarlar gitmezse musteride iz tutmuyor ve gonderilen olcum siliniyor. |
 
 ## Duzeltilen hatalar (olcumu veya veriyi etkileyenler)
 
@@ -193,6 +194,13 @@ olay geldiginde ayni turdeki en benzer gecmis olaylarla karsilastirilip
   dilimi basina bir `.bin` dosyasina bakiyor; 30m'nin kendi dosyasi yok, seri
   1m'den uretiliyor. Grafikte binlerce mum gorunurken alt serit "kayıt yok"
   diyordu.
+- **Musteriye gonderilen sinyaller ilk acilista siliniyordu.** Hafiza, paketi
+  hazirlayan makinenin ayarlariyla kurulur ve kendi ayar izini (cfgHash)
+  tasir. Ayar yamasi pakete girmeyince musteri fabrika ayarlariyla aciyor, iz
+  TUTMUYOR, uygulama da dogru davranip gonderilen olcumu "eski ayara ait"
+  sayiyor: otomatik tarama hafizayi bastan kuruyor ve test sinyallerini
+  siliyordu. Olculdu: 5m'de 990 yayinlanan sinyal ilk acilista silindi, liste
+  bos gorundu. Ayar yamasi artik verinin yaninda gidiyor.
 - **`Number(null)` SIFIR tuzagi dorduncu kez.** Bu kez kirilma ani tasimayan
   kutular "1970'te kirilmis" sayiliyor ve her an icin kirik gorunuyordu.
   Tuzak, onu yakalayan testle birlikte kodda adiyla yaziyor.

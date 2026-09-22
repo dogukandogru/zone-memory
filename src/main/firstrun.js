@@ -45,6 +45,49 @@ function gomuluKlasor() {
   return null
 }
 
+/** Gomulu ayar yamasinin paket icindeki adi. */
+const AYAR_DOSYASI = 'settings.bundled.json'
+
+/**
+ * Gomulu ayar yamasini kurar.
+ *
+ * NEDEN ZORUNLU: gonderilen hafiza, paketi hazirlayan makinedeki ayarlarla
+ * kuruldu ve kendi ayar izini (cfgHash) tasiyor. Musteri fabrika ayarlariyla
+ * acarsa iz tutmaz; uygulama dogru davranip gonderilen olcumu "eski ayara
+ * ait" sayar, otomatik tarama hafizayi bastan kurar ve test sinyallerini
+ * siler. Olculdu: 5m'de 990 yayinlanan sinyal ilk acilista silindi ve
+ * sinyal listesi bos gorundu.
+ *
+ * MUSTERININ AYARLARI VARSA DOKUNULMAZ: `settings.json` zaten varsa bu adim
+ * atlanir, yoksa bir guncelleme kurulumu musterinin esiklerini geri alirdi.
+ */
+function ayarlariKur(kaynakDosya) {
+  let hedef = null
+  try {
+    hedef = path.join(paths.userDataDir(), 'settings.json')
+  } catch (err) {
+    return 'yol-yok'
+  }
+  if (fs.existsSync(hedef)) return 'ayar-zaten-var'
+
+  try {
+    const ham = fs.readFileSync(kaynakDosya, 'utf8')
+    // Bicimi dogrula: bozuk bir dosya yazmak, ayarlari hic yazmamaktan kotu.
+    JSON.parse(ham)
+    const gecici = hedef + '.yukleniyor'
+    fs.writeFileSync(gecici, ham)
+    fs.renameSync(gecici, hedef)
+    return 'kuruldu'
+  } catch (err) {
+    logfile.write({
+      level: 'hata',
+      source: 'firstrun',
+      message: 'Gomulu ayarlar kurulamadi: ' + (err && err.message ? err.message : String(err)),
+    })
+    return 'hata'
+  }
+}
+
 /** Hedef klasorde kullanilabilir veri var mi (tek bir .bin yeter). */
 function veriVarMi(klasor) {
   try {
@@ -80,6 +123,8 @@ function kopyala(kaynak, hedef) {
   const sonuc = { kopyalandi: 0, bayt: 0, atlanan: 0 }
   const liste = fs.readdirSync(kaynak)
   for (const ad of liste) {
+    // Ayar yamasi veri degildir, kullanici klasorune ayrica yazilir.
+    if (ad === AYAR_DOSYASI) { sonuc.atlanan++; continue }
     const kYol = path.join(kaynak, ad)
     let st = null
     try {
@@ -141,8 +186,20 @@ function kur(kaynakDir) {
     return { durum: 'klasor-acilamadi' }
   }
 
+  // Ayar yamasi VERIDEN BAGIMSIZ kurulur: kullanici veriyi elle koymus ama
+  // ayarlari koymamis olabilir, o zaman da iz tutmaz.
+  const ayarKaynak = path.join(kaynak, AYAR_DOSYASI)
+  const ayarDurum = fs.existsSync(ayarKaynak) ? ayarlariKur(ayarKaynak) : 'gomulu-ayar-yok'
+  if (ayarDurum === 'kuruldu') {
+    logfile.write({
+      level: 'bilgi',
+      source: 'firstrun',
+      message: 'Gomulu ayarlar kuruldu (hafizanin ayar izi bunlarla tutuyor).',
+    })
+  }
+
   // VAR OLAN VERIYE DOKUNULMAZ.
-  if (veriVarMi(hedef)) return { durum: 'veri-zaten-var' }
+  if (veriVarMi(hedef)) return { durum: 'veri-zaten-var', ayar: ayarDurum }
 
   logfile.write({
     level: 'bilgi',
@@ -161,12 +218,13 @@ function kur(kaynakDir) {
       (sonuc.atlanan > 0 ? ', ' + sonuc.atlanan + ' dosya atlandi' : ''),
   })
 
-  return { durum: 'kuruldu', kopyalandi: sonuc.kopyalandi, bayt: sonuc.bayt }
+  return { durum: 'kuruldu', kopyalandi: sonuc.kopyalandi, bayt: sonuc.bayt, ayar: ayarDurum }
 }
 
 module.exports = {
   kur,
   // Test icin.
+  _ayarlariKur: ayarlariKur,
   _gomuluKlasor: gomuluKlasor,
   _veriVarMi: veriVarMi,
   _kopyala: kopyala,
