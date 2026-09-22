@@ -12,12 +12,20 @@
 //   2. Veri klasorunu build/bundled-data altina kopyalar (yedekler ve gecici
 //      dosyalar HARIC). Kurulum bunu icine alir, uygulama ilk acilista yerine
 //      koyar.
-//   3. electron-builder'i calistirir.
+//   3. electron-builder'i calistirir, istenirse ciktiyi zipler.
 //
 // Kullanim:
+//   node scripts/prepare-dist.mjs --win                    (NSIS kurulumu, wine gerekir)
+//   node scripts/prepare-dist.mjs --win --tasinabilir      (kurulumsuz klasor + zip)
 //   node scripts/prepare-dist.mjs --win --polygon-key ABC123
 //   node scripts/prepare-dist.mjs --win --no-data          (veri gomme)
 //   node scripts/prepare-dist.mjs --win --dry-run          (paketleme, sadece hazirla)
+//
+// TASINABILIR KIP NEDEN VAR
+// NSIS kurulum dosyasi macOS'ta wine ister. Veri ise YALNIZCA bu makinede
+// (470 MB), yani paketi musterinin makinesinde uretmek veriyi disarida
+// birakir. `--tasinabilir` wine olmadan calisir: cikan klasor zip'lenip
+// tasinir, musteri acip exe'yi calistirir, kurulum gerekmez.
 //
 // GERCEK VERIYE YAZMAZ, yalnizca okur.
 
@@ -126,8 +134,18 @@ function main() {
   const kuruMu = arg['dry-run'] === true
   const kaynakDir = typeof arg['data-dir'] === 'string' ? arg['data-dir'] : varsayilanDataDir()
 
+  const tasinabilir = arg['tasinabilir'] === true || arg['portable'] === true
+  // Windows'ta varsayilan mimari x64. Bu Mac arm oldugu icin electron-builder
+  // kendi basina arm64 secip musterinin makinesinde CALISMAYAN bir paket
+  // uretiyordu (olculdu: --win dir, win-arm64-unpacked).
+  const mimari = typeof arg.arch === 'string' ? arg.arch : 'x64'
+
   const hedefler = []
-  if (arg.win === true) hedefler.push('--win')
+  if (arg.win === true) {
+    hedefler.push('--win')
+    if (tasinabilir) hedefler.push('dir')
+    hedefler.push('--' + mimari)
+  }
   if (arg.mac === true) hedefler.push('--mac')
 
   yaz('\nMusteri kurulumu hazirlaniyor')
@@ -159,9 +177,41 @@ function main() {
   })
   if (builder.status !== 0) process.exit(builder.status || 1)
 
+  if (tasinabilir && arg.win === true) {
+    const klasor = path.join(KOK, 'release', mimari === 'x64' ? 'win-unpacked' : 'win-' + mimari + '-unpacked')
+    // Gomulu verinin pakete GERCEKTEN girdigini dogrula. Bos bir
+    // build/bundled-data klasoru sessizce hicbir sey kopyalamaz ve hata
+    // musterinin makinesinde "kayit yok" diye ortaya cikardi.
+    const kaynaklar = path.join(klasor, 'resources', 'bundled-data')
+    if (!veriYok) {
+      if (!fs.existsSync(kaynaklar) || fs.readdirSync(kaynaklar).length === 0) {
+        yaz('\nUYARI: pakette gomulu veri YOK. build/bundled-data bos kalmis olabilir.')
+        process.exitCode = 1
+      } else {
+        yaz('  Pakete giren veri: ' + fs.readdirSync(kaynaklar).length + ' dosya')
+      }
+    }
+
+    const zipYolu = path.join(KOK, 'release', 'ZoneMemory-windows-' + mimari + '.zip')
+    yaz('\nZip hazirlaniyor (birkac dakika surebilir)...')
+    const zip = spawnSync('zip', ['-r', '-q', '-1', zipYolu, path.basename(klasor)], {
+      cwd: path.join(KOK, 'release'), stdio: 'inherit',
+    })
+    if (zip.status !== 0) {
+      yaz('Zip olusturulamadi, klasoru elle sikistirabilirsin: ' + klasor)
+    } else {
+      const st = fs.statSync(zipYolu)
+      yaz('\nBitti: ' + zipYolu + ' (' + boyut(st.size) + ')')
+      yaz('Musteri bunu acip icindeki "Zone Memory.exe" dosyasini calistirir.')
+    }
+    yaz('')
+    return
+  }
+
   yaz('\nBitti. Kurulum dosyasi release/ klasorunde.')
-  if (os.platform() !== 'win32' && hedefler.includes('--win')) {
-    yaz('Not: Windows paketi macOS/Linux uzerinde wine gerektirir.')
+  if (os.platform() !== 'win32' && arg.win === true) {
+    yaz('Not: NSIS kurulum dosyasi macOS uzerinde wine gerektirir.')
+    yaz('     wine yoksa --tasinabilir ile kurulumsuz paket al.')
   }
   yaz('')
 }
