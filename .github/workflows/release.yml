@@ -1,0 +1,67 @@
+# Surum yayinlama.
+#
+# Bir `v*` etiketi gonderildiginde gercek bir Windows makinesinde kurulum
+# dosyasini uretir ve GitHub Releases'a yukler. Musterinin uygulamasi orayi
+# kontrol edip guncellemeyi kendisi indirir.
+#
+# Kullanim:
+#   npm version patch      (package.json surumunu artirir ve etiket atar)
+#   git push --follow-tags
+#
+# NEDEN GERCEK WINDOWS: NSIS kurulum dosyasi macOS'ta wine ister. Burada
+# gercek Windows kosucusu var, wine gerekmez.
+#
+# NEDEN VERISIZ: guncelleme paketlerinde mum deposu YOKTUR. Veri yalnizca ilk
+# kurulumda, elden verilen pakette gider ve musterinin
+# %APPDATA%\Zone Memory\data klasorunde durur; guncelleme oraya dokunmaz.
+# Her guncellemede 300 MB indirmenin anlami olmazdi.
+
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write        # Releases'a yukleyebilmek icin.
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # stamp-build `git describe` kullaniyor.
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      # Testler gecmeden surum cikmaz. Bozuk bir surumu musterinin
+      # makinesine OTOMATIK indirtmek, elle vermekten cok daha kotudur.
+      - run: npm test
+      - run: npm run lint
+
+      # Etiket ile package.json surumu tutmali. Tutmazsa electron-updater
+      # yanlis surumu "yeni" sanip guncelleme dongusune girebilir.
+      - name: Etiket ve surum ayni mi
+        shell: bash
+        run: |
+          etiket="${GITHUB_REF_NAME#v}"
+          surum=$(node -p "require('./package.json').version")
+          if [ "$etiket" != "$surum" ]; then
+            echo "Etiket ($etiket) ile package.json surumu ($surum) tutmuyor."
+            echo "npm version ile artirip yeniden etiketleyin."
+            exit 1
+          fi
+          echo "Surum $surum"
+
+      - name: Paketle ve yayinla
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/prepare-dist.mjs --win --no-data --publish

@@ -14,6 +14,7 @@ const live = require('./live')
 const logfile = require('./logfile')
 const notify = require('./notify')
 const firstrun = require('./firstrun')
+const updater = require('./updater')
 
 const IS_MAC = process.platform === 'darwin'
 const IS_DEV = process.argv.includes('--dev')
@@ -293,6 +294,9 @@ function buildMenu() {
           shell.openPath(logfile.ensureDirSync())
         },
       },
+      { type: 'separator' },
+      { label: 'Guncellemeleri Denetle', click: () => updater.elleKontrol() },
+      { label: 'Surum Notlari', click: () => updater.surumNotlariniAc() },
     ],
   })
 
@@ -374,6 +378,9 @@ if (!gotLock) {
     // Bildirime tiklaninca pencere one gelsin (macOS'ta pencere kapaliysa
     // yeniden olusturulur).
     notify.init({ showWindow: pencereyiGoster })
+    // Otomatik guncelleme. Paketlenmemis ve tasinabilir calistirmada kendini
+    // kapatir, ag hatasi uygulamayi durdurmaz (bkz. updater.js).
+    updater.baslat({ showWindow: pencereyiGoster, emit: ipc.send })
     buildMenu()
     ipc.register()
     engine.start()
@@ -399,5 +406,13 @@ if (!gotLock) {
       // Kapanista hata onemsiz.
     }
     engine.stop()
+    // Kullanici "uygulamayi kapatinca kur" dediyse guncelleme burada kurulur.
+    // Canli akis ve isci ONCE durduruldu: kurulum dosyalari degistirirken
+    // acik bir yazici surec kalmasin.
+    try {
+      updater.cikisKurulumu()
+    } catch (err) {
+      // Kurulum yapilamazsa uygulama normal kapanir.
+    }
   })
 }

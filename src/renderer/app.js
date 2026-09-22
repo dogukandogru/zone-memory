@@ -2501,6 +2501,35 @@ function olaylariBagla() {
     }
   })
 
+  // OTOMATIK GUNCELLEME DURUMU (alt serit).
+  //
+  // Indirme arka planda oluyor; hicbir sey yazmazsak kullanici uygulamanin
+  // neden ag kullandigini ve neden birden "guncelleme hazir" penceresi
+  // ciktigini anlamaz.
+  window.api.on('update:status', (veri) => {
+    if (!veri) return
+    const surum = veri.surum ? ' ' + veri.surum : ''
+    switch (veri.durum) {
+      case 'indiriliyor':
+        bildir('Güncelleme indiriliyor' + surum +
+          (Number.isFinite(veri.yuzde) ? ', %' + veri.yuzde : ''))
+        break
+      case 'indirildi':
+        bildir('Güncelleme indirildi' + surum + ', kurulum için onayınız bekleniyor.')
+        break
+      case 'cikista-kurulacak':
+        bildir('Güncelleme' + surum + ' uygulamayı kapatınca kurulacak.')
+        break
+      case 'hata':
+        // Guncelleme hatasi UYGULAMAYI etkilemez, o yuzden hata degil bilgi.
+        bildir('Güncelleme denetlenemedi: ' + (veri.mesaj || 'bilinmeyen sebep'))
+        break
+      default:
+        // 'bakiliyor' ve 'guncel' sessiz: her acilista satir kirletmesin.
+        break
+    }
+  })
+
   window.api.on('log', (veri) => {
     const mesaj = typeof veri === 'string' ? veri : (veri && (veri.message || veri.msg))
     if (mesaj) bildir(String(mesaj))

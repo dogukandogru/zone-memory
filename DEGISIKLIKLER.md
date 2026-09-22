@@ -87,6 +87,8 @@ olay geldiginde ayni turdeki en benzer gecmis olaylarla karsilastirilip
 | Kuruluma gomulu veri (`build/bundled-data` + `src/main/firstrun.js`) | Mum deposu ve hafiza kurulumun icinde geliyor, ilk acilista yerine konuyor. Musteri saatlerce indirip taramak zorunda degil. Var olan verinin USTUNE YAZILMAZ. |
 | Tek komutla teslim paketi (`scripts/prepare-dist.mjs`) | Anahtari yazar, veriyi yedekler haric toplar, ayar yamasini ekler, paketler. Elle dosya olusturmak ve klasor kopyalamak gerekmiyor. |
 | Ayar yamasi da paketleniyor | Hafiza, paketi hazirlayan makinenin ayarlariyla kuruldu ve kendi izini tasiyor; ayarlar gitmezse musteride iz tutmuyor ve gonderilen olcum siliniyor. |
+| Otomatik guncelleme (`src/main/updater.js`) | Musteri uygulamayi acinca yeni surum var mi bakilir, varsa arka planda indirilir; KURULUM kullaniciya sorulur, cunku kurulum uygulamayi kapatir ve suren bir taramayi cope atardi. Veriye dokunmaz. |
+| Surum yayinlama is akisi (`.github/workflows/release.yml`) | `v*` etiketi atilinca gercek Windows kosucusunda derlenip GitHub Releases'a yuklenir. Testler gecmeden surum cikmaz. |
 
 ## Duzeltilen hatalar (olcumu veya veriyi etkileyenler)
 

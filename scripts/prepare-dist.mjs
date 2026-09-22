@@ -20,6 +20,7 @@
 //   node scripts/prepare-dist.mjs --win --polygon-key ABC123
 //   node scripts/prepare-dist.mjs --win --no-data          (veri gomme)
 //   node scripts/prepare-dist.mjs --win --dry-run          (paketleme, sadece hazirla)
+//   node scripts/prepare-dist.mjs --win --no-data --publish (surum yayinla, CI)
 //
 // TASINABILIR KIP NEDEN VAR
 // NSIS kurulum dosyasi macOS'ta wine ister. Veri ise YALNIZCA bu makinede
@@ -208,8 +209,12 @@ function main() {
   })
   if (damga.status !== 0) process.exit(damga.status || 1)
 
+  // --publish: GitHub Releases'a yukler (CI'da kullanilir). Yerelde ASLA
+  // varsayilan degildir; elle calistirirken kazara surum yayinlanmamali.
+  if (arg.publish === true) hedefler.push('--publish', 'always')
+
   const builder = spawnSync('npx', ['electron-builder', ...hedefler], {
-    cwd: KOK, stdio: 'inherit', env: process.env,
+    cwd: KOK, stdio: 'inherit', env: process.env, shell: process.platform === 'win32',
   })
   if (builder.status !== 0) process.exit(builder.status || 1)
 

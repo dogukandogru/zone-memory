@@ -32,6 +32,7 @@
     "typescript": "^5.9.0"
   },
   "dependencies": {
+    "electron-updater": "^6.8.9",
     "lightweight-charts": "4.2.3"
   },
   "build": {
@@ -89,6 +90,13 @@
         "filter": [
           "**/*"
         ]
+      }
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "dogukandogru",
+        "repo": "zone-memory"
       }
     ]
   }
