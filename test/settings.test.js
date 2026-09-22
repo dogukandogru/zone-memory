@@ -175,3 +175,66 @@ test('__proto__ ve constructor anahtarlari Object.prototype\'a yazamaz', () => {
     assert.strictEqual(settings.get('timeframe'), '1h')
   }
 })
+
+// ---------------------------------------------------------------------------
+// PAKETE GOMULU API ANAHTARI
+// ---------------------------------------------------------------------------
+// Musteriye kurulu halde teslim edilen yapida anahtarin hazir gelmesi icin
+// `src/main/apiKeys.local.json` okunur. Dosya git'te DEGILDIR; bu testler
+// dosyanin olmadigi (normal gelistirme) ve oldugu (musteri yapisi) halleri
+// birlikte kilitler.
+//
+// Not: bu bir sir saklama yontemi DEGILDIR, asar sifrelenmis degildir.
+
+const ANAHTAR_DOSYASI = path.join(__dirname, '..', 'src', 'main', 'apiKeys.local.json')
+
+test('gomulu anahtar dosyasi YOKKEN anahtarlar bos gelir', () => {
+  if (fs.existsSync(ANAHTAR_DOSYASI)) {
+    // Gelistiricinin gercek anahtari duruyor olabilir, ona DOKUNMAYIZ.
+    return
+  }
+  const { settings } = tazeAyarlar()
+  assert.strictEqual(settings.get('apiKeys.polygon'), '')
+  assert.strictEqual(settings.get('apiKeys.twelvedata'), '')
+})
+
+test('gomulu anahtar varsayilan olur, kullanici ezebilir, diske yazilmaz', () => {
+  if (fs.existsSync(ANAHTAR_DOSYASI)) return   // gercek anahtari ezme
+
+  fs.writeFileSync(ANAHTAR_DOSYASI, JSON.stringify({
+    polygon: '  GOMULU_POLYGON  ',            // bosluklar kirpilmali
+    twelvedata: '',                            // bos deger yok sayilmali
+    kotuAlan: 'yoksayilmali',
+  }))
+  try {
+    const { dir, settings } = tazeAyarlar()
+
+    assert.strictEqual(settings.get('apiKeys.polygon'), 'GOMULU_POLYGON')
+    assert.strictEqual(settings.get('apiKeys.twelvedata'), '')
+    assert.strictEqual(settings.get('apiKeys.kotuAlan'), undefined)
+
+    // Varsayilana ESIT oldugu icin ayar dosyasina yazilmaz.
+    settings.applySetPayload({ patch: { timeframe: '1h' } })
+    assert.strictEqual(diskten(dir).apiKeys, undefined,
+      'gomulu anahtar kullanici dosyasina kopyalanmamali')
+
+    // Musteri kendi anahtarini girerse gomulu olani ezer ve diske yazilir.
+    settings.applySetPayload({ key: 'apiKeys.polygon', value: 'MUSTERI' })
+    assert.strictEqual(settings.get('apiKeys.polygon'), 'MUSTERI')
+    assert.strictEqual(diskten(dir).apiKeys.polygon, 'MUSTERI')
+  } finally {
+    fs.unlinkSync(ANAHTAR_DOSYASI)
+  }
+})
+
+test('bozuk gomulu anahtar dosyasi uygulamayi durdurmaz', () => {
+  if (fs.existsSync(ANAHTAR_DOSYASI)) return
+
+  fs.writeFileSync(ANAHTAR_DOSYASI, '{ bu gecerli json degil')
+  try {
+    const { settings } = tazeAyarlar()
+    assert.strictEqual(settings.get('apiKeys.polygon'), '')
+  } finally {
+    fs.unlinkSync(ANAHTAR_DOSYASI)
+  }
+})

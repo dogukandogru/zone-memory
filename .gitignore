@@ -40,3 +40,6 @@ Thumbs.db
 # Uretilen kurulum paketleri
 release/
 src/build-info.json
+
+# Pakete gomulen API anahtarlari (musteri yapisi icin). Git gecmisine GIRMEZ.
+src/main/apiKeys.local.json

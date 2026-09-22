@@ -1338,6 +1338,16 @@ module.exports = {
 
   **Sifirlama.** `settings:reset` -> `varsayilanlaraDon()`: tum ayarlar
   varsayilana doner ama `apiKeys`, `providers` ve `timeframe` KORUNUR.
+
+  **Pakete gomulu API anahtari.** `src/main/apiKeys.local.json` varsa
+  (`{ "polygon": "...", "twelvedata": "..." }`) icindeki degerler
+  `DEFAULTS.apiKeys` olur. Amac, musteriye kurulu halde teslim edilen yapida
+  anahtarin hazir gelmesidir. Dosya `.gitignore` icindedir, yani anahtar git
+  gecmisine girmez; electron-builder `src/**` globuyla paketledigi icin
+  kurulumda bulunur. Varsayilana ESIT oldugu icin kullanicinin
+  `settings.json` dosyasina KOPYALANMAZ; musteri kendi anahtarini girerse
+  o yazilir ve gomulu olani ezer. Dosya yoksa ya da bozuksa anahtarlar bos
+  gelir. BU BIR SIR SAKLAMA YONTEMI DEGILDIR: asar sifrelenmemistir.
 - `engine.js`: `worker_threads` ile tek isci baslatir, `call(cmd, payload, onProgress)`
   Promise dondurur, id ile eslestirir. Isci cokerse yeniden baslatir.
 - `worker/engine.worker.js`: komut yonlendirici. Komutlar:

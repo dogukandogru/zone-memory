@@ -83,6 +83,7 @@ olay geldiginde ayni turdeki en benzer gecmis olaylarla karsilastirilip
 | Indikator iz kancasi (`runIndicator(..., trace)`) | Her barin sonunda aktif kutu listesini verir; verilmezse maliyeti yoktur. |
 | Ileriye bakma sizinti testi (`test/leak.test.js`) | Karar barindan sonraki barlar bozulunca olay alanlarinin degismedigini kilitler. |
 | Bagimsiz Pine referansi (`test/helpers/pineRef.js`) | Kutu mantigi Pine metninden AYRICA yazildi; port onunla karsilastiriliyor. |
+| Pakete gomulu API anahtari (`src/main/apiKeys.local.json`) | Musteriye kurulu halde teslim edilen yapida anahtar hazir gelir. Dosya git'te degildir. SIR SAKLAMA DEGILDIR: asar sifrelenmemistir, kuran herkes anahtari cikarabilir. |
 
 ## Duzeltilen hatalar (olcumu veya veriyi etkileyenler)
 

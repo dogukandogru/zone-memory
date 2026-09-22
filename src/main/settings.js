@@ -26,6 +26,38 @@ function coreConst(modulePath, name, fallback) {
   return fallback
 }
 
+/**
+ * PAKETE GOMULU API ANAHTARLARI (istege bagli).
+ *
+ * Musteriye kurulu halde teslim edilen bir yapida anahtarin hazir gelmesi
+ * icin: `src/main/apiKeys.local.json` dosyasi olusturulur ve icine
+ * `{ "polygon": "...", "twelvedata": "..." }` yazilir. Dosya `.gitignore`
+ * icindedir, yani anahtar git gecmisine GIRMEZ; ama electron-builder
+ * `src/**` globuyla paketledigi icin kurulumda bulunur.
+ *
+ * DIKKAT, BU BIR SIR SAKLAMA YONTEMI DEGILDIR. asar arsivi sifrelenmis
+ * degildir; uygulamayi kuran herkes anahtari cikarabilir. Yalnizca
+ * "musteri elle girmek zorunda kalmasin" kolayligidir.
+ *
+ * Dosya yoksa davranis degismez, anahtarlar bos gelir.
+ */
+function gomuluAnahtarlar() {
+  try {
+    // Yol sabit yazilir: dinamik require paketleyicinin dosyayi bulmasini
+    // engelleyebilir.
+    const ham = require('./apiKeys.local.json')
+    if (!ham || typeof ham !== 'object') return {}
+    const out = {}
+    for (const ad of ['twelvedata', 'polygon']) {
+      if (typeof ham[ad] === 'string' && ham[ad].trim() !== '') out[ad] = ham[ad].trim()
+    }
+    return out
+  } catch (err) {
+    // Dosya yok ya da bozuk: anahtarsiz devam.
+    return {}
+  }
+}
+
 const DEFAULTS = {
   symbol: 'XAUUSD',
   timeframe: '5m',
@@ -39,7 +71,7 @@ const DEFAULTS = {
   // izler, aradaki seviye farki basis duzeltmesiyle kapatilir (loader.js).
   // En dogru canli spot fiyat icin Polygon (C:XAUUSD) anahtari onerilir.
   providers: { history: 'histdata', live: 'binance' },
-  apiKeys: { twelvedata: '', polygon: '' },
+  apiKeys: Object.assign({ twelvedata: '', polygon: '' }, gomuluAnahtarlar()),
   // GERIYE TEST VE PLAN MALIYETI
   // Islem maliyeti ve kayma olcumun en belirleyici girdisidir (1 dakikalikta
   // brut edimin tamamini yiyor) ama bir donem yalnizca kodda sabitti ve
