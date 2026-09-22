@@ -89,6 +89,7 @@ olay geldiginde ayni turdeki en benzer gecmis olaylarla karsilastirilip
 | Ayar yamasi da paketleniyor | Hafiza, paketi hazirlayan makinenin ayarlariyla kuruldu ve kendi izini tasiyor; ayarlar gitmezse musteride iz tutmuyor ve gonderilen olcum siliniyor. |
 | Otomatik guncelleme (`src/main/updater.js`) | Musteri uygulamayi acinca yeni surum var mi bakilir, varsa arka planda indirilir; KURULUM kullaniciya sorulur, cunku kurulum uygulamayi kapatir ve suren bir taramayi cope atardi. Veriye dokunmaz. |
 | Surum yayinlama is akisi (`.github/workflows/release.yml`) | `v*` etiketi atilinca gercek Windows kosucusunda derlenip GitHub Releases'a yuklenir. Testler gecmeden surum cikmaz. |
+| Alt seritte gorunur surum (`#statusVersion`) | Musteri guncellemenin gelip gelmedigini, biz de hangi surumde sorun oldugunu baska turlu anlayamiyorduk. Gelistirme ve commit edilmemis kod ayrica isaretleniyor. |
 
 ## Duzeltilen hatalar (olcumu veya veriyi etkileyenler)
 

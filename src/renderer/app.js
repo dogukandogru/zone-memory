@@ -2648,6 +2648,20 @@ async function yapiDamgasiniYaz() {
   if (bilgi.dev) parcalar.push('geliştirme')
   document.title = parcalar.join(' - ')
 
+  // Alt seritte gorunur surum. Kirli agacta ve gelistirme calistirmasinda
+  // isaretlenir: "v0.2.2" yazan bir ekran goruntusu, aslinda commit
+  // edilmemis bir koddan geliyorsa yanlis yonlendirir.
+  const sv = el('statusVersion')
+  if (sv) {
+    let metin = 'v' + (bilgi.version || '?')
+    if (bilgi.dev) metin += ' (geliştirme)'
+    else if (bilgi.dirty) metin += ' (değiştirilmiş)'
+    sv.textContent = metin
+    sv.title = 'Sürüm ' + (bilgi.version || '?') +
+      (bilgi.builtAt ? ', yapı ' + bilgi.builtAt : '') +
+      (bilgi.commit ? ', commit ' + bilgi.commit : '')
+  }
+
   const e = el('statusClock')
   if (e) {
     e.title = 'Sürüm ' + (bilgi.version || '?') +
