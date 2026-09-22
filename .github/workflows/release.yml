@@ -26,6 +26,18 @@ on:
 permissions:
   contents: write        # Releases'a yukleyebilmek icin.
 
+# AYNI ANDA TEK KOSU.
+#
+# Iki etiket birlikte gonderildiginde (v0.2.1 ve v0.2.2 ayni anda) iki kosu
+# paralel calisti ve electron-builder ayni etiket icin IKI surum olusturdu:
+# birinde latest.yml ve kurulum dosyasi, otekinde yalnizca blockmap. GitHub'in
+# "en son surum" dedigi yer blockmap'i olan bos surume dustu, yani
+# electron-updater latest.yml'i bulamayacak duruma geldi ve otomatik
+# guncelleme sessizce kirilirdi.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   windows:
     runs-on: windows-latest
