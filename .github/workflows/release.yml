@@ -72,8 +72,49 @@ jobs:
           fi
           echo "Surum $surum"
 
+      # SURUMU ONCE BIZ OLUSTURUYORUZ.
+      #
+      # electron-builder her varligi ayri yukluyor ve surum henuz yoksa her
+      # yukleme kendi surumunu olusturmaya calisiyor. Olculdu: ayni etiket
+      # icin IKI surum cikti, birinde latest.yml ve kurulum dosyasi, otekinde
+      # yalnizca blockmap. GitHub'in /releases/latest adresi ikisinden birine
+      # dusuyor; bos olana dustugunde electron-updater latest.yml'i bulamaz
+      # ve otomatik guncelleme sessizce kirilir. Surum onceden varsa
+      # electron-builder onun icine yukler ve yaris olmaz.
+      - name: Surumu olustur
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "Surum zaten var, yeniden olusturulmuyor."
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --title "$GITHUB_REF_NAME" \
+              --notes "Otomatik yayin. Degisiklikler icin DEGISIKLIKLER.md dosyasina bakin."
+          fi
+
       - name: Paketle ve yayinla
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: node scripts/prepare-dist.mjs --win --no-data --publish
+
+      # Yine de iki surum olustuysa erken yakala: bozuk bir yayin, musterinin
+      # guncelleme alamamasi demek ve bunu ancak aylar sonra fark ederdik.
+      - name: Tek surum ve latest.yml dogrulamasi
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          adet=$(gh api repos/${GITHUB_REPOSITORY}/releases --jq "[.[] | select(.tag_name==\"$GITHUB_REF_NAME\")] | length")
+          if [ "$adet" != "1" ]; then
+            echo "HATA: $GITHUB_REF_NAME etiketi icin $adet surum var, 1 olmali."
+            exit 1
+          fi
+          son=$(gh api repos/${GITHUB_REPOSITORY}/releases/latest --jq '[.assets[].name] | join(",")')
+          echo "En son surumdeki dosyalar: $son"
+          case "$son" in
+            *latest.yml*) echo "latest.yml yerinde." ;;
+            *) echo "HATA: en son surumde latest.yml yok, otomatik guncelleme calismaz."; exit 1 ;;
+          esac
