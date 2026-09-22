@@ -96,7 +96,8 @@
       {
         "provider": "github",
         "owner": "dogukandogru",
-        "repo": "zone-memory"
+        "repo": "zone-memory",
+        "releaseType": "release"
       }
     ]
   }
