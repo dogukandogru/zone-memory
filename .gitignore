@@ -43,3 +43,6 @@ src/build-info.json
 
 # Pakete gomulen API anahtarlari (musteri yapisi icin). Git gecmisine GIRMEZ.
 src/main/apiKeys.local.json
+
+# Musteri kurulumuna gomulen veri (prepare-dist.mjs uretir).
+build/bundled-data/

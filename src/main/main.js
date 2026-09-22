@@ -13,6 +13,7 @@ const engine = require('./engine')
 const live = require('./live')
 const logfile = require('./logfile')
 const notify = require('./notify')
+const firstrun = require('./firstrun')
 
 const IS_MAC = process.platform === 'darwin'
 const IS_DEV = process.argv.includes('--dev')
@@ -350,6 +351,18 @@ if (!gotLock) {
     paths.ensureDirs()
     // Eski gunlukleri temizle ve klasoru kur.
     logfile.init()
+    // ILK ACILIS: pakete gomulu veri varsa yerine kopyalanir. Isci
+    // BASLAMADAN once yapilir, yoksa yari dolu bir veri klasorunu okur.
+    // Var olan veriye asla dokunmaz (bkz. firstrun.js).
+    try {
+      firstrun.kur()
+    } catch (err) {
+      logfile.write({
+        level: 'hata',
+        source: 'firstrun',
+        message: 'Gomulu veri kurulamadi: ' + (err && err.message ? err.message : String(err)),
+      })
+    }
     // Kamera, mikrofon, konum gibi izinler bu uygulamada HIC gerekmiyor;
     // varsayilan olarak hepsi reddedilir.
     try {

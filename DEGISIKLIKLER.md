@@ -84,6 +84,8 @@ olay geldiginde ayni turdeki en benzer gecmis olaylarla karsilastirilip
 | Ileriye bakma sizinti testi (`test/leak.test.js`) | Karar barindan sonraki barlar bozulunca olay alanlarinin degismedigini kilitler. |
 | Bagimsiz Pine referansi (`test/helpers/pineRef.js`) | Kutu mantigi Pine metninden AYRICA yazildi; port onunla karsilastiriliyor. |
 | Pakete gomulu API anahtari (`src/main/apiKeys.local.json`) | Musteriye kurulu halde teslim edilen yapida anahtar hazir gelir. Dosya git'te degildir. SIR SAKLAMA DEGILDIR: asar sifrelenmemistir, kuran herkes anahtari cikarabilir. |
+| Kuruluma gomulu veri (`build/bundled-data` + `src/main/firstrun.js`) | Mum deposu ve hafiza kurulumun icinde geliyor, ilk acilista yerine konuyor. Musteri saatlerce indirip taramak zorunda degil. Var olan verinin USTUNE YAZILMAZ. |
+| Tek komutla teslim paketi (`scripts/prepare-dist.mjs`) | Anahtari yazar, veriyi yedekler haric toplar, paketler. Elle dosya olusturmak ve klasor kopyalamak gerekmiyor. |
 
 ## Duzeltilen hatalar (olcumu veya veriyi etkileyenler)
 

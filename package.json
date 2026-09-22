@@ -20,9 +20,9 @@
     "typecheck": "tsc --noEmit -p jsconfig.json",
     "import-legacy": "node scripts/import-legacy.mjs",
     "fetch-history": "node scripts/fetch-history.mjs",
-    "dist": "node scripts/stamp-build.mjs --dist && electron-builder",
-    "dist:mac": "node scripts/stamp-build.mjs --dist && electron-builder --mac",
-    "dist:win": "node scripts/stamp-build.mjs --dist && electron-builder --win",
+    "dist": "node scripts/prepare-dist.mjs",
+    "dist:mac": "node scripts/prepare-dist.mjs --mac",
+    "dist:win": "node scripts/prepare-dist.mjs --win",
     "stamp": "node scripts/stamp-build.mjs"
   },
   "devDependencies": {
@@ -81,6 +81,15 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "shortcutName": "Zone Memory"
-    }
+    },
+    "extraResources": [
+      {
+        "from": "build/bundled-data",
+        "to": "bundled-data",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ]
   }
 }
