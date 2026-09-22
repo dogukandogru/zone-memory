@@ -46,6 +46,16 @@ const ANAHTAR_DOSYASI = path.join(KOK, 'src', 'main', 'apiKeys.local.json')
 const GOMULU_KLASOR = path.join(KOK, 'build', 'bundled-data')
 /** Gomulu ayar yamasinin paket icindeki adi. */
 const AYAR_DOSYASI = 'settings.bundled.json'
+/**
+ * Musteriye gidecek varsayilan esikler, DEPODA tutulur.
+ *
+ * Neden depoda: surum yayinlamayi GitHub Actions yapiyor ve orada kimsenin
+ * `settings.json` dosyasi yok. Bu dosya olmasaydi CI'dan cikan kurulumlar
+ * esiksiz gider, musteri fabrika ayarlariyla calisirdi.
+ * Yerelde paketlerken bu makinenin ayarlari onceliklidir; `--ayar-kaydet`
+ * ile bu dosya guncellenir (sonra commit edilir).
+ */
+const AYAR_VARSAYILAN = path.join(KOK, 'build', 'musteri-ayarlari.json')
 
 /**
  * Pakete GIRMEYECEK dosyalar.
@@ -107,10 +117,16 @@ function anahtariKur(polygon, twelvedata) {
  * API anahtarlari BU DOSYAYA GIRMEZ; onlar ayri bir yoldan (apiKeys.local.json)
  * gomuluyor, iki yerde birden tasimanin anlami yok.
  */
-function ayarlariKopyala(userDir) {
-  const kaynak = path.join(userDir, 'settings.json')
+function ayarlariKopyala(userDir, kaydet) {
+  // Once bu makinenin ayarlari, yoksa depodaki varsayilan (CI boyle calisir).
+  let kaynak = path.join(userDir, 'settings.json')
+  let nereden = 'bu makine'
   if (!fs.existsSync(kaynak)) {
-    yaz('  Ayarlar: bu makinede kayitli ayar yok, gomulmedi')
+    kaynak = AYAR_VARSAYILAN
+    nereden = 'depodaki varsayilan'
+  }
+  if (!fs.existsSync(kaynak)) {
+    yaz('  Ayarlar: ne bu makinede ne depoda ayar var, gomulmedi')
     return false
   }
   let ham = null
@@ -121,9 +137,17 @@ function ayarlariKopyala(userDir) {
     return false
   }
   delete ham.apiKeys
+
+  // --ayar-kaydet: bu makinenin esiklerini depodaki varsayilana yaz.
+  if (kaydet && nereden === 'bu makine') {
+    fs.mkdirSync(path.dirname(AYAR_VARSAYILAN), { recursive: true })
+    fs.writeFileSync(AYAR_VARSAYILAN, JSON.stringify(ham, null, 2) + '\n')
+    yaz('  Ayarlar: depodaki varsayilan guncellendi (commit etmeyi unutmayin)')
+  }
   fs.writeFileSync(path.join(GOMULU_KLASOR, AYAR_DOSYASI), JSON.stringify(ham, null, 2) + '\n')
   const alanlar = Object.keys(ham).filter((a) => a !== 'settingsVersion')
-  yaz('  Ayarlar: gomuldu (' + (alanlar.length ? alanlar.join(', ') : 'yalnizca surum') + ')')
+  yaz('  Ayarlar: gomuldu, kaynak ' + nereden +
+    ' (' + (alanlar.length ? alanlar.join(', ') : 'yalnizca surum') + ')')
   return true
 }
 
@@ -193,9 +217,10 @@ function main() {
     yaz('  Veri: gomulmedi (--no-data)')
   } else {
     veriyiKopyala(kaynakDir)
-    // Ayar yamasi verinin YANINDA gitmek zorunda, yoksa hafiza izi tutmaz.
-    ayarlariKopyala(path.dirname(kaynakDir))
   }
+  // AYARLAR VERIDEN BAGIMSIZ GIDER. Guncelleme paketlerinde veri yoktur ama
+  // esikler yine de gitmeli: musteri fabrika esikleriyle kalmasin.
+  ayarlariKopyala(path.dirname(kaynakDir), arg['ayar-kaydet'] === true)
 
   if (kuruMu) {
     yaz('\n--dry-run verildi, paketleme yapilmadi.\n')

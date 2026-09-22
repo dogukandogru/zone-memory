@@ -1,0 +1,14 @@
+{
+  "settingsVersion": 2,
+  "timeframe": "1h",
+  "outcomeCfg": {
+    "targetAtr": 1.5
+  },
+  "signalCfg": {
+    "minMatches": 20,
+    "minWinRate": 0.5,
+    "minRr": 0.8,
+    "priorStrength": 10,
+    "minSimilarity": 0.8
+  }
+}
