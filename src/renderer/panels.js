@@ -286,84 +286,6 @@ function tiklamaBagla(satir, geri, veri) {
 /* ------------------------------------------------------------------ */
 
 /**
- * IKI SEKIL EGRISINI UST USTE cizer.
- *
- * NEDEN: benzerlik listesinde yalnizca bir sayi vardi (0,942) ve kullanici
- * "neye gore benzetmis" sorusunu ekrandan cevaplayamiyordu. Varsayilan
- * benzerlik olcutu GORSEL SEKIL oldugu icin, benzetmenin tamami bu iki
- * egrinin ortusmesidir; en dogru aciklama resmin kendisidir.
- *
- * Iki egri de kendi icinde 0..1'e normalize edilir, cunku Pearson
- * korelasyonu olcegi ve kaydirmayi zaten yok sayar: ekranda da ayni
- * karsilastirma gorunmeli.
- *
- * @param {HTMLCanvasElement} canvas
- * @param {ArrayLike<number>} a Simdiki kurulumun sekli
- * @param {ArrayLike<number>} b Gecmis ornegin sekli
- * @param {{height?:number, aColor?:string, bColor?:string}} [opts]
- */
-export function drawSekilKarsilastirma(canvas, a, b, opts) {
-  if (!canvas || typeof canvas.getContext !== 'function') return
-  const o = opts || {}
-  const gen = Math.max(8, Math.round(canvas.clientWidth || 260))
-  const yuk = Math.max(6, Math.round(Number.isFinite(o.height) ? o.height : 72))
-  const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) ? window.devicePixelRatio : 1
-  canvas.width = Math.round(gen * dpr)
-  canvas.height = Math.round(yuk * dpr)
-  canvas.style.height = yuk + 'px'
-  const ctx = canvas.getContext('2d')
-  if (!ctx) return
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-  ctx.clearRect(0, 0, gen, yuk)
-
-  const normalize = (dizi) => {
-    const n = dizi ? dizi.length | 0 : 0
-    if (n < 2) return null
-    let enAz = Infinity
-    let enCok = -Infinity
-    for (let i = 0; i < n; i++) {
-      const v = Number(dizi[i])
-      if (!Number.isFinite(v)) continue
-      if (v < enAz) enAz = v
-      if (v > enCok) enCok = v
-    }
-    if (!Number.isFinite(enAz) || !Number.isFinite(enCok)) return null
-    const aralik = enCok - enAz
-    const out = new Array(n)
-    for (let i = 0; i < n; i++) {
-      const v = Number(dizi[i])
-      out[i] = !Number.isFinite(v) ? NaN : (aralik > 0 ? (v - enAz) / aralik : 0.5)
-    }
-    return out
-  }
-
-  const ciz = (dizi, renk, kalinlik, kesikli) => {
-    const d = normalize(dizi)
-    if (!d) return
-    const n = d.length
-    const pad = 4
-    const ic = yuk - pad * 2
-    ctx.beginPath()
-    let basladi = false
-    for (let i = 0; i < n; i++) {
-      if (!Number.isFinite(d[i])) { basladi = false; continue }
-      const x = n > 1 ? (i / (n - 1)) * (gen - 2) + 1 : gen / 2
-      const y = pad + (1 - d[i]) * ic
-      if (!basladi) { ctx.moveTo(x, y); basladi = true } else ctx.lineTo(x, y)
-    }
-    ctx.strokeStyle = renk
-    ctx.lineWidth = kalinlik
-    ctx.setLineDash(kesikli ? [4, 3] : [])
-    ctx.stroke()
-    ctx.setLineDash([])
-  }
-
-  // Gecmis ornek once ve daha soluk: ustte duran SIMDIKI egridir.
-  ciz(b, o.bColor || RENK.dim, 1.5, true)
-  ciz(a, o.aColor || RENK.up, 2, false)
-}
-
-/**
  * Mini cizgi grafigi cizer. Dizideki NaN degerler (isinma bolgeleri)
  * atlanir ve cizgi orada kesilir.
  * @param {HTMLCanvasElement} canvas
@@ -1110,16 +1032,36 @@ export function renderSignalDetail(el, signal, opts) {
 
     el.appendChild(satir)
 
-    // NEYE GORE BENZETTI: satirin altinda acilip kapanan karsilastirma.
+    // NEYE GORE BENZETTI: AYRI BIR DUGME.
+    //
+    // Satira tiklamak grafigi ORNEGIN tarihine goturur. Karsilastirma ise
+    // SINYALIN yerinde cizilir (iki egri ayni yerde olmali ki karsilastirma
+    // anlamli olsun). Ikisini ayni tiklamaya baglamak, grafigi once bir yere
+    // goturup sonra baska bir yere cekmek olurdu; bu yuzden ayri dugme.
     if (karsilastir) {
       const kutu = h('div', 'match-compare')
       kutu.hidden = true
-      el.appendChild(kutu)
+      const dugme = h('button', 'btn mini compare-btn', 'Neye göre?')
+      dugme.type = 'button'
+      dugme.title = 'Bu örnekle şimdiki kurulumun şekillerini grafik üzerinde karşılaştır'
+      sag.appendChild(dugme)
       let yuklendi = false
-      satir.addEventListener('click', async () => {
-        if (!kutu.hidden) { kutu.hidden = true; return }
+      dugme.addEventListener('click', async (olay) => {
+        // Satirin "ornege git" davranisi tetiklenmesin.
+        olay.stopPropagation()
+        if (!kutu.hidden) {
+          kutu.hidden = true
+          dugme.classList.remove('active')
+          try { karsilastir(signal, null) } catch (err) { /* onemsiz */ }
+          return
+        }
         kutu.hidden = false
-        if (yuklendi) return
+        dugme.classList.add('active')
+        if (yuklendi) {
+          // Egriler grafikten silinmis olabilir, yeniden ciz.
+          try { karsilastir(signal, m) } catch (err) { /* onemsiz */ }
+          return
+        }
         yuklendi = true
         kutu.appendChild(h('div', 'small muted', 'Karşılaştırma hazırlanıyor...'))
         try {
@@ -1134,6 +1076,7 @@ export function renderSignalDetail(el, signal, opts) {
           yuklendi = false
         }
       })
+      el.appendChild(kutu)
     }
 
     const seri = eslesmeSerisi(m)
@@ -1157,8 +1100,9 @@ export function renderSignalDetail(el, signal, opts) {
     'sonrası lehte ve aleyhte azami hareketi gösterir.']
   if (ornegeGit) notlar.push('Bir örneğe tıklayınca grafik o tarihe gider.')
   if (karsilastir) {
-    notlar.push('Aynı tıklama, altta "neye göre benzetti" karşılaştırmasını açar; ' +
-      'tekrar tıklayınca kapanır.')
+    notlar.push('"Neye göre?" düğmesi şekilleri GRAFİK ÜZERİNDE karşılaştırır: ' +
+      'yeşil çizgi şimdiki kurulum, sarı kesikli çizgi seçilen örnek. ' +
+      'Noktalar ikişer barın ortalamasıdır, yani eğri mumlarla bire bir örtüşmez.')
   }
   for (let i = 0; i < notlar.length; i++) {
     el.appendChild(h('div', 'small muted', notlar[i]))
@@ -1183,17 +1127,22 @@ function karsilastirmayiCiz(kap, veri, signal, eslesme) {
   const w = veri.weights || { shape: 0, ctx: 0, dtw: 0 }
   const c = veri.components || { shape: 0, ctx: 0, dtw: 0, total: 0 }
 
-  // 1) Iki egri ust uste.
-  kap.appendChild(h('div', 'small muted', 'ŞEKİL KARŞILAŞTIRMASI'))
-  const cnv = document.createElement('canvas')
-  cnv.className = 'compare-canvas'
-  kap.appendChild(cnv)
+  // 1) Egriler GRAFIGE cizilir, burada yalnizca efsane durur.
+  //
+  // Once bu kutuda kucuk bir grafik ciziliyordu ve kullanici onu asil
+  // grafikle bagdastiramiyordu: sekil vektoru mumlarin birebir kopyasi
+  // degil, yumusatilmis ve 16 kovaya indirgenmis halidir. Iki ayri resmi
+  // zihinde ust uste koymak gerekiyordu. Artik egriler gercek mumlarin
+  // uzerinde, kendi fiyatlarinda ciziliyor.
   const efsane = h('div', 'small muted')
   efsane.appendChild(h('span', 'compare-key now', '\u25ac'))
   efsane.appendChild(document.createTextNode(' şimdi (' + formatDateTime(signal.time) + ')  '))
   efsane.appendChild(h('span', 'compare-key past', '\u25ac'))
   efsane.appendChild(document.createTextNode(' örnek (' + formatDateTime(eslesme.time) + ')'))
   kap.appendChild(efsane)
+  kap.appendChild(h('div', 'small muted',
+    'Eğriler grafiğin üzerinde çizildi. Her nokta ikişer barın ortalamasıdır, ' +
+    'bu yüzden eğri mumlarla bire bir örtüşmez.'))
 
   // 2) Benzerlik dokumu.
   const satirlar = [
@@ -1231,8 +1180,6 @@ function karsilastirmayiCiz(kap, veri, signal, eslesme) {
     kap.appendChild(tablo(['Değer', 'Şimdi', 'Örnek', 'Fark'], gosterilen))
   }
 
-  // Cizim olculeri yerlesim sonrasi bellidir.
-  drawSekilKarsilastirma(cnv, veri.a ? veri.a.shape : null, veri.b ? veri.b.shape : null)
 }
 
 /* ------------------------------------------------------------------ */

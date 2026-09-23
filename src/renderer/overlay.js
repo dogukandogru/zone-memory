@@ -38,6 +38,9 @@
 import { zoneBrokenAt, zoneSpanAt } from './zoneAsOf.mjs';
 
 const SUPPORT_RGB = '38, 166, 154';   // #26a69a
+/** Karsilastirma egrilerinin renkleri (panel efsanesiyle AYNI olmali). */
+const KARSILASTIRMA_SIMDI = 'rgba(38, 166, 154, 0.95)';
+const KARSILASTIRMA_ORNEK = 'rgba(245, 190, 60, 0.95)';
 const RESIST_RGB = '239, 83, 80';     // #ef5350
 
 const FILL_ALPHA = 0.12;              // normal bolge dolgusu
@@ -72,6 +75,12 @@ export function createZoneOverlay(chartView, container) {
   const clickHandlers = [];
   /** Son cizimde olusan dikdortgenler, tiklama testi icin (pane koordinati). */
   let hitRects = [];
+  /**
+   * Sekil karsilastirma egrileri (null ise cizilmez).
+   * @type {{simdi:Array<{time:number,price:number}>,
+   *         ornek:Array<{time:number,price:number}>}|null}
+   */
+  let karsilastirma = null;
 
   let destroyed = false;
   /** Eklenti baglandiginda grafigin verdigi "yeniden ciz" istegi. */
@@ -251,6 +260,68 @@ export function createZoneOverlay(chartView, container) {
     }),
   };
 
+  /**
+   * SEKIL KARSILASTIRMA EGRILERI.
+   *
+   * NEDEN GRAFIGIN USTUNDE: karsilastirma once panelde kucuk bir kutuda
+   * ciziliyordu ve kullanici onu grafikle BAGDASTIRAMIYORDU. Hakliydi:
+   * sekil vektoru grafigin birebir kopyasi degil, son 32 kapanisin 5 barlik
+   * ortalamayla yumusatilmis, 16 kovaya indirgenmis ve normalize edilmis
+   * halidir. Ayri bir kutuda gosterilince iki resmi zihinde ust uste koymak
+   * gerekiyordu. Gercek mumlarin uzerinde, kendi fiyatlarinda cizilince
+   * karsilastirma dogrudan gorunur oluyor.
+   *
+   * Noktalar {time, price} olarak HAZIR gelir; bu katman yalnizca cizer.
+   * Donusum (yumusatma, kova, fiyat bandina oturtma) cagiranda yapilir.
+   */
+  function cizEgri(ctx, noktalar, renk, kalinlik, kesikli) {
+    if (!Array.isArray(noktalar) || noktalar.length < 2) return;
+    ctx.beginPath();
+    let basladi = false;
+    for (let i = 0; i < noktalar.length; i++) {
+      const n = noktalar[i];
+      if (!n || !isNum(n.time) || !isNum(n.price)) { basladi = false; continue; }
+      const x = chartView.timeToX(n.time);
+      const y = chartView.priceToY(n.price);
+      if (!isNum(x) || !isNum(y)) { basladi = false; continue; }
+      if (!basladi) { ctx.moveTo(x, y); basladi = true; } else ctx.lineTo(x, y);
+    }
+    ctx.strokeStyle = renk;
+    ctx.lineWidth = kalinlik;
+    ctx.setLineDash(kesikli ? [5, 4] : []);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Nokta isaretleri: her nokta IKI barin ortalamasidir, yani egri
+    // mumlarla bire bir ortusmez. Noktalari gostermek bunu aciga cikarir.
+    ctx.fillStyle = renk;
+    for (let i = 0; i < noktalar.length; i++) {
+      const n = noktalar[i];
+      if (!n || !isNum(n.time) || !isNum(n.price)) continue;
+      const x = chartView.timeToX(n.time);
+      const y = chartView.priceToY(n.price);
+      if (!isNum(x) || !isNum(y)) continue;
+      ctx.beginPath();
+      ctx.arc(x, y, kalinlik + 0.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  /** Karsilastirma katmani: mumlarin USTUNDE cizilir. */
+  const karsilastirmaGorunumu = {
+    zOrder: () => 'top',
+    renderer: () => ({
+      draw: (target) => {
+        if (!karsilastirma) return;
+        target.useMediaCoordinateSpace((scope) => {
+          const ctx = scope.context;
+          cizEgri(ctx, karsilastirma.ornek, KARSILASTIRMA_ORNEK, 2, true);
+          cizEgri(ctx, karsilastirma.simdi, KARSILASTIRMA_SIMDI, 2, false);
+        });
+      },
+    }),
+  };
+
   /** Etiket katmani: mumlarin USTUNDE, yoksa etiket mumun altinda kayboluyor. */
   const etiketGorunumu = {
     zOrder: () => 'top',
@@ -270,7 +341,7 @@ export function createZoneOverlay(chartView, container) {
     },
     detached: () => { requestUpdate = null; },
     updateAllViews: () => {},
-    paneViews: () => [dolguGorunumu, etiketGorunumu],
+    paneViews: () => [dolguGorunumu, karsilastirmaGorunumu, etiketGorunumu],
   };
 
   const bagli = typeof chartView.attachPrimitive === 'function' && chartView.attachPrimitive(primitive);
@@ -375,5 +446,20 @@ export function createZoneOverlay(chartView, container) {
   // imza uyumlulugu ve ileride gerekebilecek DOM islemleri icin duruyor.
   void container;
 
-  return { setZones, setHighlight, setAsOf, getAsOf, redraw, destroy, onZoneClick, canvas: null };
+  /**
+   * Karsilastirma egrilerini ayarlar.
+   * @param {{simdi:Array<{time:number,price:number}>,
+   *          ornek:Array<{time:number,price:number}>}|null} egriler
+   */
+  function setKarsilastirma(egriler) {
+    karsilastirma = egriler && Array.isArray(egriler.simdi) && Array.isArray(egriler.ornek)
+      ? egriler
+      : null;
+    redraw();
+  }
+
+  return {
+    setZones, setHighlight, setAsOf, getAsOf, setKarsilastirma,
+    redraw, destroy, onZoneClick, canvas: null,
+  };
 }

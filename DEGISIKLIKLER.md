@@ -181,9 +181,17 @@ olay geldiginde ayni turdeki en benzer gecmis olaylarla karsilastirilip
   gorunmuyordu: yalnizca bir sayi (0,942) vardi ve o sayinin sekilden mi
   baglamdan mi geldigi, sekillerin gercekten ne kadar ortustugu belli
   degildi. Bir ornege tiklayinca satirin altinda acilip kapanan bir
-  karsilastirma geliyor: iki sekil egrisi UST USTE, benzerlik dokumu (hangi
-  bilesen hangi agirlikla toplama katildi) ve baglam degerlerinin yan yana
-  karsilastirmasi. Agirligi sifir olan bilesenler de listeleniyor ama katkisi
+  karsilastirma geliyor. Egriler GRAFIGIN UZERINDE, gercek mumlarin uzerine
+  ve gercek fiyatlara cizilir: yesil duz cizgi simdiki kurulum, sari kesikli
+  cizgi secilen ornek. Panelde ayrica benzerlik dokumu (hangi bilesen hangi
+  agirlikla toplama katildi) ve baglam degerlerinin yan yana karsilastirmasi
+  durur.
+  Ilk surumde egri panelde kucuk bir kutuda ciziliyordu ve kullanici onu
+  grafikle bagdastiramadi. Hakliydi: sekil vektoru mumlarin birebir kopyasi
+  degil, son 32 kapanisin 5 barlik ortalamayla yumusatilmis, 16 kovaya
+  indirgenmis halidir. Iki ayri resmi zihinde ust uste koymak gerekiyordu.
+  Egriler artik mumlarin uzerinde, her nokta isaretli ve ekranda "her nokta
+  ikiser barin ortalamasidir" diye yaziyor. Agirligi sifir olan bilesenler de listeleniyor ama katkisi
   "-" yaziyor; neye BAKILMADIGI da gorunmeli.
   Olaylar zamanla bulunuyor, kimlikle degil: ozellik mevcut sinyal
   dosyalariyla da calisiyor, listeyi yeniden hesaplamak gerekmiyor.

@@ -1971,6 +1971,7 @@ function sinyalPaneliniCiz() {
       geriDugmesiEkle(n.ayrinti, 'Ayrıntıyı kapat', () => {
         durum.seciliSinyalId = null
         durum.vurguluOrnek = null
+        karsilastirmayiTemizle()
         anaKadarUygula(null)
         planCizgileri(null)
         isaretleriCiz()
@@ -1989,6 +1990,7 @@ function sinyalPaneliniCiz() {
     geriDugmesiEkle(n.liste, 'Sinyal listesine dön', () => {
       durum.seciliSinyalId = null
       durum.vurguluOrnek = null
+      karsilastirmayiTemizle()
       anaKadarUygula(null)
       planCizgileri(null)
       isaretleriCiz()
@@ -2008,13 +2010,133 @@ function sinyalPaneliniCiz() {
  * @returns {Promise<object|null>}
  */
 async function ornekKarsilastir(sinyal, eslesme) {
-  if (!sinyal || !eslesme) return null
-  return await cagir('engine:compare', {
+  // Eslesme yoksa "kapat" demektir: grafikteki egriler kaldirilir.
+  if (!eslesme) {
+    if (overlay && typeof overlay.setKarsilastirma === 'function') overlay.setKarsilastirma(null)
+    return null
+  }
+  if (!sinyal) return null
+  const veri = await cagir('engine:compare', {
     tf: durum.tf,
     aTime: sayi(sinyal.time, 0),
     bTime: sayi(eslesme.time, 0),
     cfgPatch: durum.ayarYamasiKayitli || null,
   })
+  // GRAFIGI SINYALIN YERINE GOTUR.
+  //
+  // Satira tiklamak grafigi ORNEGIN tarihine goturmus olabilir (2013 gibi).
+  // Egriler ise sinyalin 32 barlik penceresine ciziliyor; grafik orada
+  // degilse kullanici hicbir sey gormez. Gerekirse o tarihin mumlari
+  // yeniden yuklenir.
+  const zaman = sayi(sinyal.time, 0)
+  if (zaman > 0 && zamanPencereDisinda(zaman)) {
+    const yuklendi = await mumlariZamanEtrafindaYukle(zaman)
+    if (yuklendi) {
+      const barlar = durum.bars
+      const to = barlar.length ? barlar[barlar.length - 1].time + tfSaniye(durum.tf) * 200 : undefined
+      await bolgeleriYukle(barlar.length ? barlar[0].time : undefined, to)
+    }
+  }
+  karsilastirmaEgrileriniCiz(sinyal, veri)
+  if (zaman > 0 && view && typeof view.scrollToTime === 'function') {
+    // Pencere 32 bar; cevresiyle birlikte gorunsun diye biraz genis.
+    try { view.scrollToTime(zaman, { minSpan: 60, maxSpan: 200 }) } catch (err) { /* onemsiz */ }
+  }
+  return veri
+}
+
+/** Grafikteki karsilastirma egrilerini kaldirir. */
+function karsilastirmayiTemizle() {
+  if (overlay && typeof overlay.setKarsilastirma === 'function') overlay.setKarsilastirma(null)
+}
+
+/** Sekil vektorunde kac bar bir noktaya dusuyor (features.js: 32 bar -> 16 kova). */
+const SEKIL_PENCERE_BAR = 32
+
+/**
+ * KARSILASTIRMA EGRILERINI GRAFIGE CIZER.
+ *
+ * Panelde ayri bir kutuda gosterildiginde kullanici egriyi grafikle
+ * BAGDASTIRAMIYORDU. Hakliydi: sekil vektoru grafigin birebir kopyasi degil,
+ * son 32 kapanisin 5 barlik ortalamayla yumusatilmis, 16 kovaya indirgenmis
+ * ve normalize edilmis halidir. Iki ayri resmi zihinde ust uste koymak
+ * gerekiyordu.
+ *
+ * Burada iki egri de GERCEK mumlarin uzerine, gercek fiyat bandina oturtulur:
+ *   - "simdi" egrisi kendi GERCEK fiyatlarina (kova ortalamalari),
+ *   - "ornek" egrisi ayni banda tasinir, cunku Pearson korelasyonu olcegi ve
+ *     kaydirmayi zaten yok sayar; karsilastirilan sey BICIMDIR.
+ *
+ * @param {object} sinyal
+ * @param {object} veri engine:compare ciktisi
+ */
+function karsilastirmaEgrileriniCiz(sinyal, veri) {
+  if (!overlay || typeof overlay.setKarsilastirma !== 'function') return
+  const sekilA = veri && veri.a && Array.isArray(veri.a.shape) ? veri.a.shape : null
+  const sekilB = veri && veri.b && Array.isArray(veri.b.shape) ? veri.b.shape : null
+  const barlar = Array.isArray(durum.bars) ? durum.bars : []
+  if (!sekilA || !sekilB || sekilA.length < 2 || barlar.length === 0) {
+    overlay.setKarsilastirma(null)
+    return
+  }
+
+  // Sinyal barini bul; pencere ONUNLA biter.
+  const zaman = sayi(sinyal.time, 0)
+  let son = -1
+  for (let i = barlar.length - 1; i >= 0; i--) {
+    if (sayi(barlar[i].time, 0) <= zaman) { son = i; break }
+  }
+  const bas = son - SEKIL_PENCERE_BAR + 1
+  if (son < 0 || bas < 0) {
+    // Pencerenin tamami yuklu degil: yanlis yere cizmektense HIC cizme.
+    overlay.setKarsilastirma(null)
+    return
+  }
+
+  // Kova ortalamalarini features.js ile AYNI kuralla uret: once 5 barlik
+  // kisaltilmis pencereli ortalama, sonra esit kovalar.
+  const YUMUSATMA = 5
+  const n = SEKIL_PENCERE_BAR
+  const duz = new Array(n)
+  let toplam = 0
+  for (let i = 0; i < n; i++) {
+    toplam += sayi(barlar[bas + i].close, 0)
+    if (i >= YUMUSATMA) toplam -= sayi(barlar[bas + i - YUMUSATMA].close, 0)
+    duz[i] = toplam / (i < YUMUSATMA ? i + 1 : YUMUSATMA)
+  }
+  const kovaSayisi = sekilA.length
+  const kova = new Array(kovaSayisi)
+  const kovaZaman = new Array(kovaSayisi)
+  for (let k = 0; k < kovaSayisi; k++) {
+    const b0 = Math.floor((k * n) / kovaSayisi)
+    const b1 = Math.floor(((k + 1) * n) / kovaSayisi)
+    let t = 0
+    for (let i = b0; i < b1; i++) t += duz[i]
+    kova[k] = t / Math.max(1, b1 - b0)
+    // Kovanin ORTASINDAKI barin zamani: egri mumlarla ayni hizada dursun.
+    kovaZaman[k] = sayi(barlar[bas + Math.min(n - 1, Math.floor((b0 + b1) / 2))].time, 0)
+  }
+
+  let enAz = Infinity
+  let enCok = -Infinity
+  for (let k = 0; k < kovaSayisi; k++) {
+    if (kova[k] < enAz) enAz = kova[k]
+    if (kova[k] > enCok) enCok = kova[k]
+  }
+  const aralik = enCok - enAz
+
+  const simdi = []
+  const ornek = []
+  for (let k = 0; k < kovaSayisi; k++) {
+    simdi.push({ time: kovaZaman[k], price: kova[k] })
+    // Ornek normalize haldedir (0..1); ayni fiyat bandina tasinir.
+    const v = Number(sekilB[k])
+    ornek.push({
+      time: kovaZaman[k],
+      price: Number.isFinite(v) ? enAz + v * (aralik > 0 ? aralik : 1) : NaN,
+    })
+  }
+  overlay.setKarsilastirma({ simdi: simdi, ornek: ornek })
 }
 
 /**
