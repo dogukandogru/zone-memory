@@ -40,6 +40,7 @@ const https = require('https')
 const zlib = require('zlib')
 const crypto = require('crypto')
 const { pipeline } = require('stream/promises')
+const { Transform } = require('stream')
 
 const paths = require('./paths')
 
@@ -57,10 +58,12 @@ const PAKET_URL =
  * Paketin SHA-256 ozeti (gzip'li halin degil, ACILMIS dosyanin).
  * Yayin betigi (scripts/publish-data.mjs) bu degeri yazdirir.
  */
-const PAKET_SHA256 = ''
+const PAKET_SHA256 = 'b99e9ed4e4db66245546d5fb29b40a1935c199510aff3ef80736afaa881ca4b5'
 
 /** Indirilen dosyada beklenen en az bar sayisi (kabaca dogruluk kontrolu). */
-const EN_AZ_BAR = 5000000
+// Olculdu: paket 7.130.898 bar tasiyor (2006-03-19 -> 2026-09-23). Esik
+// bunun altinda ama yarim inmis bir dosyayi eleyecek kadar yuksek.
+const EN_AZ_BAR = 6500000
 
 /** 1 dakikaliktan turetilen zaman dilimleri; kurulumdan sonra silinirler. */
 const TURETILEN = ['5m', '15m', '30m', '1h', '4h']
@@ -127,12 +130,20 @@ function indir(url, hedef, ilerleme, derinlik) {
       }
       const toplam = Number(yanit.headers['content-length']) || 0
       let alinan = 0
-      yanit.on('data', (parca) => {
-        alinan += parca.length
-        if (ilerleme) ilerleme(alinan, toplam)
+      // ILERLEME SAYACI BORUNUN ICINDE.
+      //
+      // `yanit.on('data', ...)` ile saymak akisi hemen "akan" kipe gecirir;
+      // pipeline baglanana kadar gelen parcalar dusebilirdi. Sayim bu yuzden
+      // borunun bir halkasi olarak yapiliyor.
+      const sayac = new Transform({
+        transform(parca, kodlama, geri) {
+          alinan += parca.length
+          if (ilerleme) ilerleme(alinan, toplam)
+          geri(null, parca)
+        },
       })
-      // GZIP ACMA AKISTA: 350 MB'lik dosya bellege alinmaz.
-      pipeline(yanit, zlib.createGunzip(), fs.createWriteStream(hedef)).then(coz, reddet)
+      // GZIP ACMA AKISTA: 326 MB'lik dosya bellege alinmaz.
+      pipeline(yanit, sayac, zlib.createGunzip(), fs.createWriteStream(hedef)).then(coz, reddet)
     })
     istek.on('error', reddet)
     // Aga baglanamayan bir istek sonsuza kadar asili kalmamali.
@@ -242,9 +253,13 @@ async function yerineKoy(gecici, opts) {
   }
   await fsp.rename(gecici, hedef)
 
-  // 1 dakikaligin kuyruk dosyasi ve kaynak kaydi ESKI depoya aitti.
+  // 1 dakikaligin kuyruk dosyasi, kaynak kaydi ve yaz saati isareti ESKI
+  // depoya aitti. Kaynak kaydi kalsaydi yeni barlar "kaynak degisti" sayilip
+  // ESKI olcege uydurulurdu; yaz saati isareti ise artik baska bir dosyayi
+  // anlatiyor olurdu (OANDA zamanlari zaten UTC gelir, duzeltme gerekmez).
   await sessizSil(hedef + '.tail.bin')
   await sessizSil(path.join(dataDir, 'XAUUSD_1m.proxy.json'))
+  await sessizSil(path.join(dataDir, 'XAUUSD_1m.dst.json'))
 
   // TURETILMIS DOSYALAR: 1 dakikaliktan yeniden uretilecekler.
   bildir(98, 'Zaman dilimleri yenileniyor')
@@ -254,6 +269,31 @@ async function yerineKoy(gecici, opts) {
     await sessizSil(yol + '.meta.json')
     await sessizSil(yol + '.tail.bin')
     await sessizSil(path.join(dataDir, 'XAUUSD_' + tf + '.proxy.json'))
+  }
+
+  // HAFIZA DA GECERSIZ, ama kendiliginden anlasilmiyor.
+  //
+  // Arayuz "hafiza guncel mi" sorusunu IKI olcutle cevapliyor: kuruldugu
+  // zaman deponun son barina yakin mi (`hafizaGeride`) ve ozellik vektoru
+  // uzunlugu guncel mi (`memoryCurrent`). Ikisi de VERININ DEGISTIGINI
+  // gormez: eski hafiza HistData olaylarindan kurulmustur ama zamani yeni
+  // deponun son barina yakin oldugu icin GUNCEL GORUNUR ve yeniden tarama
+  // hic calismaz. O yuzden hafiza kenara alinir; boylece "hafiza yok" yoluna
+  // dusulur ve tarama kesin calisir.
+  //
+  // Silinmez, `.oncekiKaynak` ekiyle durur.
+  bildir(99, 'Hafıza yenileniyor')
+  const HAFIZA_EKLERI = ['.json', '.vec', '.meta.json', '.protos.json',
+    '.zones.json', '.cands.bin']
+  for (const tf of ['1m'].concat(TURETILEN)) {
+    const taban = paths.memoryPath(tf)
+    for (const ek of HAFIZA_EKLERI) {
+      try {
+        await fsp.rename(taban + ek, taban + ek + '.oncekiKaynak')
+      } catch (err) {
+        // Dosya yoksa sorun degil.
+      }
+    }
   }
 
   // OLCUMLER GECERSIZ. Ayar izi bunu yakalayamaz (ayar degismedi, VERI

@@ -181,3 +181,33 @@ test('yerineKoy: depo HIC YOKKEN de calisir (temiz kurulum)', async () => {
   assert.strictEqual(fs.existsSync(hedef + '.oncekiKaynak'), false,
     'tasinacak eski depo yoksa bos yedek uretilmemeli')
 })
+
+test('yerineKoy: ESKI HAFIZA kenara alinir, yoksa tarama hic calismazdi', async () => {
+  const { dataBundle, paths } = tazeModul()
+  const hedef = paths.candlePath('1m')
+  await depoYaz(hedef, 50, 1000)
+
+  // Eski kaynaktan kurulmus hafiza. KRITIK: bu dosyalarin zamani yeni deponun
+  // son barina yakin oldugu icin arayuz onu GUNCEL sanardi; "hafiza geride mi"
+  // ve "ozellik vektoru guncel mi" olcutlerinin ikisi de VERININ degistigini
+  // gormez.
+  const taban = paths.memoryPath('5m')
+  fs.writeFileSync(taban + '.json', '{"events":[]}')
+  fs.writeFileSync(taban + '.vec', 'x')
+  fs.writeFileSync(taban + '.meta.json', '{"builtToTime":1}')
+  fs.writeFileSync(taban + '.zones.json', '[]')
+
+  const yeni = hedef + '.indiriliyor'
+  await depoYaz(yeni, 80, 4000)
+  await dataBundle.yerineKoy(yeni, { enAzBar: 10 })
+
+  for (const ek of ['.json', '.vec', '.meta.json', '.zones.json']) {
+    assert.strictEqual(fs.existsSync(taban + ek), false,
+      ek + ' ESKI veriden kurulmustu, yerinde kalmamali')
+    assert.strictEqual(fs.existsSync(taban + ek + '.oncekiKaynak'), true,
+      ek + ' silinmemeli, YEDEKLENMELI')
+  }
+  // Icerik bozulmamis olmali.
+  assert.strictEqual(fs.readFileSync(taban + '.meta.json.oncekiKaynak', 'utf8'),
+    '{"builtToTime":1}')
+})
