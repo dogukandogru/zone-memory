@@ -61,8 +61,14 @@ sorunu dosyanin basindaki yorumda belirt.
  * @property {number} mergeCount    Kac yakin pivot bu kutuya katildi
  * @property {number} bbDistAtr     Pivotun Bollinger bandindan disari tasmasi,
  *                                  ATR biriminde (asiriligin derinligi)
- * @property {boolean} broken
- * @property {number} brokenBar     Kirilmadiysa -1
+ * @property {boolean} broken      SON durum. Kutu birlesmeyle DIRILEBILIR,
+ *                                  yani bu alan "hic kirilmadi" demek degildir.
+ * @property {number} brokenBar     Kirilmadiysa -1 (yine SON durum)
+ * @property {number[]} brokenTimes Kirilma ve dirilme anlari, SIRAYLA. Bir ana
+ *                                  kadar gerceklesen olay sayisi TEK ise kutu
+ *                                  o anda kirikti. "O an" kipi bunu kullanir;
+ *                                  yalnizca son duruma bakildiginda kirilip
+ *                                  dirilen kutular gecmiste saglam gorunuyordu.
  * @property {number} touchCount
  */
 
@@ -77,10 +83,18 @@ sorunu dosyanin basindaki yorumda belirt.
  *
  * Bir bolge her turden EN FAZLA BIR olay uretir.
  *
+ * SNIPER indikatorun KENDI sinyalidir ve AYRI BIR TUR DEGILDIR: `kind`
+ * 'touch' kalir, olay `sniper: true` bayragini ve Pine'in bilesik skorunu
+ * tasir. Ayri tur olsaydi komsu aramasinda hicbir eslesme bulamaz, buna
+ * karsilik olcumde dokunus kovasina girerdi. Olculdu: 20 yilda 15m'de 7,
+ * 5m'de 2 sniper var.
+ *
  * @typedef {Object} Event
  * @property {number} id
  * @property {number} zoneId
  * @property {'form'|'touch'} kind
+ * @property {boolean} sniper          Pine'in kendi sinyali mi
+ * @property {number|null} sniperScore Pine'in bilesik skoru, yalnizca sniper'da
  * @property {boolean} isSupport
  * @property {'BUY'|'SELL'} direction   isSupport ? 'BUY' : 'SELL'
  * @property {number} bar

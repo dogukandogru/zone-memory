@@ -417,13 +417,28 @@ function eslesmeSerisi(m) {
 /* Olay turu yardimcilari                                              */
 /* ------------------------------------------------------------------ */
 
-/** Olay turunun okunabilir adi: kutu olusumu mu, bolgeye dokunus mu. */
-function turAdi(kind) {
+/**
+ * Olay turunun okunabilir adi: kutu olusumu mu, bolgeye dokunus mu.
+ * @param {string} kind
+ * @param {boolean} [sniper] Pine'in kendi sinyali mi
+ */
+function turAdi(kind, sniper) {
+  if (sniper) return 'Sniper (bölge dokunuşu)'
   return kind === 'form' ? 'Kutu oluşumu' : 'Bölge dokunuşu'
 }
 
-/** Liste satirlarinda yer kaplamayan kisa tur rozeti. */
-function turRozeti(kind) {
+/**
+ * Liste satirlarinda yer kaplamayan kisa tur rozeti.
+ * @param {string} kind
+ * @param {boolean} [sniper]
+ */
+function turRozeti(kind, sniper) {
+  if (sniper) {
+    const s = h('span', 'badge tiny', 'SNIPER')
+    s.title = 'İndikatörün kendi sinyali: bölge süpürüldü, fitil reddetti, ' +
+      'yapı kırıldı ve trend aynı yöndeydi. Nadir çıkar.'
+    return s
+  }
   const e = h('span', 'badge tiny', kind === 'form' ? 'OLUŞUM' : 'DOKUNUŞ')
   e.title = kind === 'form'
     ? 'Kutunun doğduğu an, giriş onay barının kapanışı'
@@ -672,7 +687,7 @@ export function renderSignals(el, signals, opts) {
 
     const orta = h('span', 'row-main')
     orta.appendChild(document.createTextNode(formatDateTime(s.time) + '  ' + formatPrice(s.price)))
-    orta.appendChild(turRozeti(s.kind))
+    orta.appendChild(turRozeti(s.kind, s.sniper))
     if (s.evidence) orta.appendChild(kanitRozeti(s.evidence))
     const altMetin = s.fired
       ? (tam(s.matchCount) + ' benzer kayıt, R/R ' + formatNumber(s.rr, 2))
@@ -751,7 +766,7 @@ export function renderSignalDetail(el, signal, opts) {
   // BASLIK: sinyal uretilmediyse bunu sakla.
   const baslikSonek = signal.fired === false ? ' (sinyal üretilmedi)' : ''
   el.appendChild(bolumBasligi((alis ? 'AL sinyali' : 'SAT sinyali') + ' - ' +
-    turAdi(signal.kind) + ' - ' + formatDateTime(signal.time) + baslikSonek))
+    turAdi(signal.kind, signal.sniper) + ' - ' + formatDateTime(signal.time) + baslikSonek))
 
   // ORNEKLEM ROZETI: 5 kayitlik bir oran ile 40 kayitlik oran ayni
   // gorunmesin. Olculdu: gosterilen oran gerceklesenden ortalama 16,6 puan

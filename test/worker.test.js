@@ -486,3 +486,79 @@ test('engine:touches zoneId verilince yalnizca o bolgenin olaylarini doner', asy
     assert.strictEqual(hepsi.zoneId, undefined)
   })
 })
+
+/* ------------------------------------------------------------------ */
+/* Ayar izi degisince olcum dosyalari                                  */
+/* ------------------------------------------------------------------ */
+
+// KILITLENEN OLAY: indikator varsayilanlari bir GUNCELLEMEYLE degisti, ayar izi
+// tutmadi ve tarama kullanicinin sinyal listesini SILDI. Kullanici hicbir sey
+// degistirmemisti; uygulamayi acti ve 990 sinyali gitmisti, geri donusu yoktu.
+// Artik dosyalar silinmez, `.onceki` ekiyle yedeklenir ve tarama sonucu bunu
+// arayuze bildirir.
+
+const binstore = require('../src/core/store/binstore')
+const { fromArrays } = require('../src/core/series')
+
+/** Tarama icin yeterli uzunlukta sentetik seri (kutu dogurmasi sart degil). */
+function taramaSerisi () {
+  const n = 800
+  const s = { time: [], open: [], high: [], low: [], close: [], volume: [] }
+  for (let i = 0; i < n; i++) {
+    const taban = 2000 + Math.sin(i / 17)
+    s.time.push(CANLI_T0 + i * 900)
+    s.open.push(taban)
+    s.high.push(taban + (i === 400 ? 5 : 1.2))
+    s.low.push(taban - (i === 400 ? 5 : 1.2))
+    s.close.push(taban + Math.sin(i / 5) * 0.3)
+    s.volume.push(i === 400 ? 6000 : 1000)
+  }
+  // binstore tipli dizi bekler.
+  return fromArrays(s)
+}
+
+/** Mum deposunu kurar, olcum dosyalarini verilen ayar iziyle yazar. */
+async function olcumKur (dataDir, iz) {
+  await binstore.writeSeries(pathsCore.candlePath(TF, undefined, dataDir), taramaSerisi())
+  const kok = pathsCore.memoryPath(TF, undefined, dataDir)
+  fs.writeFileSync(kok + '.signals.json', JSON.stringify([{ id: 1, fired: true }]))
+  fs.writeFileSync(kok + '.backtest.json', JSON.stringify({ cfgHash: iz, summary: { fired: 1 } }))
+  return kok
+}
+
+test('ayar izi DEGISINCE olcum dosyalari silinmez, .onceki olarak yedeklenir', async () => {
+  await isciyle(async (cagir, dataDir) => {
+    // Hicbir zaman uretilemeyecek bir iz: tarama kesinlikle "degisti" diyecek.
+    const kok = await olcumKur(dataDir, 'baska-bir-ayarin-izi')
+
+    const sonuc = await cagir('engine:scan', { tf: TF, params: INDIKATOR_AYARI })
+    assert.strictEqual(sonuc.signalsInvalidated, true,
+      'arayuz listeyi yeniden kurmak icin bunu bilmeli')
+
+    // BU TESTIN BUTUN KONUSU: veri kaybolmadi, yerini degistirdi.
+    assert.strictEqual(fs.existsSync(kok + '.signals.json'), false, 'gecersiz liste yerinde kalmamali')
+    assert.strictEqual(fs.existsSync(kok + '.signals.json.onceki'), true, 'liste YEDEKLENMELI')
+    assert.strictEqual(fs.existsSync(kok + '.backtest.json.onceki'), true, 'ozet YEDEKLENMELI')
+
+    const yedek = JSON.parse(fs.readFileSync(kok + '.signals.json.onceki', 'utf8'))
+    assert.deepStrictEqual(yedek, [{ id: 1, fired: true }], 'yedek icerigi BOZULMAMALI')
+  })
+})
+
+test('ayar izi AYNIYSA olcum dosyalarina dokunulmaz', async () => {
+  await isciyle(async (cagir, dataDir) => {
+    // Once bir tarama yapip bu ayarin GERCEK izini ogren.
+    await binstore.writeSeries(pathsCore.candlePath(TF, undefined, dataDir), taramaSerisi())
+    await cagir('engine:scan', { tf: TF, params: INDIKATOR_AYARI })
+    const meta = JSON.parse(
+      fs.readFileSync(pathsCore.memoryPath(TF, undefined, dataDir) + '.meta.json', 'utf8'))
+    assert.ok(meta.cfgHash, 'tarama ayar izini meta dosyasina yazmali')
+
+    const kok = await olcumKur(dataDir, meta.cfgHash)
+    const sonuc = await cagir('engine:scan', { tf: TF, params: INDIKATOR_AYARI })
+
+    assert.strictEqual(sonuc.signalsInvalidated, false, 'ayar degismedi, liste gecerli')
+    assert.strictEqual(fs.existsSync(kok + '.signals.json'), true, 'liste YERINDE KALMALI')
+    assert.strictEqual(fs.existsSync(kok + '.signals.json.onceki'), false, 'gereksiz yedek olusmamali')
+  })
+})

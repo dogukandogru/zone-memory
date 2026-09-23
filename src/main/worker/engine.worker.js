@@ -29,6 +29,12 @@ const paths = require('../paths')
 const MAX_TIME = 4102444800
 /** Canli kontrolde indikatorun kosturuldugu kuyruk pencere uzunlugu. */
 const DEFAULT_TAIL_BARS = 4000
+/**
+ * Gecersiz kalan olcum dosyalarina eklenen ek. Bu dosyalar SILINMEZ: ayar izi
+ * bir guncellemeyle de degisebiliyor ve o durumda kullanici kendi yapmadigi
+ * bir degisiklik yuzunden gecmisini kaybediyordu.
+ */
+const ONCEKI_EKI = '.onceki'
 
 // ---------------------------------------------------------------------------
 // Cekirdek modul yukleyici (tembel)
@@ -245,6 +251,11 @@ function lightEvent(e) {
     // Olay turu: 'form' kutunun dogdugu an, 'touch' fiyatin geri donup
     // dokundugu an. Eski hafiza dosyalarinda yoktur, o kayitlar dokunustur.
     kind: e.kind === 'form' ? 'form' : 'touch',
+    // SNIPER: Pine'in kendi sinyali. Ayri bir olay turu degil, nitelenmis bir
+    // dokunus; istatistik dokunus kovasinda kalir ama arayuz bunu ayirt
+    // edebilmeli, yoksa kullanici sinyali "sade dokunus" sanir.
+    sniper: !!e.sniper,
+    sniperScore: Number.isFinite(e.sniperScore) ? e.sniperScore : null,
     isSupport: !!e.isSupport,
     direction: e.direction,
     bar: e.bar,
@@ -575,6 +586,7 @@ function signalOzeti(sig) {
     fired: !!sig.fired,
     direction: sig.direction || null,
     kind: sig.kind === 'form' ? 'form' : 'touch',
+    sniper: !!sig.sniper,
     winRate: num(sig.winRate, 0),
     matchCount: num(sig.matchCount, 0),
     confidence: num(sig.confidence, 0),
@@ -1034,21 +1046,29 @@ handlers['engine:scan'] = async function (payload, ctx) {
     // Onbellek yoksa sorun degil.
   }
 
-  // Test sinyalleri ve son test ozeti YALNIZCA ayar izi degistiyse silinir.
+  // Test sinyalleri ve son test ozeti YALNIZCA ayar izi degistiyse gecersizdir.
   // Onceden her taramada siliniyordu: canli akis depoya bar ekledikce
   // otomatik tarama basliyor ve kullanicinin olcumu sessizce kayboluyordu.
+  //
+  // SILMIYORUZ, YEDEKLIYORUZ. Bu yol yalnizca kullanici Ayarlar'dan bir deger
+  // degistirdiginde calismiyor: bir GUNCELLEME indikator varsayilanlarini
+  // degistirdiginde de calisiyor. O durumda kullanici hicbir sey yapmamistir,
+  // uygulamayi acar ve listesini bulamaz. Olculdu: boyle bir guncellemede 990
+  // sinyal geri donusu olmadan gitmisti. Artik dosya `.onceki` ekiyle duruyor.
   const sonTest = await readJson(paths.backtestPath(tf))
   const eskiIz = sonTest && sonTest.cfgHash ? String(sonTest.cfgHash) : null
-  if (eskiIz && eskiIz !== yeniIz) {
+  const izDegisti = !!(eskiIz && eskiIz !== yeniIz)
+  if (izDegisti) {
     signalCache = { tf: tf, signals: [] }
     for (const dosya of [paths.signalsPath(tf), paths.backtestPath(tf)]) {
       try {
-        await fsp.unlink(dosya)
+        await fsp.rename(dosya, dosya + ONCEKI_EKI)
       } catch (err) {
         // Dosya yoksa sorun degil.
       }
     }
-    log('Ayarlar değiştiği için eski test sinyalleri ve özeti silindi.')
+    log('Ayarlar değiştiği için eski test sinyalleri geçersiz. ' +
+      'Yedekleri "' + ONCEKI_EKI + '" ekiyle duruyor.')
   } else {
     signalCache = { tf: null, signals: null }
   }
@@ -1072,6 +1092,10 @@ handlers['engine:scan'] = async function (payload, ctx) {
     prototypes: protos.length,
     stats: built.stats || null,
     summary: summary,
+    // Ayar izi degistigi icin sinyal listesi gecersiz kalindi. Arayuz bunu
+    // gorunce testi KENDISI baslatir, boylece liste kullanicidan hicbir sey
+    // istemeden yeniden dolar.
+    signalsInvalidated: izDegisti,
   }
 }
 

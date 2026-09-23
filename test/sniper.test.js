@@ -10,6 +10,13 @@
 // ve bilesik skor esigi birlikte aranir. Burada her kosul TEK TEK kilitlenir,
 // cunku bir kosulun sessizce kalkmasi sinyal sayisini yuzlerce kat degistirir
 // (olculdu: MSS kapatilinca 20 yillik seride 7 yerine 332 sinyal).
+//
+// KAYITTA AYRI BIR TUR DEGILDIR. Sniper, `kind: 'touch'` olarak yazilir ve
+// `sniper: true` bayragini tasir. Bir donem `kind: 'sniper'` yaziliyordu ve
+// bu kayitlar hafizada OLU kaliyordu: komsu suzgeci ham turu karsilastirdigi
+// icin hicbir komsuyla eslesmiyor, buna karsilik olcumde dokunus kovasina
+// giriyorlardi. 20 yilda 15m'de 7, 5m'de 2 sniper var; kendi kovasini kuracak
+// sayi degil.
 
 const test = require('node:test')
 const assert = require('node:assert')
@@ -77,7 +84,7 @@ function supurmeSerisi(opts) {
 test('supurme + fitil + MSS + trend saglaninca sniper sinyali uretilir', () => {
   const { d, bar } = supurmeSerisi({})
   const r = runIndicator(series.fromArrays(d), {}, ADIM)
-  const sn = r.touches.filter((x) => x.kind === 'sniper')
+  const sn = r.touches.filter((x) => x.sniper)
   assert.ok(sn.length >= 1, 'en az bir sniper sinyali bekleniyordu, stats: ' +
     JSON.stringify({ supurme: r.stats.sniperSweeps, fitil: r.stats.sniperBlockedWick,
       mss: r.stats.sniperBlockedMss, trend: r.stats.sniperBlockedTrend,
@@ -91,7 +98,7 @@ test('supurme + fitil + MSS + trend saglaninca sniper sinyali uretilir', () => {
 test('signalOnSniper kapaliyken hic sniper olayi uretilmez', () => {
   const { d } = supurmeSerisi({})
   const r = runIndicator(series.fromArrays(d), { signalOnSniper: false }, ADIM)
-  assert.strictEqual(r.touches.filter((x) => x.kind === 'sniper').length, 0)
+  assert.strictEqual(r.touches.filter((x) => x.sniper).length, 0)
   assert.strictEqual(r.stats.sniperEvents, 0)
 })
 
@@ -106,13 +113,13 @@ test('supurme yoksa sinyal yok: fiyat kutunun altina sarkmali', () => {
   // Alt fitili kutunun icinde birak: artik supurme degil.
   d.low[bar] = 95.5
   const r = runIndicator(series.fromArrays(d), {}, ADIM)
-  assert.strictEqual(r.touches.filter((x) => x.kind === 'sniper').length, 0)
+  assert.strictEqual(r.touches.filter((x) => x.sniper).length, 0)
 })
 
 test('fitil reddi esigin altindaysa sinyal yok', () => {
   const { d } = supurmeSerisi({})
   const r = runIndicator(series.fromArrays(d), { wickRejectMin: 0.99 }, ADIM)
-  assert.strictEqual(r.touches.filter((x) => x.kind === 'sniper').length, 0)
+  assert.strictEqual(r.touches.filter((x) => x.sniper).length, 0)
   assert.ok(r.stats.sniperBlockedWick > 0, 'fitil sayaci artmali')
 })
 
@@ -121,18 +128,18 @@ test('MSS saglanmazsa sinyal yok, useMSS kapatilinca geri gelir', () => {
   // Onceki barlarin yuksegini kapanisin USTUNE cikar: yapi kirilimi olmaz.
   for (let j = bar - 8; j < bar; j++) d.high[j] = 200
   const kapali = runIndicator(series.fromArrays(d), {}, ADIM)
-  assert.strictEqual(kapali.touches.filter((x) => x.kind === 'sniper').length, 0)
+  assert.strictEqual(kapali.touches.filter((x) => x.sniper).length, 0)
   assert.ok(kapali.stats.sniperBlockedMss > 0, 'MSS sayaci artmali')
 
   const acik = runIndicator(series.fromArrays(d), { useMSS: false }, ADIM)
-  assert.ok(acik.touches.filter((x) => x.kind === 'sniper').length >= 1,
+  assert.ok(acik.touches.filter((x) => x.sniper).length >= 1,
     'useMSS kapatilinca ayni seride sinyal cikmali')
 })
 
 test('minSniperScore cok yuksekse sinyal yok', () => {
   const { d } = supurmeSerisi({})
   const r = runIndicator(series.fromArrays(d), { minSniperScore: 99 }, ADIM)
-  assert.strictEqual(r.touches.filter((x) => x.kind === 'sniper').length, 0)
+  assert.strictEqual(r.touches.filter((x) => x.sniper).length, 0)
   assert.ok(r.stats.sniperBlockedScore > 0, 'skor sayaci artmali')
 })
 
@@ -148,8 +155,8 @@ test('signalOnceZone: ayni bolge ikinci kez sinyal vermez', () => {
 
   const tek = runIndicator(series.fromArrays(d), {}, ADIM)
   const cok = runIndicator(series.fromArrays(d), { signalOnceZone: false }, ADIM)
-  const s1 = tek.touches.filter((x) => x.kind === 'sniper')
-  const s2 = cok.touches.filter((x) => x.kind === 'sniper')
+  const s1 = tek.touches.filter((x) => x.sniper)
+  const s2 = cok.touches.filter((x) => x.sniper)
   assert.strictEqual(s1.length, 1, 'signalOnceZone acikken bolge basina tek sinyal')
   assert.ok(s2.length > s1.length, 'kapatilinca ikinci sinyal de cikmali')
 })
@@ -162,6 +169,35 @@ test('kirilmis kutu sniper sinyali uretmez', () => {
   d.open[bar - 5] = 81
   d.high[bar - 5] = 81
   const r = runIndicator(series.fromArrays(d), {}, ADIM)
-  assert.strictEqual(r.touches.filter((x) => x.kind === 'sniper').length, 0,
+  assert.strictEqual(r.touches.filter((x) => x.sniper).length, 0,
     'kirilan kutu listede kalsa bile sinyal vermemeli')
+})
+
+test('sniper kayitta AYRI TUR degil, nitelenmis dokunustur', () => {
+  const { d } = supurmeSerisi({})
+  const r = runIndicator(series.fromArrays(d), {}, ADIM)
+  const sn = r.touches.filter((x) => x.sniper)
+  assert.ok(sn.length >= 1, 'once sinyal uretilmeli')
+  for (const e of sn) {
+    // Ayri tur yazilsaydi komsu aramasinda hicbir zaman eslesmezdi.
+    assert.strictEqual(e.kind, 'touch', 'sniper dokunus kovasinda kalmali')
+  }
+  assert.strictEqual(r.touches.filter((x) => x.kind === 'sniper').length, 0,
+    "'sniper' diye bir olay turu artik yazilmiyor")
+})
+
+test('ayni bar + ayni kutuda IKIZ kayit acilmaz, mevcut dokunus nitelenir', () => {
+  const { d } = supurmeSerisi({})
+  const r = runIndicator(series.fromArrays(d), {}, ADIM)
+  // Ayni piyasa aninin iki kez sayilmasi olcumu bozardi: olculdu, 15m'de
+  // 7 sniperin 3'u zaten bir dokunus olayinin ustune denk geliyordu.
+  const sayac = new Map()
+  for (const e of r.touches) {
+    if (e.kind !== 'touch') continue
+    const anahtar = e.bar + '|' + e.zoneId
+    sayac.set(anahtar, (sayac.get(anahtar) || 0) + 1)
+  }
+  for (const [anahtar, adet] of sayac) {
+    assert.strictEqual(adet, 1, 'ayni bar/kutu icin tek dokunus kaydi olmali: ' + anahtar)
+  }
 })

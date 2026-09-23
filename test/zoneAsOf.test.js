@@ -112,3 +112,55 @@ test('zoneSpanAt: ters aralik duzeltilir, gecersiz kutu null doner', async () =>
   assert.strictEqual(zoneSpanAt({ createdTime: 'x', endTime: 'y' }, null), null)
   assert.strictEqual(zoneSpanAt(null, null), null)
 })
+
+// ---------------------------------------------------------------------------
+// KIRILMA GECMISI
+//
+// Kutu birlesmeyle DIRILEBILIYOR (Pine: merge dalinda zBroken = false). Kayit
+// bir donem yalnizca SON durumu tasiyordu: kirilip sonra dirilen bir kutu
+// "hic kirilmadi" gorunuyor, "o an" kipi de kirik oldugu donemi SAGLAM
+// ciziyordu. Olculdu: kutularin ucte biri en az bir kez diriliyor.
+// ---------------------------------------------------------------------------
+
+test('zoneBrokenAt: kirilip DIRILEN kutu, kirik oldugu donemde kirik gorunur', async () => {
+  const { zoneBrokenAt } = await mod()
+  // 120'de kirildi, 150'de dirildi ve bir daha kirilmadi.
+  const dirilen = kutu({
+    broken: false,
+    brokenTime: null,
+    brokenTimes: [120 * SAAT, 150 * SAAT],
+  })
+
+  assert.strictEqual(zoneBrokenAt(dirilen, 110 * SAAT), false, 'kirilmadan once saglam')
+  // BU TESTIN BUTUN KONUSU: son durum "saglam" olsa bile o an kirikti.
+  assert.strictEqual(zoneBrokenAt(dirilen, 130 * SAAT), true, 'kirik donemde KIRIK')
+  assert.strictEqual(zoneBrokenAt(dirilen, 150 * SAAT), false, 'dirildigi anda saglam')
+  assert.strictEqual(zoneBrokenAt(dirilen, 400 * SAAT), false, 'sonrasinda saglam')
+  // Kisit yoksa SON durum gecerlidir; TradingView de bugun boyle gosterir.
+  assert.strictEqual(zoneBrokenAt(dirilen, null), false)
+})
+
+test('zoneBrokenAt: dirilip TEKRAR kirilan kutu iki donemi de dogru verir', async () => {
+  const { zoneBrokenAt } = await mod()
+  const iki = kutu({
+    broken: true,
+    brokenTime: 180 * SAAT,
+    brokenTimes: [120 * SAAT, 150 * SAAT, 180 * SAAT],
+  })
+
+  assert.strictEqual(zoneBrokenAt(iki, 110 * SAAT), false)
+  assert.strictEqual(zoneBrokenAt(iki, 130 * SAAT), true, 'ilk kirik donem')
+  assert.strictEqual(zoneBrokenAt(iki, 160 * SAAT), false, 'aradaki saglam donem')
+  assert.strictEqual(zoneBrokenAt(iki, 190 * SAAT), true, 'ikinci kirik donem')
+  assert.strictEqual(zoneBrokenAt(iki, null), true, 'son durum kirik')
+})
+
+test('zoneBrokenAt: brokenTimes tasimayan ESKI kayitlar eskisi gibi calisir', async () => {
+  const { zoneBrokenAt } = await mod()
+  const eski = kutu({ broken: true, endTime: 180 * SAAT, brokenTime: 180 * SAAT })
+  assert.strictEqual(zoneBrokenAt(eski, 120 * SAAT), false)
+  assert.strictEqual(zoneBrokenAt(eski, 185 * SAAT), true)
+  // Bos dizi de eski yola dusmeli, "hic kirilmadi" demek degildir.
+  const bosDizi = kutu({ broken: true, brokenTime: 180 * SAAT, brokenTimes: [] })
+  assert.strictEqual(zoneBrokenAt(bosDizi, 185 * SAAT), true)
+})

@@ -176,6 +176,26 @@ olay geldiginde ayni turdeki en benzer gecmis olaylarla karsilastirilip
   etiketiyle yazilabiliyordu.
 - **extendMemory hic cagrilmiyordu** ama belgeler artimli guncelleme vaat
   ediyordu; baglansa bar indeksleri kayardi.
+- **Bir guncelleme musterinin sinyal listesini siliyordu.** Indikator
+  varsayilanlari degisince ayar izi tutmuyor ve tarama olcum dosyalarini
+  SILIYORDU. Kullanici hicbir sey degistirmemis oluyor, uygulamayi acip
+  listesini bos buluyordu; geri donusu de yoktu (bir kez 990 sinyal boyle
+  gitti). Artik dosyalar silinmiyor, `.onceki` ekiyle yedekleniyor ve test
+  KENDILIGINDEN yeniden calisiyor, yani liste kullanicidan hicbir sey
+  istemeden doluyor. Olculdu: test 5m'de 9 sn, 15m'de 3 sn, 1m'de 45 sn.
+- **Kirilip DIRILEN kutular gecmiste saglam gorunuyordu.** Kutu, yeni bir
+  pivot birlesince dirilir (Pine de boyle yapar), ama kayit yalnizca SON
+  durumu tasiyordu. Gecmis bir sinyale tiklayip "o an" kipiyle bakildiginda
+  o tarihte KIRIK olan bir kutu saglam ciziliyordu, yani ileriye bakmayi
+  onleyen kural tersinden deliniyordu. Kayit artik kirilma ve dirilme
+  anlarini sirayla tasiyor. Olculdu (15m, 20 yil): 4664 kutunun 458'i
+  diriliyor, 166'si kayitta "hic kirilmadi" gorunuyordu.
+- **SNIPER sinyali arayuzde "DOKUNUS" yaziyordu.** Indikatorun kendi sinyali
+  ayri bir olay turu olarak yaziliyordu; bu kayitlar hafizada olu kaliyor
+  (komsu aramasinda hic eslesmiyor) ama olcumde dokunus kovasina giriyordu.
+  Artik nitelenmis bir dokunus: rozeti SNIPER, Pine'in skorunu tasiyor,
+  istatistigi dokunusla ayni kovada kaliyor. Ayni barda ayni kutuya denk
+  gelen ikiz kayit da birlestiriliyor.
 - **Kutular soldan bes bar kirpik ciziliyordu.** Cizim, pivotun ONAYLANDIGI
   bardan basliyordu; Pine ise kutuyu PIVOT barindan baslatir
   (`box.new(left = bar_index - pivotLen, ...)`). Kutular 100 yerine 95 bar

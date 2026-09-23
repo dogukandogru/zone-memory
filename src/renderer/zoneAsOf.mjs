@@ -36,10 +36,10 @@ function sayiya(v) {
 /**
  * Bolgenin sag kenari icin gecerli zaman.
  *
- * `endTime` zaten dogru andir: cekirdek, kutu kirilinca kutuyu o barda
- * kapatir, dolayisiyla kirik kutularda `endTime` kirilma anidir. Kutu
- * uzunlugu kirilmadan once dolduysa `endTime` kirilma aninin ONUNDEDIR ve
- * dogru olan da odur: kutu o kadar yasar.
+ * `endTime` zaten dogru andir. Guncel indikatorde kirilan kutu ekrandan
+ * KALKMAZ, soluklasarak omrunun sonuna kadar uzar; `endTime` bu yuzden
+ * kirilma ani degil, kutunun bittigi andir. (Kirilmada kapanan ESKI kayitlarda
+ * ikisi ayni seydi; asagidaki yedek yol yalnizca onlar icin kullanilir.)
  * @param {object} zone
  * @returns {number} NaN olabilir
  */
@@ -56,10 +56,28 @@ export function zoneRightTime(zone) {
  * @param {number|null} asOf UNIX saniye; null ise kisitlama yok
  */
 export function zoneBrokenAt(zone, asOf) {
-  if (!zone || !zone.broken) return false
-  if (asOf === null || asOf === undefined) return true
-  // Eski kayitlarda `brokenTime` yoktur; o zaman kutunun sag kenari
-  // kirilma aniyla ayni sayilir (cekirdek kutuyu orada kapatir).
+  if (!zone) return false
+  // Kisit yoksa SON durum gecerlidir, TradingView'in bugun gosterdigi de odur.
+  if (asOf === null || asOf === undefined) return !!zone.broken
+
+  // KIRILMA GECMISI. Kutu birlesmeyle DIRILEBILIYOR (Pine: merge dalinda
+  // `array.set(zBroken, j, false)`), dolayisiyla tek bir "kirildi" damgasi
+  // gecmisi anlatmaya yetmez: kirilip sonra dirilen bir kutu kayitta "hic
+  // kirilmadi" gorunuyor ve "o an" kipi kirik oldugu donemi SAGLAM ciziyordu.
+  // Liste donusumludur (kirildi, dirildi, kirildi ...), bu yuzden o ana kadar
+  // gerceklesen olay sayisi TEK ise kutu o anda kirikti.
+  if (Array.isArray(zone.brokenTimes) && zone.brokenTimes.length > 0) {
+    let olan = 0
+    for (const t of zone.brokenTimes) {
+      const an = sayiya(t)
+      if (isNum(an) && an <= asOf) olan++
+    }
+    return olan % 2 === 1
+  }
+
+  // ESKI KAYITLAR: `brokenTimes` yok. O kayitlarda kutu kirilinca kapandigi
+  // icin sag kenar kirilma aniyla ayni sayilir.
+  if (!zone.broken) return false
   const kirilmaAni = sayiya(zone.brokenTime)
   const kirilma = isNum(kirilmaAni) ? kirilmaAni : zoneRightTime(zone)
   if (!isNum(kirilma)) return true

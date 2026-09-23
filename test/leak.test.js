@@ -203,6 +203,10 @@ const BOLGE_DOGUM_ALANLARI = ['id', 'isSupport', 'createdBar', 'createdTime',
 // dosya basindaki yorumda).
 const GELECEGE_BAGLI_BOLGE_ALANLARI = new Set([
   'endBar', 'endTime', 'broken', 'brokenBar', 'brokenTime',
+  // Kirilma/dirilme anlari karar barindan sonra da uzamaya devam eder.
+  // Arayuz bu listeyi "o ana kadar kac olay olmus" diye SAYARAK kullanir,
+  // sonrasini gormez; kaydin kendisi ise geleceye baglidir.
+  'brokenTimes',
   'top', 'bottom', 'flow', 'mergeCount', 'touchCount',
 ])
 

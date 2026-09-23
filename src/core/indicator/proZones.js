@@ -606,6 +606,10 @@ function runIndicator (s, params, tfSec, onProgress, trace) {
       // durumuyla cizebilsin diye gerekli: kutu daha sonra kirildiysa, sinyal
       // aninda kirik gostermek ileriye bakmaktir.
       brokenTime: z.broken ? barTime(z.brokenBar) : null,
+      // Kirilma ve dirilme anlari SIRAYLA. Yukaridaki iki alan yalnizca SON
+      // durumu tasiyor; kirilip sonra dirilen bir kutu kayitta "hic kirilmadi"
+      // gorunuyordu ve "o an" kipi o donemi saglam cizip ileriye bakiyordu.
+      brokenTimes: z.brokenBars.map(barTime),
       touchCount: z.touchCount,
     })
   }
@@ -689,10 +693,17 @@ function runIndicator (s, params, tfSec, onProgress, trace) {
     else if (kind === 'sniper') stats.sniperEvents++
     else { stats.touchEvents++; stats.firstTouches++ }
 
+    // KAYDA YAZILAN TUR. Sniper, Pine'in KENDI sinyalidir; bizim olay
+    // modelimizde ayri bir kova DEGIL, nitelenmis bir DOKUNUSTUR. Ayri tur
+    // olarak yazilsaydi hafizada hicbir komsuyla eslesmezdi (komsu suzgeci ham
+    // turu karsilastirir) ama olcumde yine dokunus kovasina girerdi, yani olu
+    // kayit olurdu. Olculdu: 20 yilda 15m'de 7, 5m'de 2 sniper var; kendi
+    // kovasini kuracak sayi degil. `sniper` bayragi arayuz icin tasinir.
     touches.push({
       id: nextEventId++,
       zoneId: z.id,
-      kind: kind,
+      kind: kind === 'sniper' ? 'touch' : kind,
+      sniper: kind === 'sniper',
       isSupport: isSupport,
       direction: isSupport ? 'BUY' : 'SELL',
       bar: i,
@@ -724,6 +735,32 @@ function runIndicator (s, params, tfSec, onProgress, trace) {
         volume: p.useVolumeScore ? volOk : false,
       },
     })
+  }
+
+  /**
+   * Sniper sinyalini kaydeder.
+   *
+   * AYNI BARDA AYNI KUTU zaten bir dokunus olayi urettiyse IKINCI bir kayit
+   * acilmaz, mevcut olay nitelenir. Iki kayit ayni piyasa anini iki kez
+   * saydiriyordu (olculdu: 15m'de 7 sniperin 3'u boyleydi).
+   *
+   * @param {Object} z
+   * @param {number} i
+   * @param {number} skor
+   */
+  const sniperYaz = (z, i, skor) => {
+    if (!p.signalOnSniper) return
+    for (let k = touches.length - 1; k >= 0; k--) {
+      const e = touches[k]
+      if (e.bar !== i) break
+      if (e.zoneId === z.id && e.kind === 'touch') {
+        e.sniper = true
+        e.sniperScore = skor
+        stats.sniperEvents++
+        return
+      }
+    }
+    emitEvent('sniper', z, i, { sniperScore: skor })
   }
 
   /**
@@ -790,6 +827,10 @@ function runIndicator (s, params, tfSec, onProgress, trace) {
         if (z.broken) {
           z.broken = false
           z.brokenBar = -1
+          // DIRILME ANI da yazilir: `brokenBars` donusumlu bir listedir
+          // (kirildi, dirildi, kirildi ...). Bu olmadan kayitta yalnizca SON
+          // durum kalir ve kutunun kirik oldugu donem tamamen kaybolur.
+          z.brokenBars.push(i)
           if (stats.zonesBroken > 0) stats.zonesBroken--
         }
         const sinirDegisti = top > z.top || bottom < z.bottom
@@ -833,6 +874,9 @@ function runIndicator (s, params, tfSec, onProgress, trace) {
       sniperDone: false,
       broken: false,
       brokenBar: -1,
+      // Kirilma ve dirilme anlari, SIRAYLA. Tek sayida eleman = su an kirik.
+      // Kutu birlesmeyle dirilebildigi icin tek bir "kirildi" damgasi yetmiyor.
+      brokenBars: [],
     }
     live.push(zone)
     cizelgeAc(zone, i)
@@ -908,6 +952,7 @@ function runIndicator (s, params, tfSec, onProgress, trace) {
       if (breakNow && !z.broken) {
         z.broken = true
         z.brokenBar = i
+        z.brokenBars.push(i)
         stats.zonesBroken++
         // KUTU LISTEDE KALIR (Pine: showBrokenZones). Cizimi `born +
         // boxLengthBars`a kadar uzamaya devam eder, yalnizca soluklasir.
@@ -992,11 +1037,11 @@ function runIndicator (s, params, tfSec, onProgress, trace) {
 
       if (alZ) {
         if (p.signalOnceZone) alZ.sniperDone = true
-        emitEvent('sniper', alZ, i, { sniperScore: alSkor })
+        sniperYaz(alZ, i, alSkor)
       }
       if (satZ) {
         if (p.signalOnceZone) satZ.sniperDone = true
-        emitEvent('sniper', satZ, i, { sniperScore: satSkor })
+        sniperYaz(satZ, i, satSkor)
       }
     }
 

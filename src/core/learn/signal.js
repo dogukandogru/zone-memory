@@ -822,6 +822,11 @@ function decideFromCandidates (ev, candidates, levels, cfg, ek) {
     id: 'sig-' + kind + '-' + num(t.zoneId, 0) + '-' + time,
     fired: fired,
     kind: kind,
+    // SNIPER: Pine'in kendi sinyali. Istatistik kovasi dokunustur (20 yilda
+    // bir elin parmagi kadar var, kendi kovasini kuramaz) ama arayuzde ayirt
+    // edilmeli, yoksa kullanici bunu sade bir dokunus sanir.
+    sniper: !!(t && t.sniper),
+    sniperScore: t && Number.isFinite(t.sniperScore) ? t.sniperScore : null,
     time: time,
     bar: num(t.bar, -1),
     direction: direction,

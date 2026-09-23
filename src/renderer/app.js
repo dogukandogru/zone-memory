@@ -1370,6 +1370,8 @@ async function tfHazirlaIc(tf, ayar) {
   const tfSec = tfSaniye(tf)
   const simdi = Math.floor(Date.now() / 1000)
   let degisti = false
+  // Tarama, ayar izi degistigi icin sinyal listesini gecersiz kildi mi.
+  let otomatikTest = false
 
   // --- 1) Eksik mumlar -----------------------------------------------------
   // Hangi kaynak: depo BOSSA gecmis kaynagi (HistData) tum tarihi verir.
@@ -1430,14 +1432,31 @@ async function tfHazirlaIc(tf, ayar) {
       }, 'Geçmiş taranamadı')
       if (sonuc) {
         degisti = true
-        bildir(tf + ' hafızası hazır: ' + formatNumber(sayi(sonuc.events, 0), 0) + ' kayıt. ' +
-          'Sinyal listesi için Test sekmesinden testi çalıştırın.')
+        // AYAR IZI DEGISTIYSE sinyal listesi gecersiz kalmistir ve testi
+        // kullanicidan beklemek dogru degil: iz bir GUNCELLEMEYLE de
+        // degisebiliyor, yani kullanici hicbir sey yapmadan listesini bos
+        // buluyordu. Olculdu: test 5m'de ~9 sn, 15m'de ~3 sn, 1m'de ~45 sn;
+        // nadir gorulen bu durum icin beklenebilir bir sure.
+        if (sonuc.signalsInvalidated) {
+          bildir(tf + ' hafızası yeniden kuruldu. Ayarlar değiştiği için ' +
+            'sinyal listesi de yeniden hesaplanıyor.')
+          otomatikTest = true
+        } else {
+          bildir(tf + ' hafızası hazır: ' + formatNumber(sayi(sonuc.events, 0), 0) + ' kayıt. ' +
+            'Sinyal listesi için Test sekmesinden testi çalıştırın.')
+        }
       }
     } finally {
       durum.taramaCalisiyor = false
-    mesgulKilidiUygula()
+      mesgulKilidiUygula()
       isBitti(taraDugmesi)
     }
+  }
+
+  // Sinyal listesi gecersiz kaldiysa testi KENDIMIZ calistiririz. Tarama
+  // bayragi birakildiktan SONRA, cunku test kendi kilidini kuruyor.
+  if (otomatikTest) {
+    await testCalistir()
   }
 
   ilerleme(100, 'Hazır')
@@ -2198,10 +2217,12 @@ function bolgeAyrintisiniCiz(z, dokunuslar) {
       orta.appendChild(document.createTextNode(formatDateTime(t.time)))
       const rozet = document.createElement('span')
       rozet.className = 'badge tiny'
-      rozet.textContent = t.kind === 'form' ? 'OLUŞUM' : 'DOKUNUŞ'
-      rozet.title = t.kind === 'form'
-        ? 'Kutunun doğduğu an, giriş onay barının kapanışı'
-        : 'Fiyatın bölgeye geri dönüşü, giriş bölge kenarı'
+      rozet.textContent = t.sniper ? 'SNIPER' : (t.kind === 'form' ? 'OLUŞUM' : 'DOKUNUŞ')
+      rozet.title = t.sniper
+        ? 'İndikatörün kendi sinyali: bölge süpürüldü, fitil reddetti, yapı kırıldı'
+        : (t.kind === 'form'
+          ? 'Kutunun doğduğu an, giriş onay barının kapanışı'
+          : 'Fiyatın bölgeye geri dönüşü, giriş bölge kenarı')
       orta.appendChild(rozet)
       const alt = document.createElement('span')
       alt.className = 'row-sub'
