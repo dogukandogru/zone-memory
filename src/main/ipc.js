@@ -80,7 +80,19 @@ function listProviders() {
   } catch (err) {
     return { providers: [], error: 'Saglayici modulu yuklenemedi.' }
   }
-  const list = typeof mod.listProviders === 'function' ? mod.listProviders() : []
+  const hepsi = typeof mod.listProviders === 'function' ? mod.listProviders() : []
+  // ARAYUZDE YALNIZCA OANDA.
+  //
+  // Kutulara TradingView'da OANDA:XAUUSD grafiginde bakiliyor ve olculdu:
+  // oradaki kutularin %100'unu OANDA uretiyor, eski HistData + Binance ikilisi
+  // %56,7'sini. Depo artik OANDA'dan kuruluyor; listede baska bir kaynak
+  // birakmak, yanlislikla secilip deponun iki ayri akistan karismasina yol
+  // acardi (kaynak degisince yeni barlar eskisinin fiyat ve hacim olcegine
+  // UYDURULUYOR, bkz. loader.js).
+  //
+  // Modul olarak digerleri duruyor: betikler (scripts/fetch-history.mjs)
+  // kullaniyor ve acil durumda ayar dosyasina elle yazilabiliyor.
+  const list = hepsi.filter((p) => p && p.id === 'oanda')
   // Fonksiyonlar IPC ile gecemez, yalnizca ust veriyi yolla.
   const plain = list.map((p) => ({
     id: p.id,
@@ -124,6 +136,13 @@ async function dispatch(cmd, payload) {
         userDataDir: paths.userDataDir(),
       }
     }
+
+    // VERI PAKETI. Arayuz tarama yapmadan ONCE bunu bekler: beklemezse eski
+    // depoya yeni kaynaktan bar ekler ve eklenen barlar eski deponun fiyat ve
+    // hacim olcegine uydurulur, hemen ardindan da depo zaten degisir.
+    case 'data:bundle-wait':
+      if (!veriPaketiBekleyici) return { kuruldu: false, sebep: 'bekleyici-yok' }
+      return await veriPaketiBekleyici()
 
     case 'settings:get':
       return settings.get(p.key)
@@ -239,6 +258,18 @@ function gecerliGonderen(event) {
 }
 
 /** IPC dinleyicilerini kurar. Yalnizca bir kez calisir. */
+/**
+ * Veri paketi kurulumunu bekleyen fonksiyon. main.js kurar; kurulmazsa
+ * arayuz beklemeden devam eder (gelistirme ve test yolu).
+ * @type {null|(()=>Promise<object>)}
+ */
+let veriPaketiBekleyici = null
+
+/** main.js veri paketi bekleyicisini buradan verir. */
+function setVeriPaketiBekleyici(fn) {
+  veriPaketiBekleyici = typeof fn === 'function' ? fn : null
+}
+
 function register(win) {
   if (win) setWindow(win)
   if (registered) return
@@ -296,6 +327,7 @@ function unregister() {
 }
 
 module.exports = {
+  setVeriPaketiBekleyici,
   register,
   unregister,
   markShuttingDown,

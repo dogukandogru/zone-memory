@@ -2962,6 +2962,21 @@ async function baslat() {
   await saglayicilariYukle()
   grafigiKur()
 
+  // VERI PAKETI BITMEDEN TARAMA YOK.
+  //
+  // Depo OANDA'dan yeniden kuruluyor olabilir (bkz. src/main/dataBundle.js).
+  // Beklemezsek asagidaki hazirlik ESKI depoya yeni kaynaktan bar ekler,
+  // eklenen barlar eski deponun fiyat ve hacim olcegine uydurulur ve hemen
+  // ardindan depo zaten degisir: bosa is ve karisik veri.
+  motorDurumu('veri hazırlanıyor')
+  const veriPaketi = await cagirGuvenli('data:bundle-wait', {}, null)
+  if (veriPaketi && veriPaketi.kuruldu) {
+    bildir('Altın verisi OANDA sürümüyle değiştirildi: ' +
+      formatNumber(sayi(veriPaketi.bar, 0), 0) + ' mum.')
+  } else if (veriPaketi && veriPaketi.hata) {
+    hataGoster('Altın verisi güncellenemedi, eski veriyle devam ediliyor: ' + veriPaketi.hata)
+  }
+
   // Acilista da eksigi tamamla: uygulama gunlerce kapali kalmis olabilir.
   await tfHazirla(durum.tf)
 

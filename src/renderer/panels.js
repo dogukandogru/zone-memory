@@ -1704,15 +1704,9 @@ export function renderSettings(el, settings, opts) {
   const saglayicilar = Array.isArray(o.providerList) ? o.providerList : []
   const saglayiciSecenekleri = saglayicilar.length
     ? saglayicilar.map((p) => ({ deger: p.id, ad: (p.name || p.id) + (p.isProxy ? ' (vekil)' : '') }))
-    : [
-      { deger: 'histdata', ad: 'HistData' },
-      { deger: 'yahoo', ad: 'Yahoo (vekil)' },
-      { deger: 'binance', ad: 'Binance (vekil)' },
-      { deger: 'okx', ad: 'OKX (vekil)' },
-      { deger: 'twelvedata', ad: 'TwelveData' },
-      { deger: 'polygon', ad: 'Polygon' },
-      { deger: 'oanda', ad: 'OANDA' },
-    ]
+    // Liste gelmediyse tek kaynak yazilir; ana surec de yalnizca OANDA
+    // donduruyor (bkz. ipc.js listProviders).
+    : [{ deger: 'oanda', ad: 'OANDA (XAU_USD spot)' }]
 
   // Bekleyen degisiklikler burada birikir, 'Kaydet' ile gonderilir.
   const yama = {}

@@ -130,6 +130,21 @@ function liveLogPath(tf, symbol) {
 }
 
 /**
+ * "Bu zaman diliminin olcumu gecersiz" isareti.
+ *
+ * Ayar izi (cfgHash) yalnizca AYAR degisimini yakalar. Depo baska bir
+ * kaynaktan yeniden kurulduğunda ayar aynidir, ama eski sinyal listesi baska
+ * bir veri kumesinin olaylarina isaret eder. Isaret dosyasi bu durumu tarama
+ * katmanina tasir: tarama gorunce olcumleri yedekler ve arayuz testi
+ * kendiliginden yeniden calistirir.
+ *
+ * Tarama isareti TUKETIR (siler), boylece bir kez calisir.
+ */
+function olcumYenilePath(tf, symbol) {
+  return memoryPath(tf, symbol) + '.yenile'
+}
+
+/**
  * Aday komsu onbellegi. Yuruyen ileri test her olay icin kNN'i bastan
  * hesapliyordu (1m hafizada tam kosu dakikalar suruyor). Esik degistiginde
  * komsular DEGISMEZ, yalnizca karar degisir; bu yuzden komsular bir kez
@@ -167,6 +182,7 @@ module.exports = {
   signalsPath,
   backtestPath,
   liveLogPath,
+  olcumYenilePath,
   candCachePath,
   calendarPath,
   ensureDirs,

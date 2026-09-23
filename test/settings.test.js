@@ -294,3 +294,47 @@ test('yalnizca bosluk iceren anahtar da bos sayilir', () => {
     assert.strictEqual(settings.get('apiKeys.oanda'), 'GOMULU_OANDA')
   })
 })
+
+// VERI KAYNAGI GOCU (settingsVersion 3)
+//
+// Kutulara TradingView'da OANDA:XAUUSD grafiginde bakiliyor. Uygulama ise
+// gecmiste HistData, canlida Binance PAXGUSDT (bir token, yani VEKIL)
+// kullaniyordu; olculdu, grafikteki kutularin yalnizca %56,7'si uretiliyordu.
+// Varsayilani degistirmek TEK BASINA yetmez: kayitli secim varsayilani EZER
+// ve mevcut kurulumlarin hepsinde secim yazili. Bu yuzden goc gerekiyor.
+
+test('kayitli eski veri kaynagi OANDA ya tasinir', () => {
+  const { dir, settings } = tazeAyarlar()
+  fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({
+    settingsVersion: 2,
+    providers: { history: 'histdata', live: 'binance' },
+    signalCfg: { minMatches: 20 },
+  }))
+  settings.reset()
+
+  assert.strictEqual(settings.get('providers.history'), 'oanda')
+  assert.strictEqual(settings.get('providers.live'), 'oanda')
+  // Kullanicinin kendi esikleri goc sirasinda KAYBOLMAMALI.
+  assert.strictEqual(settings.get('signalCfg.minMatches'), 20)
+})
+
+test('kaynak secimi olmayan eski dosya da OANDA ile acilir', () => {
+  const { dir, settings } = tazeAyarlar()
+  fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({
+    settingsVersion: 2,
+    timeframe: '15m',
+  }))
+  settings.reset()
+  assert.strictEqual(settings.get('providers.history'), 'oanda')
+  assert.strictEqual(settings.get('providers.live'), 'oanda')
+  assert.strictEqual(settings.get('timeframe'), '15m')
+})
+
+test('goc sonrasi kullanici yine de baska bir kaynak secebilir', () => {
+  const { settings } = tazeAyarlar()
+  settings.applySetPayload({ key: 'providers.live', value: 'binance' })
+  settings.reset()
+  assert.strictEqual(settings.get('providers.live'), 'binance',
+    'goc bir kez calisir, kullaniciyi kilitlemez')
+  assert.strictEqual(settings.get('providers.history'), 'oanda')
+})

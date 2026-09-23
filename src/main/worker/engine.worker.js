@@ -1057,7 +1057,20 @@ handlers['engine:scan'] = async function (payload, ctx) {
   // sinyal geri donusu olmadan gitmisti. Artik dosya `.onceki` ekiyle duruyor.
   const sonTest = await readJson(paths.backtestPath(tf))
   const eskiIz = sonTest && sonTest.cfgHash ? String(sonTest.cfgHash) : null
-  const izDegisti = !!(eskiIz && eskiIz !== yeniIz)
+  // ISARET DOSYASI: depo baska bir kaynaktan yeniden kuruldu. Ayar izi bunu
+  // YAKALAYAMAZ, cunku ayar hic degismemistir; degisen veridir ve eski sinyal
+  // listesi artik baska bir veri kumesinin olaylarina isaret eder.
+  const yenileIsareti = paths.olcumYenilePath(tf)
+  const veriDegisti = await fileExists(yenileIsareti)
+  const izDegisti = !!(eskiIz && eskiIz !== yeniIz) || veriDegisti
+  if (veriDegisti) {
+    // Isaret TUKETILIR: bir kez calisir.
+    try {
+      await fsp.unlink(yenileIsareti)
+    } catch (err) {
+      // Zaten yoksa sorun degil.
+    }
+  }
   if (izDegisti) {
     signalCache = { tf: tf, signals: [] }
     for (const dosya of [paths.signalsPath(tf), paths.backtestPath(tf)]) {

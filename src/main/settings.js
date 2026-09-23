@@ -64,13 +64,11 @@ const DEFAULTS = {
   indicatorParams: coreConst('../core/indicator/proZones', 'DEFAULT_PARAMS', {}),
   outcomeCfg: coreConst('../core/learn/outcome', 'DEFAULT_OUTCOME_CFG', {}),
   signalCfg: coreConst('../core/learn/signal', 'DEFAULT_SIGNAL_CFG', {}),
-  // Canli varsayilani Binance PAXGUSDT'dir. Yahoo (GC=F) olculdu ve bu agdan
-  // tekrarli isteklerde HTTP 429 (hiz siniri) donuyor, yani canli takip icin
-  // guvenilir degil. Binance anahtarsiz, gercek zamanli ve gercek hacimli
-  // calisiyor; PAXG fiziki altina dayali oldugu icin spot XAUUSD'yi yakindan
-  // izler, aradaki seviye farki basis duzeltmesiyle kapatilir (loader.js).
-  // En dogru canli spot fiyat icin Polygon (C:XAUUSD) anahtari onerilir.
-  providers: { history: 'histdata', live: 'binance' },
+  // TEK KAYNAK OANDA. Kullanicinin TradingView'da baktigi akisin kendisidir:
+  // spot XAU_USD ve tick sayisina dayali hacim verir, vekil DEGILDIR. Olculdu:
+  // grafikteki kutularin %100'unu uretir (eski HistData + Binance ikilisi
+  // %56,7'sini). Digerleri kodda duruyor ama varsayilan degil.
+  providers: { history: 'oanda', live: 'oanda' },
   apiKeys: Object.assign({ twelvedata: '', polygon: '', oanda: '' }, gomuluAnahtarlar()),
   // GERIYE TEST VE PLAN MALIYETI
   // Islem maliyeti ve kayma olcumun en belirleyici girdisidir (1 dakikalikta
@@ -246,6 +244,42 @@ function seansSaatiniGocur(parsed) {
 }
 
 /**
+ * Kayitli veri kaynagini OANDA'ya tasir.
+ *
+ * NEDEN: kutulara TradingView'da OANDA:XAUUSD grafiginde bakiliyor. Uygulama
+ * ise gecmiste HistData, canlida Binance PAXGUSDT (bir token, yani VEKIL)
+ * kullaniyordu. Olculdu: ayni donemde kullanicinin grafigindeki kutularin
+ * %56,7'si uretiliyordu; OANDA ile %100'u. Eksiklerin %96,6'si HACIM
+ * KAPISINDA takiliyordu, cunku hacim baska bir akistan sayiliyordu.
+ *
+ * Bu goc olmadan degisiklik kimsede etkili olmazdi: kayitli secim
+ * varsayilani EZER ve mevcut kurulumlarin ayar dosyasinda secim yazili.
+ *
+ * BIR KEZ calisir, yalnizca surum 3'ten ESKI dosyalarda. Diger goc
+ * fonksiyonlari surum denetiminden once ve kosulsuz calisiyor, ama onlar
+ * belirli bir degeri hedefliyor (ornek: sessionTz 'Europe/Istanbul' ise) ve
+ * bu yuzden zararsiz. Bunu da kosulsuz birakmak KULLANICIYI KILITLERDI:
+ * kaynagi elle degistirse bile her acilista OANDA'ya geri donerdi. Test bunu
+ * yakaladi.
+ *
+ * @param {Object} parsed
+ * @returns {Object}
+ */
+function saglayiciyiGocur(parsed) {
+  if (!isPlainObject(parsed)) return parsed
+  // Surum 3 ve sonrasinda secim kullanicinindir, dokunulmaz.
+  const surum = num(parsed.settingsVersion)
+  if (Number.isFinite(surum) && surum >= 3) return parsed
+  if (!isPlainObject(parsed.providers)) return parsed
+  const p = parsed.providers
+  if (p.history === 'oanda' && p.live === 'oanda') return parsed
+  const out = deepClone(parsed)
+  out.providers.history = 'oanda'
+  out.providers.live = 'oanda'
+  return out
+}
+
+/**
  * SAYISAL AYAR SINIRLARI
  * ---------------------------------------------------------------------------
  * Arayuzdeki min/max yalnizca HTML ozniteligidir, tarayici bunu zorlamaz ve
@@ -359,7 +393,8 @@ function sinirla(next, current) {
  * `settingsVersion` yazilir; hazir ayar katmani arada calisir
  * (bkz. core/learn/presets.js resolveCfg).
  */
-const SETTINGS_VERSION = 2
+// 3: veri kaynagi OANDA'ya tasindi (bkz. saglayiciyiGocur).
+const SETTINGS_VERSION = 3
 
 /**
  * Kullanici yamasindaki alanlar: bu alanlar varsayilana esit olsa bile
@@ -463,7 +498,7 @@ function yamayiUret(birlesik, oncekiYama, gelenYama) {
  * @returns {{yama:object, gocuruldu:boolean}}
  */
 function ayarGocu(parsed) {
-  const ham = seansSaatiniGocur(indikatorAyariniGocur(parsed || {}))
+  const ham = saglayiciyiGocur(seansSaatiniGocur(indikatorAyariniGocur(parsed || {})))
   if (num(ham.settingsVersion) === SETTINGS_VERSION) {
     const yama = deepClone(ham)
     delete yama.settingsVersion

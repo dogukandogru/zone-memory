@@ -14,6 +14,7 @@ const live = require('./live')
 const logfile = require('./logfile')
 const notify = require('./notify')
 const firstrun = require('./firstrun')
+const dataBundle = require('./dataBundle')
 const updater = require('./updater')
 
 const IS_MAC = process.platform === 'darwin'
@@ -50,6 +51,18 @@ const SHOT_SCRIPT = argDegeri('--shot-script')
 
 /** @type {BrowserWindow|null} */
 let mainWindow = null
+
+/**
+ * OANDA veri paketi kurulumu. Arayuz, tarama yapmadan ONCE bunu bekler
+ * (`data:bundle-wait`), yoksa eski depoya yeni kaynaktan bar ekler.
+ * @type {Promise<{kuruldu:boolean, bar?:number, sebep?:string, hata?:string}>}
+ */
+let veriPaketiSozu = Promise.resolve({ kuruldu: false, sebep: 'baslamadi' })
+
+/** Arayuzun bekledigi soz. */
+function veriPaketiniBekle() {
+  return veriPaketiSozu
+}
 
 /** Ana pencereyi olusturur. */
 function createWindow() {
@@ -377,11 +390,40 @@ if (!gotLock) {
     }
     // Bildirime tiklaninca pencere one gelsin (macOS'ta pencere kapaliysa
     // yeniden olusturulur).
+    // OANDA VERI PAKETI.
+    //
+    // Pencereyi BEKLETMEZ: indirme dakikalar surebilir, uygulama o sure
+    // boyunca acilmamis gorunurdu. Bunun yerine arka planda baslar ve arayuz,
+    // tarama yapmadan ONCE bunun bitmesini bekler (`data:bundle-wait`). Bu
+    // bekleme sart: beklemezse arayuz ESKI depoya OANDA bari ekler, eklenen
+    // barlar eski deponun olcegine uydurulur ve hemen ardindan depo zaten
+    // degisir.
+    veriPaketiSozu = dataBundle.kur({
+      onProgress: (pct, mesaj) => {
+        ipc.send('progress', { cmd: 'data:bundle', pct: pct, msg: mesaj })
+      },
+    }).then((sonuc) => {
+      if (sonuc && sonuc.kuruldu) {
+        logfile.write({
+          level: 'bilgi',
+          source: 'dataBundle',
+          message: 'OANDA veri paketi kuruldu: ' + sonuc.bar + ' bar.',
+        })
+      }
+      return sonuc
+    }).catch((err) => {
+      const mesaj = err && err.message ? err.message : String(err)
+      logfile.write({ level: 'hata', source: 'dataBundle', message: mesaj })
+      // Eski veriyle devam edilir; uygulama calismaya devam etmeli.
+      return { kuruldu: false, hata: mesaj }
+    })
+
     notify.init({ showWindow: pencereyiGoster })
     // Otomatik guncelleme. Paketlenmemis ve tasinabilir calistirmada kendini
     // kapatir, ag hatasi uygulamayi durdurmaz (bkz. updater.js).
     updater.baslat({ showWindow: pencereyiGoster, emit: ipc.send })
     buildMenu()
+    ipc.setVeriPaketiBekleyici(veriPaketiniBekle)
     ipc.register()
     engine.start()
     createWindow()

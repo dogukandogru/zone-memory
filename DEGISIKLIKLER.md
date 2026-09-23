@@ -176,6 +176,23 @@ olay geldiginde ayni turdeki en benzer gecmis olaylarla karsilastirilip
   etiketiyle yazilabiliyordu.
 - **extendMemory hic cagrilmiyordu** ama belgeler artimli guncelleme vaat
   ediyordu; baglansa bar indeksleri kayardi.
+- **Tek veri kaynagi: OANDA.** Kutulara TradingView'da OANDA:XAUUSD
+  grafiginde bakiliyor; uygulama ise gecmiste HistData, canlida Binance
+  PAXGUSDT (bir token, yani vekil) kullaniyordu. Olculdu: ayni donemde
+  grafikteki kutularin %56,7'si uretiliyordu, OANDA ile %100'u. Eksiklerin
+  %96,6'si hacim kapisinda takiliyordu, cunku hacim baska bir akistan
+  sayiliyordu. Artik varsayilan OANDA, kurulu makineler bir kez OANDA'ya
+  tasiniyor ve ayarlarda baska kaynak gorunmuyor (yanlislikla secilip deponun
+  iki akistan karismasi mumkun degil).
+- **Depo OANDA surumuyle bir kez degistiriliyor.** Ayari degistirmek tek
+  basina yetmiyor: depo oldugu yerde kalir ve yeni barlar ESKI deponun fiyat
+  ve hacim olcegine uydurulur. Deponun yeniden kurulmasi gerekiyor ve
+  OANDA'dan tek tek indirmek olculdu: 1 dakikalik tam gecmis ~7 milyon mum,
+  bir saatten uzun suruyor. Bu yuzden hazir dosya yayinlaniyor, uygulama bir
+  kez indiriyor. Yalnizca 1 dakikalik iniyor; 5m/15m/30m/1h/4h zaten ondan
+  turetiliyor, yani tek dosya butun zaman dilimlerini OANDA yapiyor.
+  Eski depo SILINMIYOR, `.oncekiKaynak` ekiyle duruyor; bozuk veya yarim inen
+  dosya asla yerine gecmiyor.
 - **OANDA anahtari artik pakete gomulu geliyor.** Musteri guncelledikten
   sonra "OANDA icin API anahtari gerekli" uyarisini aliyordu. Anahtar artik
   kurulum dosyasinin icinde geliyor, kimse elle girmiyor. Depo herkese acik

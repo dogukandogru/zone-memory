@@ -27,6 +27,7 @@ const { argumanlariAyristir, sayiBicim, zamanBicim, bildir } = require('../src/c
 const ANAHTAR_ORTAM = {
   twelvedata: ['TWELVEDATA_API_KEY', 'ZONE_MEMORY_TWELVEDATA_KEY'],
   polygon: ['POLYGON_API_KEY', 'ZONE_MEMORY_POLYGON_KEY'],
+  oanda: ['OANDA_API_KEY', 'ZONE_MEMORY_OANDA_KEY'],
 }
 
 /* ------------------------------------------------------------------ */
