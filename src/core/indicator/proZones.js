@@ -124,7 +124,25 @@ const DEFAULT_PARAMS = {
   // Pine'da sabit yazilmis kirilma tamponu (close < bot - atr * 0.15).
   breakAtrMult: 0.15,
 
-  // --- Sinyal katmani (Pine'da yok) ---
+  // --- SNIPER SINYALI (guncel indikatorde Pine'in KENDI sinyali) ---
+  //
+  // Eski surumde Pine hic sinyal uretmiyordu, yalnizca kutu ciziyordu; form
+  // ve touch olaylari bu portun ekiydi. Guncel indikator (bollinger_box.pine)
+  // kendi sinyalini uretiyor ve cok daha secici: fiyatin kutunun disina
+  // sarkip ICINE kapanmasi (likidite supurmesi), fitil reddi, yapi kirilimi
+  // (MSS), EMA trend uyumu ve bilesik bir skor esigi araniyor.
+  signalOnSniper: true,
+  mssLen: 8,
+  useMSS: true,
+  wickRejectMin: 0.42,
+  sniperEmaFastLen: 21,
+  sniperEmaSlowLen: 55,
+  useTrendFilter: true,
+  minSniperScore: 7.2,
+  signalOnceZone: true,
+  useFVGBonus: true,
+
+  // --- Sinyal katmani (portun eki, Pine'da yok) ---
   signalOnForm: true,
   signalOnTouch: true,
   minScoreForSignal: 3,
@@ -337,6 +355,10 @@ function runIndicator (s, params, tfSec, onProgress, trace) {
     zonesCreated: 0, zonesMerged: 0, zonesBroken: 0,
     blockedByVolume: 0, blockedByBB: 0,
     formEvents: 0, touchEvents: 0, firstTouches: 0,
+    // SNIPER: kac kez her kosul saglandi, nerede elendi.
+    sniperEvents: 0, sniperSweeps: 0, sniperBlockedWick: 0,
+    sniperBlockedMss: 0, sniperBlockedTrend: 0, sniperBlockedScore: 0,
+    sniperBlockedDone: 0,
     qualified: 0, gateBlockedSession: 0, scoreHist: {},
     // Pine araligina kirpilan ayarlar (bos ise hicbir kirpma olmadi).
     paramsClamped: paramsClamped,
@@ -434,6 +456,49 @@ function runIndicator (s, params, tfSec, onProgress, trace) {
   // --- Pine: ta.pivothigh / ta.pivotlow ------------------------------------
   const pivHigh = pivotHigh(high, pivotLen, pivotLen)
   const pivLow = pivotLow(low, pivotLen, pivotLen)
+
+  // --- SNIPER BILESENLERI (guncel Pine, satir 52-71) ---------------------
+  // Hepsi O BARDA hesaplanir, hicbiri sonraki bara bakmaz.
+  const snEmaFast = ema(close, Math.max(2, p.sniperEmaFastLen | 0))
+  const snEmaSlow = ema(close, Math.max(2, p.sniperEmaSlowLen | 0))
+  const mssLen = Math.max(1, p.mssLen | 0)
+
+  const bullWickOran = new Float64Array(n)
+  const bearWickOran = new Float64Array(n)
+  const mssBull = new Uint8Array(n)
+  const mssBear = new Uint8Array(n)
+  const fvgBull = new Float64Array(n)
+  const fvgBear = new Float64Array(n)
+
+  for (let i = 0; i < n; i++) {
+    const h = high[i]; const l = low[i]; const o = open[i]; const c = close[i]
+    // Pine: rng = max(high - low, syminfo.mintick)
+    const rng = Math.max(h - l, mintick)
+    bullWickOran[i] = ((o < c ? o : c) - l) / rng
+    bearWickOran[i] = (h - (o > c ? o : c)) / rng
+
+    // Pine: mssBull = close > ta.highest(high, mssLen)[1]
+    // `[1]` kaydirmasi ONEMLI: onceki barda biten pencereye bakilir, yani
+    // O BARIN kendi yuksegi pencereye GIRMEZ. Kaydirma unutulursa kosul
+    // neredeyse hic saglanmaz ve sinyal hic uretilmez.
+    if (i >= 1) {
+      const bas = i - mssLen >= 0 ? i - mssLen : 0
+      let enYuksek = -Infinity
+      let enDusuk = Infinity
+      for (let j = bas; j <= i - 1; j++) {
+        if (high[j] > enYuksek) enYuksek = high[j]
+        if (low[j] < enDusuk) enDusuk = low[j]
+      }
+      mssBull[i] = c > enYuksek ? 1 : 0
+      mssBear[i] = c < enDusuk ? 1 : 0
+    }
+
+    // Pine: bullFVGBonus = low > high[2] ? 0.8 : 0.0
+    if (p.useFVGBonus && i >= 2) {
+      fvgBull[i] = l > high[i - 2] ? 0.8 : 0
+      fvgBear[i] = h < low[i - 2] ? 0.8 : 0
+    }
+  }
 
   // Ozellik cikariminin yeniden hesaplamamasi icin baglam dizileri.
   const rsi14 = rsi(close, 14)
@@ -552,9 +617,10 @@ function runIndicator (s, params, tfSec, onProgress, trace) {
    * @param {Object} z
    * @param {number} i
    */
-  const emitEvent = (kind, z, i) => {
+  const emitEvent = (kind, z, i, ek) => {
     if (kind === 'form' && !p.signalOnForm) return
     if (kind === 'touch' && !p.signalOnTouch) return
+    if (kind === 'sniper' && !p.signalOnSniper) return
 
     const isSupport = z.isSupport
     const top = z.top
@@ -602,7 +668,7 @@ function runIndicator (s, params, tfSec, onProgress, trace) {
     // Bolgeye ne kadar girildi (0..1). Form olayinda fiyat henuz donmedigi
     // icin 0 kalir.
     let penetration = 0
-    if (kind === 'touch' && height > 0) {
+    if ((kind === 'touch' || kind === 'sniper') && height > 0) {
       penetration = isSupport
         ? (top - (lowI < top ? lowI : top)) / height
         : ((highI > bottom ? highI : bottom) - bottom) / height
@@ -620,6 +686,7 @@ function runIndicator (s, params, tfSec, onProgress, trace) {
     }
 
     if (kind === 'form') stats.formEvents++
+    else if (kind === 'sniper') stats.sniperEvents++
     else { stats.touchEvents++; stats.firstTouches++ }
 
     touches.push({
@@ -635,6 +702,8 @@ function runIndicator (s, params, tfSec, onProgress, trace) {
       zoneBottom: bottom,
       zoneFlow: z.flow,
       zoneAgeBars: i - z.pivotBar,
+      // Yalnizca sniper olaylarinda dolu: Pine'in bilesik skoru.
+      sniperScore: ek && Number.isFinite(ek.sniperScore) ? ek.sniperScore : null,
       penetration: penetration,
       entryDistAtr: entryDistAtr,
       bbDistAtr: z.bbDistAtr,
@@ -759,6 +828,9 @@ function runIndicator (s, params, tfSec, onProgress, trace) {
       touchCount: 0,
       lastTouchBar: -1,
       touchFired: false,
+      // Pine: zDone. `signalOnceZone` acikken her bolge en fazla BIR sniper
+      // sinyali uretir.
+      sniperDone: false,
       broken: false,
       brokenBar: -1,
     }
@@ -856,6 +928,76 @@ function runIndicator (s, params, tfSec, onProgress, trace) {
         if (live[j] !== null) kalan.push(live[j])
       }
       live = kalan
+    }
+
+    // ------------------------------------------------------------------
+    // SNIPER SINYALI (guncel Pine, satir 336-372)
+    // ------------------------------------------------------------------
+    // Kutu guncellemesinden SONRA calisir, yani bu barda kirilan kutu
+    // sinyal veremez (`!z.broken`) ve bu barda artan skor hesaba girer.
+    // Pine aday kutulari tarar ve EN YUKSEK skorlu olani secer; yon basina
+    // en fazla bir sinyal cikar.
+    if (p.signalOnSniper) {
+      const snVr = volRatio[i]
+      const snVrKatki = snVr < 3.0 ? snVr : 3.0
+      const trendYukari = snEmaFast[i] > snEmaSlow[i]
+      const trendAsagi = snEmaFast[i] < snEmaSlow[i]
+      const bw = bullWickOran[i]
+      const bew = bearWickOran[i]
+      const mssB = mssBull[i] === 1
+      const mssS = mssBear[i] === 1
+      const mssBOk = !p.useMSS || mssB
+      const mssSOk = !p.useMSS || mssS
+
+      let alZ = null; let alSkor = 0
+      let satZ = null; let satSkor = 0
+
+      for (let j = 0; j < live.length; j++) {
+        const z = live[j]
+        if (!z) continue
+        const dokunuldu = lowI <= z.top && highI >= z.bottom
+        if (!dokunuldu) continue
+
+        // Pine: canSignal = not signalOnceZone or not done
+        const sinyalVerebilir = !p.signalOnceZone || !z.sniperDone
+        if (z.broken) continue
+
+        if (z.isSupport) {
+          // SUPURME: fiyat kutunun ALTINA sarkacak ama ICINE kapanacak.
+          const supurme = lowI < z.bottom && closeI > z.bottom
+          if (!supurme) continue
+          stats.sniperSweeps++
+          if (!sinyalVerebilir) { stats.sniperBlockedDone++; continue }
+          if (!(bw >= p.wickRejectMin)) { stats.sniperBlockedWick++; continue }
+          if (!mssBOk) { stats.sniperBlockedMss++; continue }
+          if (p.useTrendFilter && !trendYukari) { stats.sniperBlockedTrend++; continue }
+          const skor = z.flow + snVrKatki + bw * 3.0 + fvgBull[i] +
+            (mssB ? 1.4 : 0) + (trendYukari ? 1.0 : 0)
+          if (!(skor >= p.minSniperScore)) { stats.sniperBlockedScore++; continue }
+          if (skor > alSkor) { alSkor = skor; alZ = z }
+        } else {
+          const supurme = highI > z.top && closeI < z.top
+          if (!supurme) continue
+          stats.sniperSweeps++
+          if (!sinyalVerebilir) { stats.sniperBlockedDone++; continue }
+          if (!(bew >= p.wickRejectMin)) { stats.sniperBlockedWick++; continue }
+          if (!mssSOk) { stats.sniperBlockedMss++; continue }
+          if (p.useTrendFilter && !trendAsagi) { stats.sniperBlockedTrend++; continue }
+          const skor = z.flow + snVrKatki + bew * 3.0 + fvgBear[i] +
+            (mssS ? 1.4 : 0) + (trendAsagi ? 1.0 : 0)
+          if (!(skor >= p.minSniperScore)) { stats.sniperBlockedScore++; continue }
+          if (skor > satSkor) { satSkor = skor; satZ = z }
+        }
+      }
+
+      if (alZ) {
+        if (p.signalOnceZone) alZ.sniperDone = true
+        emitEvent('sniper', alZ, i, { sniperScore: alSkor })
+      }
+      if (satZ) {
+        if (p.signalOnceZone) satZ.sniperDone = true
+        emitEvent('sniper', satZ, i, { sniperScore: satSkor })
+      }
     }
 
     // A4: BAR SONU IZI. Pine'in `display.data_window` ciktisiyla bar bar

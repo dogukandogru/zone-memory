@@ -84,6 +84,7 @@ olay geldiginde ayni turdeki en benzer gecmis olaylarla karsilastirilip
 | Ileriye bakma sizinti testi (`test/leak.test.js`) | Karar barindan sonraki barlar bozulunca olay alanlarinin degismedigini kilitler. |
 | Bagimsiz Pine referansi (`test/helpers/pineRef.js`) | Kutu mantigi Pine metninden AYRICA yazildi; port onunla karsilastiriliyor. |
 | OANDA saglayicisi (`src/core/data/oanda.js`) | Spot XAU_USD ve tick hacmi; kullanicinin TradingView'da baktigi akisin kendisi. Gecmis 2006'ya gider, ucretsiz deneme hesabi yeterli. |
+| SNIPER sinyali (`signalOnSniper`) | Guncel indikatorun KENDI sinyali porta eklendi: supurme, fitil reddi, MSS, EMA trend ve bilesik skor. Eski surumde Pine hic sinyal uretmiyordu. |
 | Kirilan kutu artik SILINMIYOR (`showBrokenZones`) | Guncel indikatorde kirilan kutu takipte kalir, soluklasir ve `born + boxLengthBars`a kadar uzamaya devam eder. Kutu omru 100 yerine 600 bar, kirilmis kutuya birlesen pivot onu diriltiyor. |
 | Pakete gomulu API anahtari (`src/main/apiKeys.local.json`) | Musteriye kurulu halde teslim edilen yapida anahtar hazir gelir. Dosya git'te degildir. SIR SAKLAMA DEGILDIR: asar sifrelenmemistir, kuran herkes anahtari cikarabilir. |
 | Kuruluma gomulu veri (`build/bundled-data` + `src/main/firstrun.js`) | Mum deposu ve hafiza kurulumun icinde geliyor, ilk acilista yerine konuyor. Musteri saatlerce indirip taramak zorunda degil. Var olan verinin USTUNE YAZILMAZ. |
