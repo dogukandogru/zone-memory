@@ -1663,6 +1663,9 @@ function ayarGruplari(saglayiciSecenekleri) {
           not: 'Spot fiyat verir, forex serilerinde hacim gelmez.' },
         { yol: 'apiKeys.polygon', ad: 'Polygon anahtarı', tip: 'gizli',
           not: 'Spot fiyat ve tick sayısı hacmi verir, önerilen ücretli seçenek.' },
+        { yol: 'apiKeys.oanda', ad: 'OANDA anahtarı', tip: 'gizli',
+          not: 'Ücretsiz deneme hesabı anahtarı yeterli. Spot XAU_USD ve TradingView ' +
+            'OANDA grafiğiyle aynı akıştan tick hacmi verir.' },
         { yol: 'livePollSeconds', ad: 'Canlı sorgu aralığı (sn)', tip: 'sayi', adim: 1, min: 3,
           not: 'Canlı modda sağlayıcının kaç saniyede bir sorgulanacağı.' },
       ],
@@ -1693,6 +1696,7 @@ export function renderSettings(el, settings, opts) {
       { deger: 'okx', ad: 'OKX (vekil)' },
       { deger: 'twelvedata', ad: 'TwelveData' },
       { deger: 'polygon', ad: 'Polygon' },
+      { deger: 'oanda', ad: 'OANDA' },
     ]
 
   // Bekleyen degisiklikler burada birikir, 'Kaydet' ile gonderilir.

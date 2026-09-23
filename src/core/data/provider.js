@@ -13,6 +13,12 @@
 //    vekil fiyattir (isProxy: true).
 //  - Twelve Data ve Polygon anahtar ister.
 //  - HistData calisir (HTTP 200), ucretsiz ve tam gecmis tick verisi verir.
+//  - OANDA calisir ve Turkiye'den ERISILIR (anahtarsiz 401, yani sunucu
+//    cevap veriyor). Deneme hesabi anahtari ucretsizdir. Spot XAU_USD ve
+//    tick hacmi verir; olculdu, kullanicinin TradingView grafigindeki
+//    kutularin %100'unu uretir (depo ayni donemde %56,7). DIKKAT: OANDA
+//    Turkiye ikametgahlilara ARACI KURUM hesabi acmaz, ama veri anahtari
+//    baska bir yoldan edinilebiliyor.
 //
 // Modul dongusu olmasin diye saglayici modulleri BURADA ust duzeyde
 // require EDILMEZ; ilk erisimde tembel yuklenir. Boylece saglayici dosyalari
@@ -31,6 +37,7 @@ const MODUL_YOLLARI = [
   './okx',
   './twelvedata',
   './polygon',
+  './oanda',
 ]
 
 /**
