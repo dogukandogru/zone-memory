@@ -24,6 +24,58 @@
 
 const DEFAULT_WEIGHTS = { shape: 0.60, ctx: 0.25, dtw: 0.15 }
 
+/**
+ * BENZERLIK ON AYARLARI.
+ *
+ * Benzerligin ne kadari GORSEL SEKIL olsun sorusunun hazir cevaplari.
+ * Kullanici Ayarlar'dan secer; `ozel` secilirse `signalCfg.weights` icindeki
+ * uc sayi aynen kullanilir.
+ *
+ * OLCULDU (secim ve dogrulama dilimleri ayri, esikler hic kullanilmadan,
+ * olcut komsularin tutma oraninin gercek sonucu ayirt etme gucu = AUC):
+ *
+ *            5m dogrulama (8.651 olay)   15m dogrulama (3.362 olay)
+ *   sekil            0,6155                      0,5899
+ *   sekilAgirlikli   0,6196                      0,5993
+ *   dengeli          0,6229                      0,6011
+ *   baglamAgirlikli  0,6275                      0,6037
+ *   baglam           0,6254                      0,6055
+ *
+ * Iki zaman diliminde de sira AYNI: baglam arttikca tahmin iyilesiyor,
+ * yalniz sekil en kotusu. Aradaki fark kucuk (0,01 AUC bandi), yani hicbiri
+ * otekini ezmiyor; yine de "yalniz sekil" olcumde en zayif secenektir.
+ * Sebebi muhtemelen sekil vektorunun min-max normalize olmasi: hareketin
+ * ATR'ye gore buyuklugu, kutu genisligi, hacim patlamasi ve seans bilgisi
+ * sekilde YOKTUR, hepsi baglam tarafindadir.
+ */
+const AGIRLIK_ONAYARLARI = {
+  sekil: { shape: 1.00, ctx: 0.00, dtw: 0.00 },
+  sekilAgirlikli: { shape: 0.85, ctx: 0.10, dtw: 0.05 },
+  dengeli: { shape: 0.40, ctx: 0.40, dtw: 0.20 },
+  baglamAgirlikli: { shape: 0.20, ctx: 0.70, dtw: 0.10 },
+  baglam: { shape: 0.00, ctx: 1.00, dtw: 0.00 },
+}
+
+/**
+ * Sinyal ayarindan etkin agirliklari cozer.
+ *
+ * TEK KAYNAK: hem kNN hem aday onbellegi bunu cagirir. Onbellek anahtari da
+ * cozulmus degerden uretilir, yoksa on ayar degistiginde eski onbellek
+ * sessizce kullanilir ve olcum yanlis cikardi.
+ *
+ * @param {{weightPreset?:string, weights?:object}} [signalCfg]
+ * @returns {{shape:number, ctx:number, dtw:number}}
+ */
+function agirlikCoz (signalCfg) {
+  const c = signalCfg || {}
+  const ad = typeof c.weightPreset === 'string' ? c.weightPreset : ''
+  if (ad && Object.prototype.hasOwnProperty.call(AGIRLIK_ONAYARLARI, ad)) {
+    return Object.assign({}, AGIRLIK_ONAYARLARI[ad])
+  }
+  // 'ozel' ya da taninmayan ad: elle verilen agirliklar gecerlidir.
+  return Object.assign({}, DEFAULT_WEIGHTS, c.weights || {})
+}
+
 /** DTW icin varsayilan Sakoe-Chiba bant genisligi. */
 const DEFAULT_BAND = 5
 /** knn on-elemesinde k basina alinacak aday sayisi. */
@@ -489,6 +541,8 @@ function azalanBenzerlik (a, b) {
 }
 
 module.exports = {
+  AGIRLIK_ONAYARLARI,
+  agirlikCoz,
   DEFAULT_WEIGHTS,
   pearson,
   cosine,

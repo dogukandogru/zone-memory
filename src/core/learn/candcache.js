@@ -53,7 +53,7 @@
  */
 
 const { DEFAULT_SIGNAL_CFG, findCandidates, yonBelirle, turBelirle } = require('./signal')
-const { DEFAULT_WEIGHTS } = require('./similarity')
+const { agirlikCoz } = require('./similarity')
 
 /** Onbellek bicim surumu. Bicim veya aday havuzu kurali degisirse artirilir. */
 // Surum 2: her olay icin HAVUZ SAYACLARI da saklanir (baseN, baseWins).
@@ -194,9 +194,7 @@ function adayOlabilir (ev) {
 function buildCandidates (memory, cfg, onProgress) {
   const conf = cfg || {}
   const signalCfg = Object.assign({}, DEFAULT_SIGNAL_CFG, conf.signalCfg || {})
-  signalCfg.weights = Object.assign(
-    {}, DEFAULT_WEIGHTS, (conf.signalCfg && conf.signalCfg.weights) || {}
-  )
+  signalCfg.weights = agirlikCoz(signalCfg)
 
   let embargoSec = sayi(conf.embargoSec, DEFAULT_EMBARGO_SEC)
   if (embargoSec < 0) embargoSec = 0
@@ -317,7 +315,9 @@ function cacheKey (memory, cfg) {
   const mem = memory || {}
   const conf = cfg || {}
   const signalCfg = Object.assign({}, DEFAULT_SIGNAL_CFG, conf.signalCfg || {})
-  const w = Object.assign({}, DEFAULT_WEIGHTS, (conf.signalCfg && conf.signalCfg.weights) || {})
+  // Anahtar COZULMUS agirliklardan uretilir: on ayar degistiginde eski
+  // onbellek sessizce kullanilirsa olcum yanlis cikar.
+  const w = agirlikCoz(signalCfg)
 
   const adet = Array.isArray(mem.events) ? mem.events.length : 0
   // `builtToTime` ust duzeyde ya da memstore'un `meta` alaninda olabilir.

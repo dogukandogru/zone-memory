@@ -666,3 +666,33 @@ test('data:sync EKSIK turetilmis dosyayi yeni bar gelmese de yazar', async () =>
     assert.ok(uretilmis.length > 0, 'uretilen dosya bos olmamali')
   })
 })
+
+test('engine:backtest-last: benzerlik agirligi degistiyse bunu bildirir', async () => {
+  await isciyle(async (cagir, dataDir) => {
+    const kok = pathsCore.memoryPath(TF, undefined, dataDir)
+    // ESKI agirlikla alinmis bir olcum (surum yukseltmesinden once yazilmis).
+    fs.writeFileSync(kok + '.backtest.json', JSON.stringify({
+      tf: TF,
+      cfgHash: 'herhangi',
+      usedCfg: { signalCfg: { weights: { shape: 0.6, ctx: 0.25, dtw: 0.15 } } },
+      summary: { fired: 1 },
+    }))
+
+    const sonuc = await cagir('engine:backtest-last', { tf: TF })
+    assert.strictEqual(sonuc.found, true)
+    // Varsayilan artik "yalnizca sekil"; kayitli olcum eski agirlikla alinmis.
+    assert.strictEqual(sonuc.weightsMatch, false,
+      'agirlik degistiyse olcum eski sayilmali, yoksa liste sessizce ayrisir')
+    assert.strictEqual(sonuc.activeWeights.shape, 1)
+
+    // AYNI agirlikla alinmis olcum eski sayilmamali.
+    fs.writeFileSync(kok + '.backtest.json', JSON.stringify({
+      tf: TF,
+      cfgHash: 'herhangi',
+      usedCfg: { signalCfg: { weights: { shape: 1, ctx: 0, dtw: 0 } } },
+      summary: { fired: 1 },
+    }))
+    const ayni = await cagir('engine:backtest-last', { tf: TF })
+    assert.strictEqual(ayni.weightsMatch, true)
+  })
+})

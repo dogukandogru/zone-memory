@@ -176,6 +176,20 @@ olay geldiginde ayni turdeki en benzer gecmis olaylarla karsilastirilip
   etiketiyle yazilabiliyordu.
 - **extendMemory hic cagrilmiyordu** ama belgeler artimli guncelleme vaat
   ediyordu; baglansa bar indeksleri kayardi.
+- **Benzerlik neye baksin, artik Ayarlar'dan secilebiliyor.** Gecmiste benzer
+  kurulum aranirken neye bakilacagi bugune kadar kodda sabitti (sekil %60,
+  baglam %25, getiri %15). Alti secenek var: yalnizca gorsel sekil, agirlikla
+  sekil, dengeli, agirlikla baglam, yalnizca baglam, ozel. VARSAYILAN
+  "yalnizca gorsel sekil".
+  Olculdu (dogrulama dilimi, esikler kullanilmadan, olcut AUC): 5m'de yalniz
+  sekil 0,6155 ve yalniz baglam 0,6254; 15m'de 0,5899 ve 0,6055. Iki zaman
+  diliminde de baglam arttikca tahmin iyilesiyor, yani varsayilan olarak
+  secilen secenek olcumde en zayif olandir; fark kucuktur (0,01 AUC bandi).
+  Sekil vektoru normalize edildigi icin hareketin ATR'ye gore buyuklugu, kutu
+  genisligi, hacim patlamasi ve seans bilgisi sekilde YOKTUR, hepsi baglam
+  tarafindadir.
+  Ayar degisince sinyal listesi kendiliginden yeniden hesaplaniyor; ayni sey
+  uygulamanin varsayilani surum yukseltmesiyle degistiginde de oluyor.
 - **Olcum yenileme isareti fazla erken siliniyordu.** Isareti tarama biter
   bitmez siliyorduk, oysa olcumu asil yeniden kuran sey taramadan SONRA gelen
   testtir ve test en uzun adimdir. Kullanici test sirasinda uygulamayi

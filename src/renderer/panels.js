@@ -1581,6 +1581,24 @@ function ayarGruplari(saglayiciSecenekleri) {
       alanlar: [
         { yol: 'signalCfg.k', ad: 'Komşu sayısı (k)', tip: 'sayi', adim: 1, min: 1, max: 200,
           not: 'Hafızadan alınan en benzer kayıt sayısı.' },
+        { yol: 'signalCfg.weightPreset', ad: 'Benzerlik neye baksın', tip: 'secim',
+          secenekler: [
+            { deger: 'sekil', ad: 'Yalnızca görsel şekil' },
+            { deger: 'sekilAgirlikli', ad: 'Ağırlıkla şekil (%85 şekil)' },
+            { deger: 'dengeli', ad: 'Dengeli (%40 şekil, %40 bağlam)' },
+            { deger: 'baglamAgirlikli', ad: 'Ağırlıkla bağlam (%70 bağlam)' },
+            { deger: 'baglam', ad: 'Yalnızca bağlam' },
+            { deger: 'ozel', ad: 'Özel (aşağıdaki sayılar)' },
+          ],
+          not: 'Geçmişte benzer kurulum aranırken neye bakılacağı. ŞEKİL: son 32 ' +
+            'kapanışın normalize edilmiş eğrisi, yani grafiğin görünümü. BAĞLAM: ' +
+            'RSI, ATR, ortalamalara uzaklık, saat, kutu genişliği, kutu yaşı, hacim ' +
+            'oranı gibi 24 değer. Ölçüldü (doğrulama dilimi, eşikler kullanılmadan, ' +
+            'ölçüt AUC): 5m\'de yalnız şekil 0,6155 ve yalnız bağlam 0,6254; ' +
+            '15m\'de 0,5899 ve 0,6055. İki zaman diliminde de bağlam arttıkça ' +
+            'tahmin iyileşiyor, yani "yalnızca görsel şekil" ölçümde en zayıf ' +
+            'seçenektir. Aradaki fark küçüktür (0,01 AUC bandı). ' +
+            'Değiştirince sinyal listesi yeniden hesaplanır.' },
         { yol: 'signalCfg.minSimilarity', ad: 'En az benzerlik', tip: 'sayi', adim: 0.01, min: 0, max: 0.999,
           not: 'Bu eşiğin altındaki eşleşmeler sayılmaz. Ölçüldü: 0,80 eşiği rastgele ' +
             'çiftlerin yaklaşık %41\'ini geçiriyor, yani tek başına seçici değildir.' },

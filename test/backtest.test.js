@@ -757,7 +757,15 @@ test('onbellek anahtari yalnizca komsulari etkileyen ayarlarla degisir', () => {
   assert.equal(candcache.cacheKey(mem, { signalCfg: { minSimilarity: 0.1, minMatches: 1 } }), taban)
   // k, agirliklar ve komsu dislama komsulari degistirir.
   assert.notEqual(candcache.cacheKey(mem, { signalCfg: { k: 10 } }), taban)
-  assert.notEqual(candcache.cacheKey(mem, { signalCfg: { weights: { shape: 0.9 } } }), taban)
+  // AGIRLIK ON AYARI anahtari degistirir.
+  assert.notEqual(candcache.cacheKey(mem, { signalCfg: { weightPreset: 'baglam' } }), taban)
+  // ELLE AGIRLIK ancak on ayar 'ozel' iken gecerlidir. On ayar dururken
+  // verilen sayilar SESSIZCE yok sayilir; anahtarin degismemesi bunun
+  // kanitidir ve bu davranis bilerek boyledir (tek kaynak: on ayar).
+  assert.equal(candcache.cacheKey(mem, { signalCfg: { weights: { shape: 0.9 } } }), taban)
+  assert.notEqual(
+    candcache.cacheKey(mem, { signalCfg: { weightPreset: 'ozel', weights: { shape: 0.9 } } }),
+    taban)
   assert.notEqual(candcache.cacheKey(mem, { signalCfg: { excludeWithinSec: 1 } }), taban)
   // Hafizanin kendisi buyuyunce de anahtar degisir.
   const buyuk = { tf: mem.tf, ctxNames: mem.ctxNames, events: mem.events.concat(mem.events[0]) }

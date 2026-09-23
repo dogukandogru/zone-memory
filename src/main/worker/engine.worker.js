@@ -1593,7 +1593,33 @@ handlers['engine:backtest-last'] = async function (payload) {
   const mem = await getMemory(tf, false)
   const hafizaIz = mem && mem.meta && mem.meta.cfgHash ? mem.meta.cfgHash : null
   const gecerli = !hafizaIz || !kayit.cfgHash ? null : hafizaIz === kayit.cfgHash
-  return Object.assign({ tf: tf, found: true, stillValid: gecerli }, kayit)
+
+  // BENZERLIK AGIRLIGI DEGISTI MI.
+  //
+  // Ayar izi bunu KAPSAMAZ: iz indikator ayarini ve etiket tanimini tutar,
+  // komsu agirligini degil. Ama agirlik degisince komsular da degisir, yani
+  // listedeki her sinyal baska bir karsilastirmadan cikmis olur. Bu, ayar
+  // ekranindan degistirildiginde oldugu gibi, UYGULAMANIN VARSAYILANI
+  // degistiginde de olur; ikincisini hicbir sey yakalamiyordu.
+  const etkinAgirlik = core('learn/similarity').agirlikCoz(
+    core('learn/presets').resolveCfg(tf, payload && payload.cfgPatch ? payload.cfgPatch : {}, null).signalCfg
+  )
+  const eskiAgirlik = kayit.usedCfg && kayit.usedCfg.signalCfg
+    ? kayit.usedCfg.signalCfg.weights
+    : null
+  const yakin = (a, b) => Math.abs(num(a, 0) - num(b, 0)) < 1e-9
+  const agirlikAyni = !eskiAgirlik ? null : (
+    yakin(eskiAgirlik.shape, etkinAgirlik.shape) &&
+    yakin(eskiAgirlik.ctx, etkinAgirlik.ctx) &&
+    yakin(eskiAgirlik.dtw, etkinAgirlik.dtw)
+  )
+  return Object.assign({
+    tf: tf,
+    found: true,
+    stillValid: gecerli,
+    weightsMatch: agirlikAyni,
+    activeWeights: etkinAgirlik,
+  }, kayit)
 }
 
 /** Kayitli prototipler. */

@@ -37,7 +37,7 @@
  * ayrisirdi.
  */
 
-const { knn, DEFAULT_WEIGHTS } = require('./similarity')
+const { knn, agirlikCoz } = require('./similarity')
 const { zoneLevels, DEFAULT_OUTCOME_CFG } = require('./outcome')
 const { wilson } = require('./stats')
 
@@ -58,6 +58,10 @@ const DEFAULT_SIGNAL_CFG = {
   minMatches: 15,
   minWinRate: 0.62,
   excludeWithinSec: 86400 * 3,
+  // BENZERLIK ON AYARI. Ayarlar ekranindan secilir; `ozel` secilirse
+  // asagidaki `weights` aynen kullanilir. Olcum ve gerekce:
+  // src/core/learn/similarity.js AGIRLIK_ONAYARLARI.
+  weightPreset: 'sekil',
   weights: { shape: 0.60, ctx: 0.25, dtw: 0.15 },
   tp1Pct: 40,
   tp2Pct: 70,
@@ -240,7 +244,7 @@ function turBelirle (t) {
  */
 function ayarCoz (cfg) {
   const conf = Object.assign({}, DEFAULT_SIGNAL_CFG, cfg || {})
-  conf.weights = Object.assign({}, DEFAULT_WEIGHTS || DEFAULT_SIGNAL_CFG.weights, (cfg && cfg.weights) || {})
+  conf.weights = agirlikCoz(conf)
   return conf
 }
 

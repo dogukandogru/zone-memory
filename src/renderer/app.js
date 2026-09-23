@@ -642,7 +642,13 @@ function bolgeleriCiz() {
 // saglam olan bir destek, iki hafta sonra kirildigi icin kesikli ciziliyordu.
 // Kullanici "zaten kirilacakmis" diye okuyup kendi degerlendirmesini gecmise
 // uyduruyordu. Bu kip, ekrani o anda gerceklen gorulebilecek bilgiyle
-// sinirlar. Kapatilinca sonuc gorunur, zaten inceleme icin o da gerekir.
+// sinirlar.
+//
+// VARSAYILAN KAPALI. Bir donem acik geliyordu ve sinyale tiklayan kisi
+// grafigin orada bitmesini HATA saniyordu: bir sinyale tiklamanin dogal
+// karsiligi sonucunu gormektir. Kip, sinyali sonucunu BILMEDEN
+// degerlendirmek isteyen icin bir arac; varsayilan davranis degil.
+// Arayuzde adi "Sonrasini gizle", cunku "O an" ne yaptigini soylemiyordu.
 
 /** Kip acik mi (kutu isaretli). */
 function anaKadarAcikMi() {
@@ -1206,6 +1212,16 @@ async function hafizayiYukle() {
   const sonTest = await cagirGuvenli('engine:backtest-last', { tf: durum.tf }, null)
   if (sonTest && sonTest.found) durum.testSonucu = sonTest
   else durum.testSonucu = null
+  // BENZERLIK AGIRLIGI DEGISMISSE OLCUM ESKIDIR.
+  //
+  // Ayar ekranindan degistirmek zaten testi yeniden calistiriyor. Yakalanmayan
+  // durum sudur: uygulamanin VARSAYILANI degisir (surum yukseltmesiyle) ve
+  // kullanici hicbir sey yapmamis olur. O zaman ekrandaki liste eski
+  // agirlikla, canli uretilen sinyaller yeni agirlikla hesaplanir ve ikisi
+  // sessizce ayrisir.
+  if (sonTest && sonTest.found && sonTest.weightsMatch === false) {
+    durum.olcumYenilensin = true
+  }
   // Canli sinyal gunlugu: canli uretilen sinyaller ve sonuclanan etiketleri.
   // Bu dosya taramadan ve hafiza silmeden bagimsiz birikir.
   const canliGunluk = await cagirGuvenli('engine:live-log', { tf: durum.tf, limit: 50 }, null)
@@ -2339,6 +2355,16 @@ async function ayarlariKaydet(yama) {
     bildir('Kaydedilecek değişiklik yok.')
     return
   }
+  // BENZERLIK ON AYARI OLCUMU GECERSIZ KILAR.
+  //
+  // Ayar izi (cfgHash) bunu YAKALAMAZ: iz indikator ayarini ve etiket
+  // tanimini kapsar, komsu agirligini degil. Ama agirlik degisince komsular
+  // da degisir, yani listedeki her sinyal baska bir karsilastirmadan cikmis
+  // olur. Kullaniciya "yeniden hesaplanir" diye soyluyoruz; o zaman gercekten
+  // hesaplanmali, yoksa not yalan olur.
+  const oncekiOnAyar = durum.ayarlar && durum.ayarlar.signalCfg
+    ? durum.ayarlar.signalCfg.weightPreset
+    : undefined
   const yeni = await cagirGuvenli('settings:set', { patch: gonderilecek }, 'Ayarlar kaydedilemedi')
   if (yeni === null) return
   if (yeni && typeof yeni === 'object') durum.ayarlar = yeni
@@ -2352,6 +2378,13 @@ async function ayarlariKaydet(yama) {
   await ayarYamasiniYenile()
   ayarPaneliniCiz(true)
   saglayiciSecimleriniKur()
+
+  const yeniOnAyar = yeni && yeni.signalCfg ? yeni.signalCfg.weightPreset : undefined
+  if (yeniOnAyar !== oncekiOnAyar) {
+    bildir('Benzerlik ayarı değişti, sinyal listesi yeniden hesaplanıyor.')
+    durum.olcumYenilensin = true
+    await olcumYenilemesiGerekiyorsa()
+  }
 }
 
 /** Ayarlari varsayilanlara dondurur (API anahtarlari ve saglayicilar korunur). */

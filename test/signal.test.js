@@ -605,3 +605,55 @@ test('zaman agirligi: eski eslesmeler daha az agirlik alir, etkin orneklem duser
   assert.ok(s.winRateRaw > kapali.winRateRaw,
     'eski kaybeden hafifledigi icin agirlikli oran daha yuksek olmali')
 })
+
+// BENZERLIK ON AYARI
+//
+// "Benzerligin ne kadari GORSEL SEKIL olsun" sorusu artik Ayarlar'dan
+// secilebiliyor. Varsayilan `sekil` (yalnizca gorsel), kullanicinin istegi
+// uzerine boyle secildi.
+//
+// OLCULDU (dogrulama dilimi, esikler kullanilmadan, olcut AUC):
+//   5m : yalniz sekil 0,6155 | bugunku 0,6210 | yalniz baglam 0,6254
+//   15m: yalniz sekil 0,5899 | bugunku 0,5958 | yalniz baglam 0,6055
+// Iki zaman diliminde de baglam arttikca tahmin iyilesiyor; yani "yalniz
+// sekil" olcumde EN ZAYIF secenektir. Fark kucuktur (0,01 AUC bandi).
+
+test('agirlik on ayari: varsayilan yalnizca sekildir', () => {
+  const { agirlikCoz } = require('../src/core/learn/similarity')
+  const w = agirlikCoz(DEFAULT_SIGNAL_CFG)
+  assert.strictEqual(w.shape, 1)
+  assert.strictEqual(w.ctx, 0)
+  assert.strictEqual(w.dtw, 0)
+})
+
+test('agirlik on ayari: her secenek beklenen agirligi verir', () => {
+  const { agirlikCoz, AGIRLIK_ONAYARLARI } = require('../src/core/learn/similarity')
+  for (const ad of Object.keys(AGIRLIK_ONAYARLARI)) {
+    const w = agirlikCoz({ weightPreset: ad })
+    assert.deepStrictEqual(w, AGIRLIK_ONAYARLARI[ad], ad + ' on ayari')
+    // Agirliklarin toplami 1 olmali, yoksa "yuzde" olarak anlatilamaz.
+    const toplam = w.shape + w.ctx + w.dtw
+    assert.ok(Math.abs(toplam - 1) < 1e-9, ad + ' toplami 1 olmali, ' + toplam)
+  }
+})
+
+test('agirlik on ayari: ON AYAR elle verilen sayilari EZER', () => {
+  const { agirlikCoz } = require('../src/core/learn/similarity')
+  // Bu davranis bilerek boyledir: tek kaynak on ayardir. Elle sayi vermek
+  // icin 'ozel' secilmelidir; aksi halde sayilar sessizce yok sayilir ve
+  // onbellek anahtari da degismez (bkz. test/backtest.test.js).
+  const w = agirlikCoz({ weightPreset: 'baglam', weights: { shape: 0.9, ctx: 0.1, dtw: 0 } })
+  assert.strictEqual(w.shape, 0)
+  assert.strictEqual(w.ctx, 1)
+
+  const ozel = agirlikCoz({ weightPreset: 'ozel', weights: { shape: 0.9, ctx: 0.1, dtw: 0 } })
+  assert.strictEqual(ozel.shape, 0.9)
+  assert.strictEqual(ozel.ctx, 0.1)
+})
+
+test('agirlik on ayari: taninmayan ad elle agirliklara duser', () => {
+  const { agirlikCoz, DEFAULT_WEIGHTS } = require('../src/core/learn/similarity')
+  // Eski bir ayar dosyasinda olmayan bir ad varsa uygulama durmamali.
+  const w = agirlikCoz({ weightPreset: 'boyle-bir-sey-yok' })
+  assert.deepStrictEqual(w, Object.assign({}, DEFAULT_WEIGHTS))
+})
