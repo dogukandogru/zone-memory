@@ -336,3 +336,19 @@ test('sekil penceresi: sinirlarin disindaki degerler kirpilir', () => {
   assert.equal(features.sekilPenceresi(null), features.SHAPE_WINDOW_VARSAYILAN)
   assert.equal(features.sekilPenceresi({ shapeWindowBars: 'abc' }), features.SHAPE_WINDOW_VARSAYILAN)
 })
+
+// IZ, VARSAYILANDA DEGISMEZ.
+//
+// Ize yeni bir alan eklendiginde degeri varsayilan olsa bile alan dolu
+// gecilirse HERKESIN izi degisir ve hicbir sey degismedigi halde tam yeniden
+// tarama tetiklenir. Olculdu: varsayilanla iz 76e9eb372de3 -> 8b482d9f21de.
+test('izIcinOzellikAyari: varsayilan pencere ize GIRMEZ', () => {
+  assert.equal(features.izIcinOzellikAyari(null), null)
+  assert.equal(features.izIcinOzellikAyari({}), null)
+  assert.equal(features.izIcinOzellikAyari({ shapeWindowBars: features.SHAPE_WINDOW_VARSAYILAN }), null)
+  // Sinira kirpilan deger de varsayilana esitse yine girmez.
+  assert.equal(features.izIcinOzellikAyari({ shapeWindowBars: 'abc' }), null)
+
+  // Degistirilmis pencere ize GIRER, yoksa eski hafiza sessizce kullanilirdi.
+  assert.deepEqual(features.izIcinOzellikAyari({ shapeWindowBars: 96 }), { shapeWindowBars: 96 })
+})

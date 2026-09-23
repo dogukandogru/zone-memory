@@ -185,7 +185,11 @@ function ayarIzi(indicatorParams, outcomeCfg, ctxNames, featureCfg) {
     // OZELLIK AYARI IZE DAHIL. Sekil penceresi degisince ozellik vektorleri
     // de degisir; ize girmezse eski hafiza sessizce kullanilir ve komsular
     // baska bir pencereyle hesaplanmis olurdu.
-    featureCfg: featureCfg || null,
+    //
+    // VARSAYILANDA null: alan dolu gecilseydi, ozelligin eklendigi surumde
+    // HERKESIN izi degisir ve hicbir sey degismedigi halde tam yeniden tarama
+    // tetiklenirdi. Olculdu: varsayilanla iz 76e9eb372de3 -> 8b482d9f21de.
+    featureCfg: core('learn/features').izIcinOzellikAyari(featureCfg),
   })
 }
 

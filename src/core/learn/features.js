@@ -50,6 +50,24 @@ const SHAPE_WINDOW_VARSAYILAN = 32
 const SHAPE_WINDOW_EN_AZ = 16
 const SHAPE_WINDOW_EN_COK = 512
 
+/**
+ * Ayar izine (cfgHash) yazilacak ozellik ayari.
+ *
+ * VARSAYILANDA null DONER. Sebebi: ize yeni bir alan eklendiginde, degeri
+ * varsayilan olsa bile alan dolu gelirse HERKESIN izi degisir ve hicbir sey
+ * degismedigi halde tam yeniden tarama tetiklenir (1 dakikalikta dakikalarca
+ * suren bir is). Alan ancak kullanici degeri GERCEKTEN degistirdiginde ize
+ * girer; o zaman da yeniden tarama zaten gereklidir.
+ *
+ * @param {{shapeWindowBars?:number}|null} [featureCfg]
+ * @returns {{shapeWindowBars:number}|null}
+ */
+function izIcinOzellikAyari (featureCfg) {
+  const pencere = sekilPenceresi(featureCfg)
+  if (pencere === SHAPE_WINDOW_VARSAYILAN) return null
+  return { shapeWindowBars: pencere }
+}
+
 /** Ayardan gecerli sekil penceresini cikarir. */
 function sekilPenceresi (opts) {
   const ham = opts && Number.isFinite(Number(opts.shapeWindowBars))
@@ -340,6 +358,7 @@ module.exports = {
   SHAPE_WINDOW_EN_AZ,
   SHAPE_WINDOW_EN_COK,
   sekilPenceresi,
+  izIcinOzellikAyari,
   rowLength,
   packRow,
   unpackRow,
