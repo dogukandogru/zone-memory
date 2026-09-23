@@ -62,6 +62,10 @@ const DEFAULTS = {
   symbol: 'XAUUSD',
   timeframe: '5m',
   indicatorParams: coreConst('../core/indicator/proZones', 'DEFAULT_PARAMS', {}),
+  // OZELLIK AYARI: gecmiste benzer kurulum aranirken sekil KAC BARA bakar.
+  // Ozellik vektorunu degistirir, yani hafizanin yeniden kurulmasini
+  // gerektirir; ayar izine dahildir, degisince tarama kendiliginden istenir.
+  featureCfg: { shapeWindowBars: 32 },
   outcomeCfg: coreConst('../core/learn/outcome', 'DEFAULT_OUTCOME_CFG', {}),
   signalCfg: coreConst('../core/learn/signal', 'DEFAULT_SIGNAL_CFG', {}),
   // TEK KAYNAK OANDA. Kullanicinin TradingView'da baktigi akisin kendisidir:
@@ -295,6 +299,7 @@ const SINIRLAR = {
   'backtestCfg.costUsd': [0, 100],
   'backtestCfg.slippageAtr': [0, 2],
   'backtestCfg.warmupPerBucket': [0, 5000],
+  'featureCfg.shapeWindowBars': [16, 512],
   'signalCfg.k': [1, 200],
   'signalCfg.minSimilarity': [0, 0.999],
   'signalCfg.minMatches': [1, 1000],

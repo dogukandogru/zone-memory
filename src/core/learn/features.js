@@ -29,8 +29,36 @@ const FEATURE_VERSION = 2
 
 const SHAPE_LEN = 16
 const RET_LEN = 32
-/** Sekil ve getiri penceresi. */
+/** Getiri penceresi. DEGISMEZ: satir uzunlugu buna bagli (bkz. ROW_LEN). */
 const WINDOW_BARS = 32
+
+/**
+ * SEKIL PENCERESI (bar). Kullanici Ayarlar'dan degistirebilir.
+ *
+ * Sekil vektoru her zaman SHAPE_LEN (16) noktadir; pencere buyudukce her
+ * nokta daha cok barin ortalamasi olur, yani daha genis ama daha kaba bir
+ * bicim karsilastirilir. Getiri vektoru bundan ETKILENMEZ ve 32 kalir:
+ * uzunlugu degisseydi hafiza dosyasinin satir boyu degisir, eski dosyalar
+ * okunamaz hale gelirdi.
+ *
+ * DIKKAT: bu deger ozellik vektorunu degistirir, yani hafizanin yeniden
+ * kurulmasini gerektirir. Ayar izine (cfgHash) dahildir, boylece degisince
+ * yeniden tarama kendiliginden istenir.
+ */
+const SHAPE_WINDOW_VARSAYILAN = 32
+/** Anlamli alt ve ust sinir: 16'nin altinda kova basina 1 bar bile dusmez. */
+const SHAPE_WINDOW_EN_AZ = 16
+const SHAPE_WINDOW_EN_COK = 512
+
+/** Ayardan gecerli sekil penceresini cikarir. */
+function sekilPenceresi (opts) {
+  const ham = opts && Number.isFinite(Number(opts.shapeWindowBars))
+    ? Math.round(Number(opts.shapeWindowBars))
+    : SHAPE_WINDOW_VARSAYILAN
+  if (ham < SHAPE_WINDOW_EN_AZ) return SHAPE_WINDOW_EN_AZ
+  if (ham > SHAPE_WINDOW_EN_COK) return SHAPE_WINDOW_EN_COK
+  return ham
+}
 /** Sekil yumusatmasinda kullanilan hareketli ortalama uzunlugu. */
 const SMOOTH_LEN = 5
 
@@ -55,61 +83,73 @@ const IKI_PI = Math.PI * 2
  * @returns {{shape: Float32Array, ret: Float32Array, ctx: Float32Array}|null}
  *          Pencere yetmiyorsa null
  */
-function buildFeatures (s, touch, ctxArr) {
+function buildFeatures (s, touch, ctxArr, opts) {
   if (!s || !touch) return null
 
   const bar = touch.bar | 0
   const n = s.length | 0
   if (bar < 0 || bar >= n) return null
-  // Sekil icin 32, getiri icin 33 kapanis gerekir; ikisi de bar >= 32 demektir.
-  if (bar < WINDOW_BARS) return null
+
+  const sekilPencere = sekilPenceresi(opts)
+  // Getiri icin 33 kapanis, sekil icin `sekilPencere` kapanis gerekir.
+  const gereken = Math.max(WINDOW_BARS, sekilPencere)
+  if (bar < gereken) return null
 
   const close = s.close
 
-  // Son WINDOW_BARS + 1 kapanis: [bar - WINDOW_BARS .. bar]
-  const ham = new Float64Array(WINDOW_BARS + 1)
+  // Getiri penceresi: son WINDOW_BARS + 1 kapanis.
+  const hamGetiri = new Float64Array(WINDOW_BARS + 1)
   for (let i = 0; i <= WINDOW_BARS; i++) {
     const c = +close[bar - WINDOW_BARS + i]
     if (!Number.isFinite(c) || c <= 0) return null
-    ham[i] = c
+    hamGetiri[i] = c
   }
 
-  const shape = sekilVektoru(ham)
-  const ret = getiriVektoru(ham)
+  // Sekil penceresi AYRI okunur: kullanici genisletmis olabilir.
+  const hamSekil = new Float64Array(sekilPencere)
+  for (let i = 0; i < sekilPencere; i++) {
+    const c = +close[bar - sekilPencere + 1 + i]
+    if (!Number.isFinite(c) || c <= 0) return null
+    hamSekil[i] = c
+  }
+
+  const shape = sekilVektoru(hamSekil)
+  const ret = getiriVektoru(hamGetiri)
   const ctx = baglamVektoru(s, touch, ctxArr, bar)
 
   return { shape, ret, ctx }
 }
 
 /**
- * Sekil vektoru: son WINDOW_BARS kapanis (ham dizisinin son 32 elemani),
+ * Sekil vektoru: verilen kapanis dizisinin TAMAMI,
  * once SMOOTH_LEN'lik hareketli ortalama ile yumusatilir (ilk barlarda pencere
  * kisaltilir, NaN uretilmez), sonra SHAPE_LEN kovaya bolunup kova ortalamasi
  * alinir, en son min-max ile 0..1 araligina tasinir.
- * @param {Float64Array} ham WINDOW_BARS + 1 uzunlukta kapanislar
+ * @param {Float64Array} ham Sekil penceresi kadar kapanis
  * @returns {Float32Array}
  */
 function sekilVektoru (ham) {
-  // ham dizisinin ilk elemani yalnizca log getiri icin gerekli, sekil son 32 bar.
-  const bas = ham.length - WINDOW_BARS
+  // Dizinin TAMAMI sekil penceresidir; uzunlugu ayardan gelir.
+  const pencere = ham.length | 0
 
   // Kisaltilmis pencereli hareketli ortalama.
-  const duz = new Float64Array(WINDOW_BARS)
+  const duz = new Float64Array(pencere)
   let toplam = 0
-  for (let i = 0; i < WINDOW_BARS; i++) {
-    toplam += ham[bas + i]
-    if (i >= SMOOTH_LEN) toplam -= ham[bas + i - SMOOTH_LEN]
-    const pencere = i < SMOOTH_LEN ? i + 1 : SMOOTH_LEN
-    duz[i] = toplam / pencere
+  for (let i = 0; i < pencere; i++) {
+    toplam += ham[i]
+    if (i >= SMOOTH_LEN) toplam -= ham[i - SMOOTH_LEN]
+    const p = i < SMOOTH_LEN ? i + 1 : SMOOTH_LEN
+    duz[i] = toplam / p
   }
 
-  // Kova ortalamalari.
+  // Kova ortalamalari. Kova SAYISI sabittir (SHAPE_LEN); pencere buyudukce
+  // her kovaya daha cok bar duser, yani bicim daha genis ama daha kaba olur.
   const kova = new Float64Array(SHAPE_LEN)
   for (let k = 0; k < SHAPE_LEN; k++) {
-    const basIdx = Math.floor((k * WINDOW_BARS) / SHAPE_LEN)
-    const sonIdx = Math.floor(((k + 1) * WINDOW_BARS) / SHAPE_LEN)
+    const basIdx = Math.floor((k * pencere) / SHAPE_LEN)
+    const sonIdx = Math.max(basIdx + 1, Math.floor(((k + 1) * pencere) / SHAPE_LEN))
     let t = 0
-    for (let i = basIdx; i < sonIdx; i++) t += duz[i]
+    for (let i = basIdx; i < sonIdx; i++) t += duz[Math.min(i, pencere - 1)]
     kova[k] = t / (sonIdx - basIdx)
   }
 
@@ -296,6 +336,10 @@ module.exports = {
   WINDOW_BARS,
   CTX_NAMES,
   buildFeatures,
+  SHAPE_WINDOW_VARSAYILAN,
+  SHAPE_WINDOW_EN_AZ,
+  SHAPE_WINDOW_EN_COK,
+  sekilPenceresi,
   rowLength,
   packRow,
   unpackRow,

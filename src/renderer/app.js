@@ -1448,6 +1448,7 @@ async function tfHazirlaIc(tf, ayar) {
       const sonuc = await cagirGuvenli('engine:scan', {
         tf: tf,
         params: ayar.indicatorParams,
+        featureCfg: ayar.featureCfg || null,
         cfgPatch: durum.ayarYamasiKayitli || null,
       }, 'Geçmiş taranamadı')
       if (sonuc) {
@@ -1643,6 +1644,7 @@ async function taramaCalistir() {
     await cagir('engine:scan', {
       tf: durum.tf,
       params: ayar.indicatorParams,
+      featureCfg: ayar.featureCfg || null,
       // Esikler ve hedef isci tarafinda hazir ayarla birlestirilir.
       cfgPatch: durum.ayarYamasiKayitli || null,
     })

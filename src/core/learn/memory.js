@@ -67,7 +67,7 @@ function num (v, def) {
  * cikarimi %60-100.
  *
  * @param {Object} s Series
- * @param {{tf:string, params:object, outcomeCfg:object}} cfg
+ * @param {{tf:string, params:object, outcomeCfg:object, featureCfg?:object}} cfg
  * @param {(pct:number,msg:string)=>void} [onProgress]
  * @returns {{tf:string, ctxNames:string[], events:Object[], zones:Object[], stats:object}}
  */
@@ -77,6 +77,9 @@ function buildMemory (s, cfg, onProgress) {
   const tfSec = tfSeconds(tf)
   const params = Object.assign({}, DEFAULT_PARAMS, conf.params || {})
   const outcomeCfg = Object.assign({}, DEFAULT_OUTCOME_CFG, conf.outcomeCfg || {})
+  // Ozellik ayari (su an yalnizca sekil penceresi). Ayar izine dahildir,
+  // degisince hafiza yeniden kurulur.
+  const featureCfg = conf.featureCfg || null
 
   const report = typeof onProgress === 'function' ? onProgress : null
   if (report) report(0, 'Indikator taramasi basliyor')
@@ -167,7 +170,7 @@ function buildMemory (s, cfg, onProgress) {
       atrAt = ctx.atr[t.bar]
     }
 
-    const features = ctx ? buildFeatures(s, t, ctx) : null
+    const features = ctx ? buildFeatures(s, t, ctx, featureCfg) : null
     const outcome = labelTouch(s, t, atrAt, outcomeCfg)
 
     if (!outcome) {

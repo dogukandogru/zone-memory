@@ -176,6 +176,16 @@ olay geldiginde ayni turdeki en benzer gecmis olaylarla karsilastirilip
   etiketiyle yazilabiliyordu.
 - **extendMemory hic cagrilmiyordu** ama belgeler artimli guncelleme vaat
   ediyordu; baglansa bar indeksleri kayardi.
+- **Sekil penceresi artik ayarlanabiliyor.** Gecmiste benzer kurulum
+  aranirken seklin KAC BARA baktigi kodda 32 olarak sabitti; kullanici
+  "sadece cok kisa oncesine bakiyor" dedi ve haklıydı. Ayarlar'dan 16 ile 512
+  arasinda secilebiliyor (5 dakikalikta 32 bar ~2,5 saat, 96 bar ~8 saat).
+  Sekil her zaman 16 noktadir; pencere buyudukce her nokta daha cok barin
+  ortalamasi olur, yani daha genis ama daha kaba bir bicim karsilastirilir.
+  KASITLI SINIR: yalnizca SEKIL penceresi degisir, getiri vektoru 32 kalir.
+  Uzunlugu degisseydi hafiza dosyasinin satir boyu degisir, eski dosyalar
+  okunamaz hale gelirdi.
+  Ayar izine dahil: degisince yeniden tarama ve olcum kendiliginden isteniyor.
 - **"Neye gore benzetti" karsilastirmasi.** Sinyal ayrintisinda "en benzer
   gecmis ornekler" listesi vardi ama benzerligin NEREDEN geldigi
   gorunmuyordu: yalnizca bir sayi (0,942) vardi ve o sayinin sekilden mi

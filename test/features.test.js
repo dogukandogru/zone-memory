@@ -279,3 +279,60 @@ test('buildFeatures: pencerede gecersiz kapanis varsa null doner', () => {
   const s = seriKur(closes)
   assert.equal(buildFeatures(s, dokunus(50), baglam(n)), null)
 })
+
+// SEKIL PENCERESI AYARI
+//
+// Kullanici "sadece cok kisa oncesine bakiyor, biraz daha genis bakabilir"
+// dedi. Pencere kodda 32 bar sabitti. Artik Ayarlar'dan degistirilebiliyor.
+//
+// KASITLI SINIR: yalnizca SEKIL penceresi degisir, getiri vektoru 32 kalir.
+// Getirinin uzunlugu degisseydi hafiza dosyasinin SATIR BOYU degisir, eski
+// dosyalar okunamaz hale gelirdi.
+
+/** Dalgali kapanislardan seri uretir (sabit seri sekli 0.5'e duzler). */
+function dalgaliSeri (n) {
+  const closes = new Array(n)
+  for (let i = 0; i < n; i++) closes[i] = 100 + Math.sin(i / 9) * 4 + Math.sin(i / 23) * 7
+  return seriKur(closes)
+}
+
+test('sekil penceresi: varsayilan 32 ve eski davranisla AYNI sonucu verir', () => {
+  const s = dalgaliSeri(200)
+  const c = baglam(200)
+  const a = buildFeatures(s, dokunus(100), c)
+  const b = buildFeatures(s, dokunus(100), c, { shapeWindowBars: 32 })
+  assert.deepEqual(Array.from(a.shape), Array.from(b.shape),
+    'ayar verilmemisi ile 32 verilmisi ayni olmali')
+})
+
+test('sekil penceresi: pencere buyuyunce SEKIL degisir, getiri DEGISMEZ', () => {
+  const s = dalgaliSeri(400)
+  const c = baglam(400)
+  const dar = buildFeatures(s, dokunus(300), c, { shapeWindowBars: 32 })
+  const genis = buildFeatures(s, dokunus(300), c, { shapeWindowBars: 128 })
+
+  assert.equal(genis.shape.length, SHAPE_LEN, 'nokta sayisi HER ZAMAN sabit')
+  assert.notDeepEqual(Array.from(dar.shape), Array.from(genis.shape),
+    'daha genis pencere baska bir bicim vermeli')
+
+  // SATIR BOYU KORUNMALI: getiri vektoru penceresizdir.
+  assert.equal(dar.ret.length, RET_LEN)
+  assert.equal(genis.ret.length, RET_LEN)
+  assert.deepEqual(Array.from(dar.ret), Array.from(genis.ret),
+    'getiri vektoru sekil penceresinden ETKILENMEMELI')
+})
+
+test('sekil penceresi: yeterli bar yoksa null doner', () => {
+  const s = dalgaliSeri(200)
+  const c = baglam(200)
+  // 128 barlik pencere isteyip 100. barda sormak: gecmis yetmez.
+  assert.equal(buildFeatures(s, dokunus(100), c, { shapeWindowBars: 128 }), null)
+  assert.notEqual(buildFeatures(s, dokunus(130), c, { shapeWindowBars: 128 }), null)
+})
+
+test('sekil penceresi: sinirlarin disindaki degerler kirpilir', () => {
+  assert.equal(features.sekilPenceresi({ shapeWindowBars: 5 }), features.SHAPE_WINDOW_EN_AZ)
+  assert.equal(features.sekilPenceresi({ shapeWindowBars: 9999 }), features.SHAPE_WINDOW_EN_COK)
+  assert.equal(features.sekilPenceresi(null), features.SHAPE_WINDOW_VARSAYILAN)
+  assert.equal(features.sekilPenceresi({ shapeWindowBars: 'abc' }), features.SHAPE_WINDOW_VARSAYILAN)
+})

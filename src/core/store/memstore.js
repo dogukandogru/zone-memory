@@ -70,6 +70,19 @@ const LITTLE_ENDIAN = new Uint8Array(new Uint16Array([1]).buffer)[0] === 1
  * @returns {string}
  */
 function cfgHash(parcalar) {
+  // BOS ALANLAR IZE GIRMEZ.
+  //
+  // Yeni bir alan eklendiginde (ornek: featureCfg) degeri varsayilanken
+  // `null` gelir. Null da ize katilsaydi, alanin eklendigi surumde HERKESIN
+  // izi degisir ve hicbir sey degismedigi halde tam yeniden tarama
+  // tetiklenirdi. Alan ancak GERCEKTEN bir deger tasidiginda ize girer.
+  const temiz = {}
+  for (const k of Object.keys(parcalar || {})) {
+    const v = parcalar[k]
+    if (v === null || v === undefined) continue
+    temiz[k] = v
+  }
+
   const sirali = function (deger) {
     if (Array.isArray(deger)) return deger.map(sirali)
     if (deger && typeof deger === 'object') {
@@ -81,7 +94,7 @@ function cfgHash(parcalar) {
     if (typeof deger === 'number' && Number.isFinite(deger)) return Number(deger.toFixed(8))
     return deger
   }
-  const metin = JSON.stringify(sirali(parcalar || {}))
+  const metin = JSON.stringify(sirali(temiz))
   return crypto.createHash('sha256').update(metin).digest('hex').slice(0, 12)
 }
 
@@ -381,6 +394,9 @@ async function saveMemory(basePath, memory) {
 
   const iz = mem.cfgHash ? String(mem.cfgHash) : cfgHash({
     indicatorParams: mem.indicatorParams || null,
+    // Ozellik ayari (sekil penceresi). Ize dahildir; hafizanin hangi
+    // pencereyle kuruldugu dosyada yazili olmazsa karsilastirilamaz.
+    featureCfg: mem.featureCfg || null,
     outcomeCfg: mem.outcomeCfg || null,
     ctxNames: ctxNames,
   })
@@ -409,6 +425,7 @@ async function saveMemory(basePath, memory) {
     // yuzden kullanici targetAtr gibi bir ayari degistirip taramayi
     // unuttugunda canli sinyal yeni tanimla uretilen olayi eski tanimla
     // etiketlenmis gecmisle karsilastiriyor ve bu hicbir yerde gorunmuyordu.
+    featureCfg: mem.featureCfg && typeof mem.featureCfg === 'object' ? mem.featureCfg : null,
     indicatorParams: mem.indicatorParams && typeof mem.indicatorParams === 'object'
       ? mem.indicatorParams
       : null,
@@ -588,6 +605,7 @@ async function loadMemory(basePath) {
       builtToTime: Number.isFinite(meta.builtToTime) ? meta.builtToTime : 0,
       cfgHash: meta.cfgHash ? String(meta.cfgHash) : null,
       indicatorParams: meta.indicatorParams || null,
+      featureCfg: meta.featureCfg || null,
       outcomeCfg: meta.outcomeCfg || null,
       featureVersion: Number.isFinite(meta.featureVersion) ? meta.featureVersion : null,
       builtAt: meta.builtAt || null,
@@ -616,6 +634,7 @@ function ozetKur(m) {
     ctxNames: Array.isArray(m.ctxNames) ? m.ctxNames.slice() : null,
     cfgHash: m.cfgHash ? String(m.cfgHash) : null,
     indicatorParams: m.indicatorParams || null,
+    featureCfg: m.featureCfg || null,
     outcomeCfg: m.outcomeCfg || null,
     featureVersion: Number.isFinite(m.featureVersion) ? m.featureVersion : null,
     builtAt: m.builtAt || null,

@@ -538,3 +538,24 @@ test('saveMemory: yeniden kayit yan ozeti ve buildId yi tazeler', async () => {
   assert.equal(fs.existsSync(base + '.vec.tmp'), false)
   assert.equal(fs.existsSync(base + '.meta.json.tmp'), false)
 })
+
+// BOS ALANLAR IZE GIRMEZ.
+//
+// Ize yeni bir alan eklendiginde (ornek: featureCfg) degeri varsayilanken
+// null gelir. Null da katilsaydi, alanin eklendigi surumde HERKESIN izi
+// degisir ve hicbir sey degismedigi halde tam yeniden tarama tetiklenirdi;
+// 1 dakikalikta bu dakikalarca suren bir istir.
+test('cfgHash: null ve undefined alanlar izi DEGISTIRMEZ', () => {
+  const taban = { indicatorParams: { pivotLen: 5 }, ctxNames: ['a', 'b'] }
+  const iz = memstore.cfgHash(taban)
+
+  assert.strictEqual(memstore.cfgHash(Object.assign({}, taban, { featureCfg: null })), iz,
+    'null alan izi degistirmemeli')
+  assert.strictEqual(memstore.cfgHash(Object.assign({}, taban, { featureCfg: undefined })), iz,
+    'undefined alan izi degistirmemeli')
+
+  // Ama GERCEK bir deger izi degistirmeli, yoksa ayar degisimi yakalanmaz.
+  assert.notStrictEqual(
+    memstore.cfgHash(Object.assign({}, taban, { featureCfg: { shapeWindowBars: 64 } })), iz,
+    'dolu alan izi DEGISTIRMELI')
+})

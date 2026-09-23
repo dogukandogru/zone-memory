@@ -378,6 +378,10 @@ async function tick() {
       // Zaten degerlendirilmis olaylar tekrar degerlendirilmez.
       seenKeys: Array.from(state.seenKeys),
       params: cfg.indicatorParams || {},
+      // Sekil penceresi: canli olaylarin ozellikleri hafizayla AYNI
+      // pencereyle uretilmeli, yoksa komsular baska bir bicimle
+      // karsilastirilir ve fark hicbir yerde gorunmez.
+      featureCfg: cfg.featureCfg || null,
       // Esikler ve hedef, isci tarafinda presets.resolveCfg ile cozulur:
       // tarama, test ve canli AYNI birlestirmeyi kullanmak zorunda
       // (onceden canli varsayilan 1.0 ATR hedefle plan kuruyordu, hafiza ise

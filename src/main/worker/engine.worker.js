@@ -177,11 +177,15 @@ function cfgPatchGeriUyum(payload) {
  * @param {object} outcomeCfg
  * @param {string[]} ctxNames
  */
-function ayarIzi(indicatorParams, outcomeCfg, ctxNames) {
+function ayarIzi(indicatorParams, outcomeCfg, ctxNames, featureCfg) {
   return core('store/memstore').cfgHash({
     indicatorParams: indicatorParams || null,
     outcomeCfg: outcomeCfg || null,
     ctxNames: Array.isArray(ctxNames) ? ctxNames : null,
+    // OZELLIK AYARI IZE DAHIL. Sekil penceresi degisince ozellik vektorleri
+    // de degisir; ize girmezse eski hafiza sessizce kullanilir ve komsular
+    // baska bir pencereyle hesaplanmis olurdu.
+    featureCfg: featureCfg || null,
   })
 }
 
@@ -780,7 +784,10 @@ handlers['data:status'] = async function (payload) {
       memoryCfgMatch: mem && mem.cfgHash
         ? mem.cfgHash === ayarIzi(mem.indicatorParams || null,
           core('learn/presets').resolveCfg(tf, payload && payload.cfgPatch ? payload.cfgPatch : {}, null).outcomeCfg,
-          mem.ctxNames)
+          mem.ctxNames,
+          // Etkin ayar arayuzden gelir; gelmediyse hafizanin kendi ayari
+          // kullanilir, yani karsilastirma "degismemis" der.
+          payload && payload.featureCfg !== undefined ? payload.featureCfg : (mem.featureCfg || null))
         : null,
       memoryBuiltAt: mem && mem.builtAt ? mem.builtAt : null,
       memoryBuildCommit: mem && mem.buildCommit ? mem.buildCommit : null,
@@ -984,11 +991,13 @@ handlers['engine:scan'] = async function (payload, ctx) {
   // (bkz. core/learn/presets.js resolveCfg).
   const uygulanan = core('learn/presets').resolveCfg(tf, payload.cfgPatch || cfgPatchGeriUyum(payload), null)
   const params = Object.assign({}, payload.params || {})
+  // Ozellik ayari: su an yalnizca sekil penceresi. Arayuz gonderir.
+  const ozellikAyari = payload.featureCfg || null
 
   ctx.progress(2, 'İndikatör çalışıyor')
   const built = memoryMod.buildMemory(
     s,
-    { tf: tf, params: params, outcomeCfg: uygulanan.outcomeCfg },
+    { tf: tf, params: params, outcomeCfg: uygulanan.outcomeCfg, featureCfg: ozellikAyari },
     (pct, msg) => ctx.progress(2 + num(pct, 0) * 0.78, msg)
   )
 
@@ -996,7 +1005,7 @@ handlers['engine:scan'] = async function (payload, ctx) {
   const zones = built.zones || []
   // Ayar izi: hem hafiza meta'sina yazilir hem eski olcumlerin gecerli olup
   // olmadigini belirler (tek yerde hesaplanir).
-  const yeniIz = ayarIzi(params, uygulanan.outcomeCfg, built.ctxNames)
+  const yeniIz = ayarIzi(params, uygulanan.outcomeCfg, built.ctxNames, ozellikAyari)
 
   ctx.progress(82, 'Hafıza diske yazılıyor')
   await memstore.saveMemory(paths.memoryPath(tf), {
@@ -1013,6 +1022,7 @@ handlers['engine:scan'] = async function (payload, ctx) {
     // AYAR IZI: hangi indikator ayari ve hangi etiket tanimiyla kuruldu.
     // Canli ve test bunu etkin ayarla karsilastirir; uyusmazsa uyarir.
     indicatorParams: params,
+    featureCfg: ozellikAyari,
     outcomeCfg: uygulanan.outcomeCfg,
     featureVersion: core('learn/features').FEATURE_VERSION,
     cfgHash: yeniIz,
@@ -1452,7 +1462,8 @@ handlers['engine:backtest'] = async function (payload, ctx) {
   const etkinIz = ayarIzi(
     memMeta && memMeta.indicatorParams ? memMeta.indicatorParams : null,
     uygulanan.outcomeCfg,
-    mem.ctxNames
+    mem.ctxNames,
+    memMeta && memMeta.featureCfg ? memMeta.featureCfg : null
   )
   const izUyum = hafizaIz ? hafizaIz === etkinIz : null
 
@@ -2221,7 +2232,8 @@ handlers['engine:live-tick'] = async function (payload) {
         ? memMeta.cfgHash === ayarIzi(
           payload.params || memMeta.indicatorParams || null,
           canliCfg.outcomeCfg,
-          mem.ctxNames
+          mem.ctxNames,
+          payload.featureCfg !== undefined ? payload.featureCfg : (memMeta.featureCfg || null)
         )
         : null
 
@@ -2242,7 +2254,8 @@ handlers['engine:live-tick'] = async function (payload) {
         const hafif = lightEvent(cand)
         let sig = null
         if (uretilebilir) {
-          const feats = core('learn/features').buildFeatures(sub, cand, ind.context)
+          const feats = core('learn/features').buildFeatures(sub, cand, ind.context,
+            payload.featureCfg !== undefined ? payload.featureCfg : (memMeta && memMeta.featureCfg))
           if (!feats) {
             ozellikYok++
           } else {

@@ -1743,6 +1743,17 @@ function ayarGruplari(saglayiciSecenekleri) {
       alanlar: [
         { yol: 'signalCfg.k', ad: 'Komşu sayısı (k)', tip: 'sayi', adim: 1, min: 1, max: 200,
           not: 'Hafızadan alınan en benzer kayıt sayısı.' },
+        { yol: 'featureCfg.shapeWindowBars', ad: 'Şekil penceresi (bar)',
+          tip: 'sayi', adim: 8, min: 16, max: 512,
+          not: 'Geçmişte benzer kurulum aranırken şeklin KAÇ BARA baktığı. ' +
+            'Varsayılan 32. Şekil her zaman 16 noktadır; pencere büyüdükçe her ' +
+            'nokta daha çok barın ortalaması olur, yani daha geniş ama daha kaba ' +
+            'bir biçim karşılaştırılır. 5 dakikalıkta 32 bar yaklaşık 2,5 saat, ' +
+            '96 bar yaklaşık 8 saattir. ' +
+            'DİKKAT: bu değer özellik vektörünü değiştirir, yani HAFIZANIN ' +
+            'YENİDEN KURULMASI gerekir. Kaydettikten sonra tarama kendiliğinden ' +
+            'istenir ve ölçüm de yeniden hesaplanır. Pencere büyüdükçe serinin ' +
+            'başındaki olaylar kullanılamaz hale gelir (ilk pencere kadar bar).' },
         { yol: 'signalCfg.weightPreset', ad: 'Benzerlik neye baksın', tip: 'secim',
           secenekler: [
             { deger: 'sekil', ad: 'Yalnızca görsel şekil' },
