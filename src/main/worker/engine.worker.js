@@ -874,13 +874,28 @@ handlers['data:sync'] = async function (payload, ctx) {
   })
 
   // Taban degistiyse ust zaman dilimlerini yeniden uret.
+  //
+  // EKSIK DOSYA DA URETILIR. Bir donem yalnizca `added > 0` kosulu vardi ve
+  // bu, veri paketi turetilmis dosyalari sildikten SONRA acilan piyasa kapali
+  // bir oturumda hicbirini geri yazmiyordu: OANDA sifir yeni bar doner,
+  // `added` sifir kalir, dosyalar silinmis halde kalirdi. Uygulama yine
+  // calisiyordu (seri 1 dakikaliktan bellekte orneklenir) ama her acilista
+  // 7,13 milyon bar bastan orneklenir ve bu dilimler "veri yok" sayilip
+  // gereksiz senkron denemesi baslatilirdi.
   const uretilen = []
-  if (hedefTf === '1m' && res && res.added > 0) {
+  const eksikTf = []
+  for (const ust of TURETILEN_TF) {
+    if (!(await fileExists(paths.candlePath(ust)))) eksikTf.push(ust)
+  }
+  const yenidenUret = hedefTf === '1m' && ((res && res.added > 0) || eksikTf.length > 0)
+  if (yenidenUret) {
     const taban = await binstore.readSeries(paths.candlePath('1m'))
     if (taban && taban.length > 0) {
-      for (let i = 0; i < TURETILEN_TF.length; i++) {
-        const ust = TURETILEN_TF[i]
-        ctx.progress(75 + (i / TURETILEN_TF.length) * 24, ust + ' yeniden üretiliyor')
+      // Yeni bar geldiyse HEPSI tazelenir; gelmediyse yalnizca eksikler.
+      const hedefler = (res && res.added > 0) ? TURETILEN_TF : eksikTf
+      for (let i = 0; i < hedefler.length; i++) {
+        const ust = hedefler[i]
+        ctx.progress(75 + (i / hedefler.length) * 24, ust + ' yeniden üretiliyor')
         const s = seriesMod.resample(taban, tfSeconds(ust))
         await binstore.writeSeries(paths.candlePath(ust), s)
         uretilen.push({ tf: ust, count: s.length })
@@ -1060,17 +1075,18 @@ handlers['engine:scan'] = async function (payload, ctx) {
   // ISARET DOSYASI: depo baska bir kaynaktan yeniden kuruldu. Ayar izi bunu
   // YAKALAYAMAZ, cunku ayar hic degismemistir; degisen veridir ve eski sinyal
   // listesi artik baska bir veri kumesinin olaylarina isaret eder.
+  //
+  // ISARET BURADA SILINMEZ. Bir donem tarama biter bitmez siliniyordu, ama
+  // olcumu asil yeniden kuran sey TARAMA DEGIL, ardindan gelen TESTTIR. Test
+  // en uzun adim; kullanici o sirada uygulamayi kapatirsa isaret gitmis,
+  // olcum dosyalari da yedege tasinmis oluyordu. Sonraki acilista hafiza
+  // guncel oldugu icin tarama hic calismiyor, eski iz de null oldugundan
+  // "olcum gecersiz" bir daha hic denmiyordu: liste KALICI olarak bos
+  // kaliyor ve kullanicinin elle test calistirmasi gerekiyordu.
+  // Isareti test tuketir (`engine:backtest`).
   const yenileIsareti = paths.olcumYenilePath(tf)
   const veriDegisti = await fileExists(yenileIsareti)
   const izDegisti = !!(eskiIz && eskiIz !== yeniIz) || veriDegisti
-  if (veriDegisti) {
-    // Isaret TUKETILIR: bir kez calisir.
-    try {
-      await fsp.unlink(yenileIsareti)
-    } catch (err) {
-      // Zaten yoksa sorun degil.
-    }
-  }
   if (izDegisti) {
     signalCache = { tf: tf, signals: [] }
     for (const dosya of [paths.signalsPath(tf), paths.backtestPath(tf)]) {
@@ -1080,7 +1096,9 @@ handlers['engine:scan'] = async function (payload, ctx) {
         // Dosya yoksa sorun degil.
       }
     }
-    log('Ayarlar değiştiği için eski test sinyalleri geçersiz. ' +
+    log((veriDegisti
+      ? 'Veri kaynağı değiştiği için eski test sinyalleri geçersiz. '
+      : 'Ayarlar değiştiği için eski test sinyalleri geçersiz. ') +
       'Yedekleri "' + ONCEKI_EKI + '" ekiyle duruyor.')
   } else {
     signalCache = { tf: null, signals: null }
@@ -1109,6 +1127,11 @@ handlers['engine:scan'] = async function (payload, ctx) {
     // gorunce testi KENDISI baslatir, boylece liste kullanicidan hicbir sey
     // istemeden yeniden dolar.
     signalsInvalidated: izDegisti,
+    // Sebep: 'veri' (depo baska bir kaynaktan kuruldu) veya 'ayar'.
+    // Kullaniciya DOGRU sebebi soylemek gerekiyor: veri paketi yuzunden
+    // "Ayarlar degisti" demek, hicbir ayara dokunmamis kullaniciyi kendi
+    // esiklerinin bozuldugunu sanip Ayarlar'i kurcalamaya iter.
+    invalidationReason: izDegisti ? (veriDegisti ? 'veri' : 'ayar') : null,
   }
 }
 
@@ -1514,6 +1537,19 @@ handlers['engine:backtest'] = async function (payload, ctx) {
     })
   } catch (err) {
     log('Test özeti diske yazılamadı: ' + (err && err.message ? err.message : String(err)))
+  }
+
+  // OLCUM YENILEME ISARETI BURADA TUKETILIR, taramada degil.
+  //
+  // Olcumu yeniden kuran sey tarama degil, bu testtir; isaret ancak simdi
+  // karsiligini buldu. Tarama silseydi ve kullanici test sirasinda uygulamayi
+  // kapatsaydi, sonraki acilista hafiza guncel oldugu icin tarama hic
+  // calismaz, eski iz de null oldugundan "olcum gecersiz" bir daha hic
+  // denmezdi: liste KALICI olarak bos kalirdi.
+  try {
+    await fsp.unlink(paths.olcumYenilePath(tf))
+  } catch (err) {
+    // Isaret yoksa sorun degil, olagan durum budur.
   }
 
   // CSV DISA AKTARIMI ICIN: kirpilmamis islem listesi bellekte tutulur.

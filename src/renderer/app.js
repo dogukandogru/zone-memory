@@ -1441,8 +1441,11 @@ async function tfHazirlaIc(tf, ayar) {
         // buluyordu. Olculdu: test 5m'de ~9 sn, 15m'de ~3 sn, 1m'de ~45 sn;
         // nadir gorulen bu durum icin beklenebilir bir sure.
         if (sonuc.signalsInvalidated) {
-          bildir(tf + ' hafızası yeniden kuruldu. Ayarlar değiştiği için ' +
-            'sinyal listesi de yeniden hesaplanıyor.')
+          const sebep = sonuc.invalidationReason === 'veri'
+            ? 'Veri kaynağı değiştiği için'
+            : 'Ayarlar değiştiği için'
+          bildir(tf + ' hafızası yeniden kuruldu. ' + sebep +
+            ' sinyal listesi de yeniden hesaplanıyor.')
           otomatikTest = true
         } else {
           bildir(tf + ' hafızası hazır: ' + formatNumber(sayi(sonuc.events, 0), 0) + ' kayıt. ' +

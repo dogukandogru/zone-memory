@@ -562,3 +562,107 @@ test('ayar izi AYNIYSA olcum dosyalarina dokunulmaz', async () => {
     assert.strictEqual(fs.existsSync(kok + '.signals.json.onceki'), false, 'gereksiz yedek olusmamali')
   })
 })
+
+/* ------------------------------------------------------------------ */
+/* Olcum yenileme isareti                                              */
+/* ------------------------------------------------------------------ */
+
+// Depo baska bir kaynaktan yeniden kuruldugunda ayar izi DEGISMEZ (ayar
+// aynidir, degisen veridir) ama eski sinyal listesi artik baska bir veri
+// kumesinin olaylarina isaret eder. Veri paketi bu durumu bir isaret
+// dosyasiyla tarama katmanina tasir.
+//
+// KILITLENEN OLAY: isaret bir donem TARAMA biter bitmez siliniyordu. Oysa
+// olcumu yeniden kuran sey tarama degil, ardindan gelen TESTTIR ve test en
+// uzun adimdir. Kullanici test sirasinda uygulamayi kapatirsa isaret gitmis,
+// olcum dosyalari da yedege tasinmis oluyordu; sonraki acilista hafiza guncel
+// oldugu icin tarama hic calismiyor ve liste KALICI olarak bos kaliyordu.
+
+test('yenile isareti TARAMAYLA silinmez, olcum yeniden kurulana kadar durur', async () => {
+  await isciyle(async (cagir, dataDir) => {
+    const kok = await olcumKur(dataDir, 'baska-bir-ayarin-izi')
+    const isaret = pathsCore.memoryPath(TF, undefined, dataDir) + '.yenile'
+    fs.writeFileSync(isaret, JSON.stringify({ sebep: 'oanda-veri-paketi' }))
+
+    const sonuc = await cagir('engine:scan', { tf: TF, params: INDIKATOR_AYARI })
+    assert.strictEqual(sonuc.signalsInvalidated, true)
+    // Sebep DOGRU soylenmeli: kullanici hicbir ayara dokunmadi.
+    assert.strictEqual(sonuc.invalidationReason, 'veri')
+
+    // BU TESTIN BUTUN KONUSU: test daha calismadi, isaret DURMALI.
+    assert.strictEqual(fs.existsSync(isaret), true,
+      'isareti tarama degil, olcumu yeniden kuran TEST tuketmeli')
+    assert.strictEqual(fs.existsSync(kok + '.signals.json.onceki'), true)
+  })
+})
+
+test('yenile isareti olmadan sebep "ayar" olur', async () => {
+  await isciyle(async (cagir, dataDir) => {
+    await olcumKur(dataDir, 'baska-bir-ayarin-izi')
+    const sonuc = await cagir('engine:scan', { tf: TF, params: INDIKATOR_AYARI })
+    assert.strictEqual(sonuc.signalsInvalidated, true)
+    assert.strictEqual(sonuc.invalidationReason, 'ayar')
+  })
+})
+
+test('yenile isaretini TEST tuketir', async () => {
+  await isciyle(async (cagir, dataDir) => {
+    const isaret = pathsCore.memoryPath(TF, undefined, dataDir) + '.yenile'
+    fs.writeFileSync(isaret, JSON.stringify({ sebep: 'oanda-veri-paketi' }))
+
+    await cagir('engine:backtest', { tf: TF, cfg: testCfg() })
+
+    // Olcum yeniden kuruldu: isaret artik karsiligini buldu.
+    assert.strictEqual(fs.existsSync(isaret), false,
+      'test bittiginde isaret silinmeli, yoksa her acilista tekrar calisir')
+  })
+})
+
+/* ------------------------------------------------------------------ */
+/* Turetilmis zaman dilimleri                                          */
+/* ------------------------------------------------------------------ */
+
+// Veri paketi turetilmis dosyalari siler ve data:sync onlari geri yazar.
+// KILITLENEN OLAY: geri yazma bir donem yalnizca "yeni bar indirildi"
+// kosuluna bagliydi. Piyasa kapaliyken (hafta sonu) saglayici sifir bar
+// doner, dosyalar silinmis kalirdi; uygulama calismaya devam ederdi ama her
+// acilista milyonlarca bar bastan orneklenirdi.
+
+/** 1 dakikalik taban seri (60 saniye araliklı). */
+function tabanSerisi1m () {
+  const n = 2000
+  const d = { time: [], open: [], high: [], low: [], close: [], volume: [] }
+  for (let i = 0; i < n; i++) {
+    const f = 2000 + Math.sin(i / 40)
+    d.time.push(CANLI_T0 + i * 60)
+    d.open.push(f)
+    d.high.push(f + 0.4)
+    d.low.push(f - 0.4)
+    d.close.push(f + 0.1)
+    d.volume.push(100)
+  }
+  return fromArrays(d)
+}
+
+test('data:sync EKSIK turetilmis dosyayi yeni bar gelmese de yazar', async () => {
+  await isciyle(async (cagir, dataDir) => {
+    // 1 dakikalik taban dolu, turetilmis dosya YOK (veri paketi silmisti).
+    const taban = tabanSerisi1m()
+    await binstore.writeSeries(pathsCore.candlePath('1m', undefined, dataDir), taban)
+    const hedef = pathsCore.candlePath('5m', undefined, dataDir)
+    assert.strictEqual(fs.existsSync(hedef), false, 'baslangicta yok')
+
+    // Piyasa kapali: indirilecek yeni bar YOK. `to` deponun son barina esit
+    // verilince aga hic cikilmaz ve added 0 kalir.
+    const sonBar = taban.time[taban.length - 1]
+    const sonuc = await cagir('data:sync', {
+      tf: '5m', providerId: 'histdata', to: sonBar,
+    })
+    assert.strictEqual(sonuc.added, 0, 'yeni bar inmemis olmali')
+
+    assert.strictEqual(fs.existsSync(hedef), true,
+      'yeni bar gelmese de eksik dosya uretilmeli')
+    const uretilmis = await binstore.readSeries(hedef)
+    assert.ok(uretilmis.length > 0, 'uretilen dosya bos olmamali')
+  })
+})

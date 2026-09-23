@@ -176,6 +176,21 @@ olay geldiginde ayni turdeki en benzer gecmis olaylarla karsilastirilip
   etiketiyle yazilabiliyordu.
 - **extendMemory hic cagrilmiyordu** ama belgeler artimli guncelleme vaat
   ediyordu; baglansa bar indeksleri kayardi.
+- **Olcum yenileme isareti fazla erken siliniyordu.** Isareti tarama biter
+  bitmez siliyorduk, oysa olcumu asil yeniden kuran sey taramadan SONRA gelen
+  testtir ve test en uzun adimdir. Kullanici test sirasinda uygulamayi
+  kapatirsa isaret gitmis, olcum dosyalari da yedege tasinmis oluyordu;
+  sonraki acilista hafiza guncel oldugu icin tarama hic calismiyor ve sinyal
+  listesi KALICI olarak bos kaliyordu. Isareti artik test tuketiyor.
+- **Hafta sonu acilista zaman dilimi dosyalari olusmuyordu.** Veri paketi
+  turetilmis dosyalari siliyor, geri yazma ise yalnizca "yeni bar indirildi"
+  kosuluna bagliydi. Piyasa kapaliyken saglayici sifir bar dondurdugu icin
+  dosyalar silinmis kaliyor ve her acilista milyonlarca bar bastan
+  orneklenmek zorunda kaliyordu. Eksik dosya artik yeni bar gelmese de
+  uretiliyor.
+- **Sebep yanlis soyleniyordu.** Veri kaynagi degistigi halde kullaniciya
+  "Ayarlar degisti" deniyordu; hicbir ayara dokunmamis biri kendi esiklerinin
+  bozuldugunu sanip Ayarlar'i kurcalayabilirdi.
 - **Acilista bos grafik.** Olcum yenilenmesi gerektiginde test, grafik
   yuklenmeden ONCE calisiyordu; kullanici depo ve hafiza hazir oldugu halde
   dakikalarca "Veri yok" yazan bos bir ekrana bakiyordu. Test artik ekran
