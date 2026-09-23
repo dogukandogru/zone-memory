@@ -84,6 +84,7 @@ olay geldiginde ayni turdeki en benzer gecmis olaylarla karsilastirilip
 | Ileriye bakma sizinti testi (`test/leak.test.js`) | Karar barindan sonraki barlar bozulunca olay alanlarinin degismedigini kilitler. |
 | Bagimsiz Pine referansi (`test/helpers/pineRef.js`) | Kutu mantigi Pine metninden AYRICA yazildi; port onunla karsilastiriliyor. |
 | OANDA saglayicisi (`src/core/data/oanda.js`) | Spot XAU_USD ve tick hacmi; kullanicinin TradingView'da baktigi akisin kendisi. Gecmis 2006'ya gider, ucretsiz deneme hesabi yeterli. |
+| Kirilan kutu artik SILINMIYOR (`showBrokenZones`) | Guncel indikatorde kirilan kutu takipte kalir, soluklasir ve `born + boxLengthBars`a kadar uzamaya devam eder. Kutu omru 100 yerine 600 bar, kirilmis kutuya birlesen pivot onu diriltiyor. |
 | Pakete gomulu API anahtari (`src/main/apiKeys.local.json`) | Musteriye kurulu halde teslim edilen yapida anahtar hazir gelir. Dosya git'te degildir. SIR SAKLAMA DEGILDIR: asar sifrelenmemistir, kuran herkes anahtari cikarabilir. |
 | Kuruluma gomulu veri (`build/bundled-data` + `src/main/firstrun.js`) | Mum deposu ve hafiza kurulumun icinde geliyor, ilk acilista yerine konuyor. Musteri saatlerce indirip taramak zorunda degil. Var olan verinin USTUNE YAZILMAZ. |
 | Tek komutla teslim paketi (`scripts/prepare-dist.mjs`) | Anahtari yazar, veriyi yedekler haric toplar, ayar yamasini ekler, paketler. Elle dosya olusturmak ve klasor kopyalamak gerekmiyor. |
@@ -174,6 +175,13 @@ olay geldiginde ayni turdeki en benzer gecmis olaylarla karsilastirilip
   etiketiyle yazilabiliyordu.
 - **extendMemory hic cagrilmiyordu** ama belgeler artimli guncelleme vaat
   ediyordu; baglansa bar indeksleri kayardi.
+- **Calismasi biten kutular ekrandan siliniyordu.** Kullanici bunu ekranda
+  gordu: TradingView'da kutu kirildiktan sonra da duruyor, bizde kayboluyordu.
+  Sebep, portun ESKI indikator surumune yazilmis olmasiydi. Guncel surumde
+  (`docs/pine/bollinger_box.pine`) kirilan kutu takip listesinde KALIR, her
+  barda sag kenarini yeniden alir ve `born + boxLengthBars`a kadar UZAR;
+  yalnizca soluklasip "BROKEN" yazisi alir. Ayrica kutu omru 100 degil 600
+  bar ve kirilmis bir kutuya yeni pivot birlesirse kutu DIRILIR.
 - **Gecmis sinyal, GELECEGIYLE birlikte cizilliyordu.** Sinyal aninda saglam
   olan bir destek, haftalar sonra kirildigi icin kesikli ve solgun
   gorunuyordu; ekrandaki mumlar da sinyalden sonrasini gosteriyordu.

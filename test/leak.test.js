@@ -271,22 +271,31 @@ function kilitleriUygula (K, temizD, temiz) {
     }
   }
 
-  // --- 3. K'DAN ONCE KIRILMIS KUTULARIN TUM ALANLARI ----------------------
-  // Kirilma kutuyu takipten dusurur: brokenBar <= K ise kutunun butun yasami
-  // K'dan once bitmistir, endBar/endTime/flow dahil her sey sabit olmali.
+  // --- 3. K'DAN ONCE KIRILMIS KUTULARIN DOGUM ALANLARI --------------------
+  //
+  // ONCEDEN burada kirilmis kutularin TUM alanlari karsilastiriliyordu,
+  // gerekce "kirilma kutuyu takipten dusurur, yasami orada biter" idi.
+  // GUNCEL INDIKATORDE BU DOGRU DEGIL: kirilan kutu listede kalir, cizimi
+  // uzamaya devam eder, yeni bir pivot ona birlesip sinirlarini
+  // degistirebilir ve hatta kutuyu DIRILTEBILIR. Yani endBar, top, bottom,
+  // flow ve broken alanlari kirilmadan SONRA da degisir; bunlar gelecege
+  // baglidir ve burada karsilastirilamaz.
+  //
+  // Kilit gucunu kaybetmesin diye kirilmis kutular yine taranir, ama
+  // yalnizca DOGUMDA kesinlesen alanlar uzerinden. Gercek bir ileriye bakma
+  // (orn. ozellik vektorunun bir sonraki bari okumasi) 2. adimda zaten
+  // olayin TUM alanlarinda yakalanir.
   let kirik = 0
   for (const z of temiz.zones) {
     if (!z.broken || z.brokenBar < 0 || z.brokenBar > K) continue
     kirik++
     const bz = bozukBolge.get(z.id)
     assert.ok(bz !== undefined, 'K=' + K + ': kirilmis bolge#' + z.id + ' bozuk kosuda yok')
-    const am = duzlestir(z)
-    const bm = duzlestir(bz)
-    for (const [yol, deger] of am) {
-      assert.ok(ayniDeger(deger, bm.get(yol)),
+    for (const alan of BOLGE_DOGUM_ALANLARI) {
+      assert.ok(ayniDeger(z[alan], bz[alan]),
         'ILERIYE BAKMA SIZINTISI. K=' + K + ', kirilmis bolge#' + z.id +
-        ' (brokenBar=' + z.brokenBar + '), alan "' + yol + '": temiz ' +
-        String(deger) + ', bozuk ' + String(bm.get(yol)))
+        ' (brokenBar=' + z.brokenBar + '), alan "' + alan + '": temiz ' +
+        String(z[alan]) + ', bozuk ' + String(bz[alan]))
     }
   }
 

@@ -1,0 +1,412 @@
+//@version=6
+indicator("bollinger+box", overlay=true, max_boxes_count=500, max_labels_count=300)
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// AYARLAR
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+pivotLen        = input.int(5, "Pivot Hassasiyeti", minval=2, maxval=20)
+atrLen          = input.int(14, "ATR Length", minval=5, maxval=100)
+zoneAtrMult     = input.float(0.35, "Zone Kalınlığı / ATR", minval=0.05, maxval=2.0, step=0.05)
+mergeAtrMult    = input.float(0.55, "Yakın Bölgeleri Birleştir / ATR", minval=0.10, maxval=3.0, step=0.05)
+
+volumeLen       = input.int(50, "Volume Ortalama", minval=10, maxval=300)
+minVolRatio     = input.float(1.05, "Minimum Volume Gücü", minval=0.1, maxval=5.0, step=0.05)
+minFlowToShow   = input.float(6.0, "Minimum Flow Değeri", minval=1.0, maxval=10.0, step=0.1)
+boxLengthBars   = input.int(100, "Kutu Uzunluğu (Mum)", minval=1, maxval=5000)
+
+maxZones        = input.int(24, "Maksimum Aktif Bölge", minval=5, maxval=100)
+maxAgeBars      = input.int(600, "Bölge Ömrü / Bar", minval=50, maxval=5000)
+touchCooldown   = input.int(12, "Aynı Bölge Temas Aralığı", minval=1, maxval=100)
+
+mssLen          = input.int(8, "MSS Onay Uzunluğu", minval=3, maxval=50)
+useMSS          = input.bool(true, "MSS Onayı Kullan")
+wickRejectMin   = input.float(0.42, "Minimum Fitil Reddi", minval=0.10, maxval=0.90, step=0.01)
+
+emaFastLen      = input.int(21, "EMA Fast", minval=2, maxval=200)
+emaSlowLen      = input.int(55, "EMA Slow", minval=5, maxval=300)
+useTrendFilter  = input.bool(true, "Trend Filtresi Kullan")
+showEMA         = input.bool(false, "EMA Çizgilerini Göster")
+
+minSniperScore  = input.float(7.2, "Minimum Sniper Score", minval=1.0, maxval=15.0, step=0.1)
+signalOnceZone  = input.bool(true, "Her Bölgeden Sadece 1 Sinyal")
+showBrokenZones = input.bool(true, "Kırılan Bölgeleri Soluk Göster")
+useFVGBonus     = input.bool(true, "FVG Bonus Skoru Kullan")
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BOLLINGER BAND AYARLARI (YENİ EKLENEN KATMAN)
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+useBBFilter     = input.bool(true, "Kutu Oluşumunda Bollinger Band Filtresi Kullan", group="Bollinger Band")
+bbLen           = input.int(20, "Bollinger Band Periyot (Range modu için)", minval=1, group="Bollinger Band")
+bbMult          = input.float(2.0, "Bollinger Band Std Sapma", minval=0.1, step=0.1, group="Bollinger Band")
+showBBLines     = input.bool(true, "Bollinger Band Çizgilerini Göster", group="Bollinger Band")
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ANA HESAPLAMALAR
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+atr   = ta.atr(atrLen)
+volMA = ta.sma(volume, volumeLen)
+
+emaFast = ta.ema(close, emaFastLen)
+emaSlow = ta.ema(close, emaSlowLen)
+
+trendBull = emaFast > emaSlow
+trendBear = emaFast < emaSlow
+
+plot(showEMA ? emaFast : na, "EMA Fast", color=color.new(color.aqua, 0))
+plot(showEMA ? emaSlow : na, "EMA Slow", color=color.new(color.orange, 0))
+
+rng      = math.max(high - low, syminfo.mintick)
+bullWick = (math.min(open, close) - low) / rng
+bearWick = (high - math.max(open, close)) / rng
+
+mssBull = close > ta.highest(high, mssLen)[1]
+mssBear = close < ta.lowest(low, mssLen)[1]
+
+mssBullOK = not useMSS or mssBull
+mssBearOK = not useMSS or mssBear
+
+vRatioNow = not na(volMA) and volMA > 0 ? volume / volMA : 1.0
+
+bullFVGBonus = useFVGBonus and not na(high[2]) and low > high[2] ? 0.8 : 0.0
+bearFVGBonus = useFVGBonus and not na(low[2]) and high < low[2] ? 0.8 : 0.0
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BOLLINGER BAND HESAPLAMA (YENİ)
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+bbBasis = ta.sma(close, bbLen)
+bbDev   = bbMult * ta.stdev(close, bbLen)
+bbUpper = bbBasis + bbDev
+bbLower = bbBasis - bbDev
+
+plot(showBBLines ? bbUpper : na, "BB Upper", color=color.new(color.silver, 30))
+plot(showBBLines ? bbBasis : na, "BB Basis", color=color.new(color.silver, 60))
+plot(showBBLines ? bbLower : na, "BB Lower", color=color.new(color.silver, 30))
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ARRAY SİSTEMİ
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+var box[]   zones      = array.new_box()
+var float[] zTop       = array.new_float()
+var float[] zBot       = array.new_float()
+var float[] zScore     = array.new_float()
+var bool[]  zSupport   = array.new_bool()
+var bool[]  zBroken    = array.new_bool()
+var bool[]  zDone      = array.new_bool()
+var int[]   zBorn      = array.new_int()
+var int[]   zLastTouch = array.new_int()
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// FONKSİYONLAR
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+f_transp(float _score, bool _broken) =>
+    _broken ? 93 : int(math.max(35, math.min(88, 92 - _score * 5.0)))
+
+f_text(bool _support, float _score, bool _broken) =>
+    sideTxt  = _support ? "BUY LIQUIDITY" : "SELL LIQUIDITY"
+    stateTxt = _broken ? "BROKEN" : "ACTIVE"
+    sideTxt + "\nFlow: " + str.tostring(_score, "#.0") + "\n" + stateTxt
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// PİVOTLAR
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ph = ta.pivothigh(high, pivotLen, pivotLen)
+pl = ta.pivotlow(low, pivotLen, pivotLen)
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// DİRENÇ / SELL LIQUIDITY
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+if not na(ph) and not na(atr[pivotLen])
+    zH    = atr[pivotLen] * zoneAtrMult
+    top   = ph + zH
+    bot   = ph - zH * 0.25
+    vDen  = not na(volMA[pivotLen]) and volMA[pivotLen] > 0 ? volMA[pivotLen] : volume[pivotLen]
+    vR    = vDen > 0 ? volume[pivotLen] / vDen : 1.0
+    score = math.min(10.0, math.max(1.0, vR * 3.0))
+
+    bbSellOK = not useBBFilter or (not na(bbUpper[pivotLen]) and ph >= bbUpper[pivotLen])
+
+    if vR >= minVolRatio and score >= minFlowToShow and bbSellOK
+        merged = false
+
+        if array.size(zones) > 0
+            for j = 0 to array.size(zones) - 1
+                sameSide = not array.get(zSupport, j)
+                midOld   = (array.get(zTop, j) + array.get(zBot, j)) / 2.0
+                nearZone = math.abs(ph - midOld) <= atr * mergeAtrMult
+
+                if sameSide and nearZone
+                    oldScore = array.get(zScore, j)
+                    newScore = math.min(10.0, oldScore + score * 0.25)
+                    newTop   = math.max(array.get(zTop, j), top)
+                    newBot   = math.min(array.get(zBot, j), bot)
+
+                    array.set(zScore, j, newScore)
+                    array.set(zTop, j, newTop)
+                    array.set(zBot, j, newBot)
+                    array.set(zBroken, j, false)
+
+                    bx = array.get(zones, j)
+                    box.set_top(bx, newTop)
+                    box.set_bottom(bx, newBot)
+                    box.set_text(bx, f_text(false, newScore, false))
+
+                    merged := true
+
+        if not merged
+            transp = f_transp(score, false)
+            b = box.new(
+                 left=bar_index - pivotLen,
+                 top=top,
+                 right=bar_index,
+                 bottom=bot,
+                 xloc=xloc.bar_index,
+                 extend=extend.none,
+                 bgcolor=color.new(color.red, transp),
+                 border_color=color.new(color.orange, math.max(transp - 10, 0)),
+                 text=f_text(false, score, false),
+                 text_color=color.white,
+                 text_size=size.tiny)
+
+            array.push(zones, b)
+            array.push(zTop, top)
+            array.push(zBot, bot)
+            array.push(zScore, score)
+            array.push(zSupport, false)
+            array.push(zBroken, false)
+            array.push(zDone, false)
+            array.push(zBorn, bar_index - pivotLen)
+            array.push(zLastTouch, na)
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// DESTEK / BUY LIQUIDITY
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+if not na(pl) and not na(atr[pivotLen])
+    zH    = atr[pivotLen] * zoneAtrMult
+    top   = pl + zH * 0.25
+    bot   = pl - zH
+    vDen  = not na(volMA[pivotLen]) and volMA[pivotLen] > 0 ? volMA[pivotLen] : volume[pivotLen]
+    vR    = vDen > 0 ? volume[pivotLen] / vDen : 1.0
+    score = math.min(10.0, math.max(1.0, vR * 3.0))
+
+    bbBuyOK = not useBBFilter or (not na(bbLower[pivotLen]) and pl <= bbLower[pivotLen])
+
+    if vR >= minVolRatio and score >= minFlowToShow and bbBuyOK
+        merged = false
+
+        if array.size(zones) > 0
+            for j = 0 to array.size(zones) - 1
+                sameSide = array.get(zSupport, j)
+                midOld   = (array.get(zTop, j) + array.get(zBot, j)) / 2.0
+                nearZone = math.abs(pl - midOld) <= atr * mergeAtrMult
+
+                if sameSide and nearZone
+                    oldScore = array.get(zScore, j)
+                    newScore = math.min(10.0, oldScore + score * 0.25)
+                    newTop   = math.max(array.get(zTop, j), top)
+                    newBot   = math.min(array.get(zBot, j), bot)
+
+                    array.set(zScore, j, newScore)
+                    array.set(zTop, j, newTop)
+                    array.set(zBot, j, newBot)
+                    array.set(zBroken, j, false)
+
+                    bx = array.get(zones, j)
+                    box.set_top(bx, newTop)
+                    box.set_bottom(bx, newBot)
+                    box.set_text(bx, f_text(true, newScore, false))
+
+                    merged := true
+
+        if not merged
+            transp = f_transp(score, false)
+            b = box.new(
+                 left=bar_index - pivotLen,
+                 top=top,
+                 right=bar_index,
+                 bottom=bot,
+                 xloc=xloc.bar_index,
+                 extend=extend.none,
+                 bgcolor=color.new(color.teal, transp),
+                 border_color=color.new(color.aqua, math.max(transp - 10, 0)),
+                 text=f_text(true, score, false),
+                 text_color=color.white,
+                 text_size=size.tiny)
+
+            array.push(zones, b)
+            array.push(zTop, top)
+            array.push(zBot, bot)
+            array.push(zScore, score)
+            array.push(zSupport, true)
+            array.push(zBroken, false)
+            array.push(zDone, false)
+            array.push(zBorn, bar_index - pivotLen)
+            array.push(zLastTouch, na)
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// FAZLA BÖLGE TEMİZLEME
+// Geçmiş bölgeler grafikte kalır, sadece aktif takip listesinden çıkarılır.
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+while array.size(zones) > maxZones
+    oldBox  = array.shift(zones)
+    oldBorn = array.shift(zBorn)
+
+    box.set_right(oldBox, math.min(bar_index, oldBorn + boxLengthBars))
+
+    array.shift(zTop)
+    array.shift(zBot)
+    array.shift(zScore)
+    array.shift(zSupport)
+    array.shift(zBroken)
+    array.shift(zDone)
+    array.shift(zLastTouch)
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BÖLGELERİ GÜNCELLEME
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+if array.size(zones) > 0
+    int i = array.size(zones) - 1
+
+    while i >= 0
+        bx     = array.get(zones, i)
+        top    = array.get(zTop, i)
+        bot    = array.get(zBot, i)
+        score  = array.get(zScore, i)
+        sup    = array.get(zSupport, i)
+        born   = array.get(zBorn, i)
+        broken = array.get(zBroken, i)
+        lastT  = array.get(zLastTouch, i)
+
+        tooOld = bar_index - born > maxAgeBars
+
+        if tooOld
+            box.set_right(bx, math.min(bar_index, born + boxLengthBars))
+
+            array.remove(zones, i)
+            array.remove(zTop, i)
+            array.remove(zBot, i)
+            array.remove(zScore, i)
+            array.remove(zSupport, i)
+            array.remove(zBroken, i)
+            array.remove(zDone, i)
+            array.remove(zBorn, i)
+            array.remove(zLastTouch, i)
+        else
+            rightEdge = math.min(bar_index, born + boxLengthBars)
+            box.set_right(bx, rightEdge)
+
+            touched     = low <= top and high >= bot
+            canAddTouch = na(lastT) or bar_index - lastT >= touchCooldown
+
+            if touched and canAddTouch and not broken
+                newScore = math.min(10.0, score + 0.35)
+                array.set(zScore, i, newScore)
+                array.set(zLastTouch, i, bar_index)
+                score := newScore
+
+            breakSupport = sup and close < bot - atr * 0.15
+            breakResist  = not sup and close > top + atr * 0.15
+            newBroken    = broken or breakSupport or breakResist
+
+            array.set(zBroken, i, newBroken)
+
+            transp = f_transp(score, newBroken)
+            bgCol  = sup ? color.new(color.teal, transp) : color.new(color.red, transp)
+            brCol  = sup ? color.new(color.aqua, math.max(transp - 10, 0)) : color.new(color.orange, math.max(transp - 10, 0))
+
+            if newBroken and not showBrokenZones
+                box.delete(bx)
+                array.remove(zones, i)
+                array.remove(zTop, i)
+                array.remove(zBot, i)
+                array.remove(zScore, i)
+                array.remove(zSupport, i)
+                array.remove(zBroken, i)
+                array.remove(zDone, i)
+                array.remove(zBorn, i)
+                array.remove(zLastTouch, i)
+            else
+                box.set_bgcolor(bx, bgCol)
+                box.set_border_color(bx, brCol)
+                box.set_text(bx, f_text(sup, score, newBroken))
+
+        i := i - 1
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// SNIPER SİNYAL MANTIĞI
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+buySignal       = false
+sellSignal      = false
+buySignalScore  = 0.0
+sellSignalScore = 0.0
+int buyZoneId   = na
+int sellZoneId  = na
+
+if barstate.isconfirmed and array.size(zones) > 0
+    for s = 0 to array.size(zones) - 1
+        top    = array.get(zTop, s)
+        bot    = array.get(zBot, s)
+        score  = array.get(zScore, s)
+        sup    = array.get(zSupport, s)
+        broken = array.get(zBroken, s)
+        done   = array.get(zDone, s)
+
+        canSignal = not signalOnceZone or not done
+        touched   = low <= top and high >= bot
+
+        buySweep  = sup and touched and low < bot and close > bot
+        sellSweep = not sup and touched and high > top and close < top
+
+        buyScore = score + math.min(vRatioNow, 3.0) + bullWick * 3.0 + bullFVGBonus + (mssBull ? 1.4 : 0.0) + (trendBull ? 1.0 : 0.0)
+        sellScore = score + math.min(vRatioNow, 3.0) + bearWick * 3.0 + bearFVGBonus + (mssBear ? 1.4 : 0.0) + (trendBear ? 1.0 : 0.0)
+
+        buyCond = canSignal and not broken and buySweep and bullWick >= wickRejectMin and mssBullOK and (not useTrendFilter or trendBull) and buyScore >= minSniperScore
+        sellCond = canSignal and not broken and sellSweep and bearWick >= wickRejectMin and mssBearOK and (not useTrendFilter or trendBear) and sellScore >= minSniperScore
+
+        if buyCond and buyScore > buySignalScore
+            buySignal := true
+            buySignalScore := buyScore
+            buyZoneId := s
+
+        if sellCond and sellScore > sellSignalScore
+            sellSignal := true
+            sellSignalScore := sellScore
+            sellZoneId := s
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// SİNYAL ETİKETLERİ
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+if buySignal and not na(buyZoneId)
+    if signalOnceZone
+        array.set(zDone, buyZoneId, true)
+
+    label.new(
+         x=bar_index,
+         y=low - atr * 0.20,
+         text="SNIPER BUY\nScore: " + str.tostring(buySignalScore, "#.0"),
+         style=label.style_label_up,
+         color=color.new(color.lime, 0),
+         textcolor=color.white,
+         size=size.small)
+
+if sellSignal and not na(sellZoneId)
+    if signalOnceZone
+        array.set(zDone, sellZoneId, true)
+
+    label.new(
+         x=bar_index,
+         y=high + atr * 0.20,
+         text="SNIPER SELL\nScore: " + str.tostring(sellSignalScore, "#.0"),
+         style=label.style_label_down,
+         color=color.new(color.red, 0),
+         textcolor=color.white,
+         size=size.small)
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ALARMLAR
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+signalDir = buySignal ? 1 : sellSignal ? -1 : 0
+plot(signalDir, title="Signal Direction", display=display.none)
+
+alertcondition(buySignal or sellSignal, title="SNIPER BUY & SELL TEK ALARM", message="SNIPER BUY/SELL | Direction: {{plot(\"Signal Direction\")}} | {{ticker}} | {{interval}}")
+alertcondition(buySignal, title="SNIPER BUY", message="SNIPER BUY | {{ticker}} | {{interval}}")
+alertcondition(sellSignal, title="SNIPER SELL", message="SNIPER SELL | {{ticker}} | {{interval}}")

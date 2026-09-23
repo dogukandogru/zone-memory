@@ -188,10 +188,14 @@ test('parite: varsayilan ayarlarla 10.000 barlik bes tohumda kutular birebir ayn
     toplamKutu += ref.zones.length
     toplamKirik += ref.zones.filter((z) => z.brokenBar !== null).length
   }
-  // Olculdu (2026-09): bes tohumda 170 kutu, 97'si kirilmis. Sayi degisirse
-  // ya uretec ya da kutu mantigi degismistir; ikisi de bilincli olmali.
-  assert.equal(toplamKutu, 170, 'toplam kutu sayisi degisti')
-  assert.equal(toplamKirik, 97, 'toplam kirilmis kutu sayisi degisti')
+  // Olculdu (2026-09, GUNCEL indikator): bes tohumda 167 kutu, 135'i
+  // kirilmis. Kirik sayisi 97'den 135'e cikti cunku kirilan kutu artik
+  // takipten CIKMIYOR, cizilmeye ve uzamaya devam ediyor; daha uzun yasayan
+  // kutu daha cok kirilma firsati goruyor. Kutu sayisi 170'ten 167'ye indi
+  // cunku listede kalan kirik kutular maxZones sayisina dahil ve yeni
+  // pivotlar onlara birlesebiliyor.
+  assert.equal(toplamKutu, 167, 'toplam kutu sayisi degisti')
+  assert.equal(toplamKirik, 135, 'toplam kirilmis kutu sayisi degisti')
 })
 
 test('parite: ILK DOKUNUS olaylari referansla ayni bar ve ayni zoneId', () => {
@@ -302,12 +306,11 @@ test('pivot esitlik kurali: port KESIN kurali varsayar, esitDahil sonucu degisti
     if (esit.zones.length !== kesin.zones.length) farkliTohum++
   }
 
-  // Olculdu (2026-09): kesin 170, esitDahil 174 kutu. Bes tohumun dordunde fark
-  // var, biri (3) ayni. Yani kural bir tercih meselesi degil, portun ciktisini
-  // degistiren bir varsayimdir; Pine'in gercek davranisi degisirse buradaki
-  // sayilar da degismeli.
-  assert.equal(kesinToplam, 170, 'kesin kuralda toplam kutu sayisi degisti')
-  assert.equal(esitToplam, 174, 'esitDahil kuralinda toplam kutu sayisi degisti')
+  // Olculdu (2026-09, GUNCEL indikator): kesin 167, esitDahil 170 kutu.
+  // Kural hala portun ciktisini degistiren bir varsayimdir; Pine'in gercek
+  // davranisi degisirse buradaki sayilar da degismeli.
+  assert.equal(kesinToplam, 167, 'kesin kuralda toplam kutu sayisi degisti')
+  assert.equal(esitToplam, 170, 'esitDahil kuralinda toplam kutu sayisi degisti')
   assert.ok(esitToplam > kesinToplam,
     'esitlige izin vermek en az bir pivot daha uretmeli, yoksa secenek anlamsiz')
   assert.ok(farkliTohum >= 3, `fark yalnizca ${farkliTohum} tohumda gorundu`)

@@ -33,6 +33,9 @@ const ta = require('../../src/core/ta')
  * }}
  */
 const PINE_VARSAYILAN = {
+  // Guncel indikatorde (docs/pine/bollinger_box.pine) kirilan kutu takipten
+  // CIKMAZ, soluk cizilmeye ve uzamaya devam eder.
+  showBrokenZones: true,
   // Moduller (Pine 7-9)
   showZones: true,
   useVolumeFilter: true,
@@ -43,7 +46,7 @@ const PINE_VARSAYILAN = {
   zoneAtrMult: 0.35,
   mergeAtrMult: 0.55,
   maxZones: 24,
-  maxAgeBars: 100,
+  maxAgeBars: 600,
   touchCooldown: 12,
   boxLengthBars: 100,
   // Volume ayarlari (Pine 26-28)
@@ -193,7 +196,11 @@ function pineRef (bars, params, opts) {
             z.score = Math.min(10.0, z.score + score * 0.25)
             z.top = Math.max(z.top, top)
             z.bot = Math.min(z.bot, bot)
-            z.broken = false // Pine 111 (takip edilen kutu zaten kirilmamis olur)
+            // Pine 146: array.set(zBroken, j, false). Kirilmis kutuya yeni
+            // pivot birlesirse kutu DIRILIR. Kirilan kutular artik listede
+            // kaldigi icin bu gercekten olabilen bir durumdur.
+            z.broken = false
+            z.brokenBar = null
             z.mergeBars.push(i)
             merged = true
           }
@@ -245,7 +252,9 @@ function pineRef (bars, params, opts) {
             z.score = Math.min(10.0, z.score + score * 0.25)
             z.top = Math.max(z.top, top)
             z.bot = Math.min(z.bot, bot)
+            // Pine 146: kirilmis kutu birlesmeyle DIRILIR.
             z.broken = false
+            z.brokenBar = null
             z.mergeBars.push(i)
             merged = true
           }
@@ -311,16 +320,22 @@ function pineRef (bars, params, opts) {
         z.touchBars.push(i)
       }
 
-      // Pine 267-271: kirilma. atr O BARIN atr'si.
+      // Pine 304-308: kirilma. atr O BARIN atr'si.
       const breakSupport = z.isSupport && close[i] < z.bot - atrNow * 0.15
       const breakResist = !z.isSupport && close[i] > z.top + atrNow * 0.15
-      const newBroken = z.broken || breakSupport || breakResist
-      z.broken = newBroken
-
-      // Pine 281-290: kirilan kutu takipten cikar.
-      if (newBroken) {
-        z.endBar = Math.min(i, z.bornBar + p.boxLengthBars)
+      const yeniKirilma = !z.broken && (breakSupport || breakResist)
+      if (yeniKirilma) {
+        z.broken = true
         z.brokenBar = i
+      }
+
+      // Pine 315-330: kutu YALNIZCA showBrokenZones kapaliyken silinir.
+      // Acikken (varsayilan) listede kalir; ustteki `rightEdge` satiri her
+      // barda calismaya devam ettigi icin kutu `born + boxLengthBars`a kadar
+      // UZAR. Eski surumde burada takipten cikiyordu ve cizim kirilma
+      // barinda kesiliyordu.
+      if (z.broken && p.showBrokenZones === false) {
+        z.endBar = Math.min(i, z.bornBar + p.boxLengthBars)
         z.active = false
         takip.splice(t, 1)
       }

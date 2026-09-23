@@ -86,6 +86,15 @@ const DEFAULT_PARAMS = {
   zoneAtrMult: 0.35,
   mergeAtrMult: 0.55,
   maxZones: 24,
+  // KIRILAN KUTU CIZILMEYE DEVAM EDER (Pine: showBrokenZones, varsayilan acik).
+  //
+  // Eski surumde kirilan kutu takipten CIKIYOR ve cizimi kirilma barinda
+  // KESILIYORDU. Guncel indikatorde kutu listede kaliyor, her barda
+  // `box.set_right(bx, min(bar_index, born + boxLengthBars))` alarak
+  // UZAMAYA DEVAM EDIYOR; yalnizca soluklasip "BROKEN" yazisi aliyor.
+  // Kullanici ekranda tam bu farki gordu: bizde kutular kayboluyordu,
+  // TradingView'da duruyordu.
+  showBrokenZones: true,
   // KUTU DURUMU ARALIKLARINI KAYDET (Y3). Varsayilan kapali: yalnizca ust
   // zaman dilimi baglami olculurken gerekiyor ve bellekte yer tutuyor.
   recordTimeline: false,
@@ -99,7 +108,8 @@ const DEFAULT_PARAMS = {
   // seride 14 dizi 450,5 MB tutuyordu ve etiketleme bitene kadar bellekte
   // kaliyordu. Kesif ve hata ayiklama icin acilabilir.
   fullContext: false,
-  maxAgeBars: 100,
+  // Guncel indikatorde 100 degil 600. Kutular alti kat uzun yasar.
+  maxAgeBars: 600,
   touchCooldown: 12,
   boxLengthBars: 100,
   // --- Pine: Volume Ayarlari ---
@@ -437,6 +447,7 @@ function runIndicator (s, params, tfSec, onProgress, trace) {
   const maxAgeBars = Math.max(1, p.maxAgeBars | 0)
   const boxLengthBars = Math.max(1, p.boxLengthBars | 0)
   const touchCooldown = Math.max(1, p.touchCooldown | 0)
+  const showBrokenZones = p.showBrokenZones !== false
   const mergeAtrMult = p.mergeAtrMult
   const zoneAtrMult = p.zoneAtrMult
   const breakAtrMult = p.breakAtrMult
@@ -704,6 +715,14 @@ function runIndicator (s, params, tfSec, onProgress, trace) {
 
         const boosted = z.flow + score * 0.25
         z.flow = boosted > FLOW_MAX ? FLOW_MAX : boosted
+        // Pine: array.set(zBroken, j, false). Kirilmis bir kutuya yeni pivot
+        // birlesirse kutu DIRILIR. Kirilan kutular artik listede kaldigi icin
+        // bu gercekten olabilen bir durum.
+        if (z.broken) {
+          z.broken = false
+          z.brokenBar = -1
+          if (stats.zonesBroken > 0) stats.zonesBroken--
+        }
         const sinirDegisti = top > z.top || bottom < z.bottom
         if (top > z.top) z.top = top
         if (bottom < z.bottom) z.bottom = bottom
@@ -818,10 +837,16 @@ function runIndicator (s, params, tfSec, onProgress, trace) {
         z.broken = true
         z.brokenBar = i
         stats.zonesBroken++
-        emitZone(z, i)
-        live[j] = null
-        died = true
-        continue
+        // KUTU LISTEDE KALIR (Pine: showBrokenZones). Cizimi `born +
+        // boxLengthBars`a kadar uzamaya devam eder, yalnizca soluklasir.
+        // Dokunus skoru artik artmaz, cunku asagidaki kosul `!z.broken`
+        // ariyor; kirilan kutu yeni olay da uretmez.
+        if (!showBrokenZones) {
+          emitZone(z, i)
+          live[j] = null
+          died = true
+          continue
+        }
       }
     }
 

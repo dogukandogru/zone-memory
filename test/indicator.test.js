@@ -355,7 +355,16 @@ test('kirilma: kapanis taban - atr * breakAtrMult altina inince kutu kirilir', (
   assert.equal(r.zones.length, 1)
   assert.equal(r.zones[0].broken, true)
   assert.equal(r.zones[0].brokenBar, 270, 'Pine tek barda kirar, onay bari yoktur')
-  assert.equal(r.zones[0].endBar, 270, 'kirilan kutu orada biter')
+  // KIRILAN KUTU ORADA BITMEZ.
+  //
+  // Guncel indikatorde (docs/pine/bollinger_box.pine) kirilan kutu takipten
+  // CIKMAZ: her barda `box.set_right(bx, min(bar_index, born + boxLengthBars))`
+  // almaya devam eder, yani soluklasir ama UZAR. Eski surumde kirilma barinda
+  // kesiliyordu ve kullanici ekranda tam bu farki gordu: bizde kutular
+  // kayboluyordu, TradingView'da duruyordu.
+  assert.equal(r.zones[0].endBar, Math.min(n - 1, r.zones[0].pivotBar + DEFAULT_PARAMS.boxLengthBars),
+    'kirilan kutu boxLengthBars boyunca cizilmeye devam eder')
+  assert.ok(r.zones[0].endBar > 270, 'kirilma barinda KESILMEMELI')
   // U7: arayuz gecmis bir sinyali o anki durumuyla cizebilsin diye kirilma
   // ANI da tasinir. Yalnizca bar indisi tasindiginda, farkli bir pencere
   // yuklendiginde indis hicbir zamana karsilik gelmiyordu.
