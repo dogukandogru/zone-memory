@@ -1506,8 +1506,16 @@ handlers['engine:backtest'] = async function (payload, ctx) {
   // Olcum diske yazilir: "hangi ayarla ne olculdu" bilgisi uygulama kapaninca
   // kaybolmasin ve otomatik tarama gereksiz yere silmesin (bkz. engine:scan).
   const kanit = kanitDurumu(ozet)
+  // KAYDA COZULMUS AGIRLIK YAZILIR.
+  //
+  // `signalCfg.weights` HAM alandir ve on ayar secildiginde kullanilmaz;
+  // etkin degerler `agirlikCoz` ile cikar. Ham alani yazmak iki hata uretir:
+  // olcumun hangi agirlikla alindigi YANLIS gorunur, ve "olcum eskidi mi"
+  // karsilastirmasi hep uyusmazlik bulup testi her acilista yeniden
+  // calistirirdi (sonsuz dongu).
+  const etkinAgirlik = core('learn/similarity').agirlikCoz(uygulanan.signalCfg)
   const kullanilanAyar = {
-    signalCfg: uygulanan.signalCfg,
+    signalCfg: Object.assign({}, uygulanan.signalCfg, { weights: etkinAgirlik }),
     outcomeCfg: uygulanan.planOutcomeCfg,
     warmupEvents: num(cfg.warmupEvents, null),
     sources: uygulanan.sources,

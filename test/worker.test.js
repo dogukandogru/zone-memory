@@ -696,3 +696,23 @@ test('engine:backtest-last: benzerlik agirligi degistiyse bunu bildirir', async 
     assert.strictEqual(ayni.weightsMatch, true)
   })
 })
+
+test('engine:backtest olcume COZULMUS agirligi yazar, ham alani degil', async () => {
+  await isciyle(async (cagir, dataDir) => {
+    await cagir('engine:backtest', { tf: TF, cfg: testCfg() })
+    const kayit = JSON.parse(fs.readFileSync(
+      pathsCore.memoryPath(TF, undefined, dataDir) + '.backtest.json', 'utf8'))
+    const w = kayit.usedCfg.signalCfg.weights
+    // Varsayilan on ayar "yalnizca sekil": kayit da bunu soylemeli.
+    // Ham `weights` alani (0.60/0.25/0.15) yazilsaydi olcumun hangi agirlikla
+    // alindigi YANLIS gorunur ve "eskidi mi" karsilastirmasi her acilista
+    // uyusmazlik bulup testi sonsuz kez yeniden calistirirdi.
+    assert.strictEqual(w.shape, 1)
+    assert.strictEqual(w.ctx, 0)
+    assert.strictEqual(w.dtw, 0)
+
+    // Ayni kayit hemen ardindan ESKIMIS sayilmamali.
+    const son = await cagir('engine:backtest-last', { tf: TF })
+    assert.strictEqual(son.weightsMatch, true, 'taze olcum eski sayilmamali')
+  })
+})

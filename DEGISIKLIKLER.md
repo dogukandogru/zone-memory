@@ -176,6 +176,13 @@ olay geldiginde ayni turdeki en benzer gecmis olaylarla karsilastirilip
   etiketiyle yazilabiliyordu.
 - **extendMemory hic cagrilmiyordu** ama belgeler artimli guncelleme vaat
   ediyordu; baglansa bar indeksleri kayardi.
+- **Yakinlastirmisken sinyale tiklayinca grafik bos gorunuyordu.** Fiyat
+  eksenini elle surukleyip yakinlastirinca kutuphane o eksenin otomatik
+  olceklemesini kapatiyor ve araligi sabitliyor. Sonra baska bir tarihe
+  atlayinca o tarihin fiyatlari sabitlenmis araligin disinda kaliyor, yani
+  mumlar ekranin disinda ciziliyordu; ancak elle uzaklasinca goruluyordu.
+  Sinyale atlarken dikey olcek artik yeniden otomatige aliniyor. Yatay
+  yakinlastirma korunuyor.
 - **Benzerlik neye baksin, artik Ayarlar'dan secilebiliyor.** Gecmiste benzer
   kurulum aranirken neye bakilacagi bugune kadar kodda sabitti (sekil %60,
   baglam %25, getiri %15). Alti secenek var: yalnizca gorsel sekil, agirlikla

@@ -759,6 +759,23 @@ export function createChartView(container) {
     if (isNum(+o.maxSpan) && span > +o.maxSpan) span = +o.maxSpan;
 
     ts.setVisibleLogicalRange({ from: l - span / 2, to: l + span / 2 });
+
+    // DIKEY OLCEK DE SERBEST BIRAKILIR.
+    //
+    // Kullanici fiyat eksenini elle surukleyip yakinlastirdiginda
+    // lightweight-charts o eksenin OTOMATIK OLCEKLEMESINI kapatir ve araligi
+    // sabitler. Sonra baska bir tarihe atlandiginda o tarihin fiyatlari
+    // sabitlenmis araligin disinda kalir: mumlar ekranin disinda cizilir ve
+    // grafik BOS gorunur. Kullanici bunu "sinyale tikladim, grafik gelmedi"
+    // diye yasiyordu ve ancak elle uzaklasinca goruyordu.
+    //
+    // Yatay yakinlastirma KORUNUR (yukaridaki span), yalnizca dikey olcek
+    // yeniden otomatige alinir: zaten "su ana bak" demenin karsiligi budur.
+    try {
+      candleSeries.priceScale().applyOptions({ autoScale: true });
+    } catch (_e) {
+      // Eski surumlerde bu secenek olmayabilir; konum yine de degisti.
+    }
     emitRange();
   }
 
