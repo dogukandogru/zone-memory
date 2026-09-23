@@ -18,6 +18,7 @@
 //   node scripts/search-params.mjs --tf 15m
 //   node scripts/search-params.mjs --tf 15m --split 0.6 --grid ince
 //   node scripts/search-params.mjs --tf 1h --min-trades 40 --json --out arama.json
+//   node scripts/search-params.mjs --tf 15m --symbol XAUUSD_OANDA
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -244,7 +245,10 @@ async function main () {
   const ustSayi = Number.isFinite(Number(arg.top)) ? Number(arg.top) : 8
   const warmup = Number.isFinite(Number(arg.warmup)) ? Number(arg.warmup) : 500
 
-  const mem = await memstore.loadMemory(path.join(dataDir, DEFAULT_SYMBOL + '_' + tf + '_memory'))
+  // --symbol: ayni klasordeki baska bir veri kumesiyle (ornegin OANDA'dan
+  // indirilmis XAUUSD_OANDA) arama yapabilmek icin. Varsayilan degismez.
+  const sembol = arg.symbol && arg.symbol !== true ? String(arg.symbol) : DEFAULT_SYMBOL
+  const mem = await memstore.loadMemory(path.join(dataDir, sembol + '_' + tf + '_memory'))
   if (!mem || !mem.events || mem.events.length === 0) throw new Error(tf + ': hafiza yok, once tarama yapin')
   const cfgc = presets.resolveCfg(tf, yama, mem.meta)
   let protos = []
