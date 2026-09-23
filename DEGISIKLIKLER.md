@@ -176,6 +176,17 @@ olay geldiginde ayni turdeki en benzer gecmis olaylarla karsilastirilip
   etiketiyle yazilabiliyordu.
 - **extendMemory hic cagrilmiyordu** ama belgeler artimli guncelleme vaat
   ediyordu; baglansa bar indeksleri kayardi.
+- **"Neye gore benzetti" karsilastirmasi.** Sinyal ayrintisinda "en benzer
+  gecmis ornekler" listesi vardi ama benzerligin NEREDEN geldigi
+  gorunmuyordu: yalnizca bir sayi (0,942) vardi ve o sayinin sekilden mi
+  baglamdan mi geldigi, sekillerin gercekten ne kadar ortustugu belli
+  degildi. Bir ornege tiklayinca satirin altinda acilip kapanan bir
+  karsilastirma geliyor: iki sekil egrisi UST USTE, benzerlik dokumu (hangi
+  bilesen hangi agirlikla toplama katildi) ve baglam degerlerinin yan yana
+  karsilastirmasi. Agirligi sifir olan bilesenler de listeleniyor ama katkisi
+  "-" yaziyor; neye BAKILMADIGI da gorunmeli.
+  Olaylar zamanla bulunuyor, kimlikle degil: ozellik mevcut sinyal
+  dosyalariyla da calisiyor, listeyi yeniden hesaplamak gerekmiyor.
 - **Yakinlastirmisken sinyale tiklayinca grafik bos gorunuyordu.** Fiyat
   eksenini elle surukleyip yakinlastirinca kutuphane o eksenin otomatik
   olceklemesini kapatiyor ve araligi sabitliyor. Sonra baska bir tarihe

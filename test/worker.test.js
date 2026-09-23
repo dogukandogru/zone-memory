@@ -716,3 +716,51 @@ test('engine:backtest olcume COZULMUS agirligi yazar, ham alani degil', async ()
     assert.strictEqual(son.weightsMatch, true, 'taze olcum eski sayilmamali')
   })
 })
+
+/* ------------------------------------------------------------------ */
+/* Neye gore benzetildi                                                */
+/* ------------------------------------------------------------------ */
+
+// Arayuz "en benzer gecmis ornekler" listesini gosteriyordu ama benzerligin
+// NEREDEN geldigi gorunmuyordu: yalnizca bir sayi vardi (0,942) ve o sayinin
+// sekilden mi baglamdan mi geldigi, sekillerin gercekten ne kadar ortustugu
+// belli degildi.
+
+test('engine:compare: iki olayin benzerlik dokumunu ve egrilerini verir', async () => {
+  await isciyle(async (cagir, dataDir) => {
+    const mem = await memstore.loadMemory(pathsCore.memoryPath(TF, undefined, dataDir))
+    const olaylar = mem.events.filter((e) => e.features && e.features.shape)
+    assert.ok(olaylar.length >= 2, 'fixture en az iki ozellikli olay icermeli')
+
+    const sonuc = await cagir('engine:compare', {
+      tf: TF, aTime: olaylar[0].time, bTime: olaylar[1].time,
+    })
+
+    // Bilesenlerin hepsi 0..1 arasinda olmali, yoksa yuzde olarak anlatilamaz.
+    for (const ad of ['shape', 'ctx', 'dtw', 'total']) {
+      const v = sonuc.components[ad]
+      assert.ok(v >= 0 && v <= 1, ad + ' 0..1 arasinda olmali, ' + v)
+    }
+    // Toplam, agirliklarla bilesenlerin carpimi olmali: ekranda "sekil x %100"
+    // diye gosterecegiz, tutmazsa gosterdigimiz hesap yalan olur.
+    const w = sonuc.weights
+    const beklenen = w.shape * sonuc.components.shape +
+      w.ctx * sonuc.components.ctx + w.dtw * sonuc.components.dtw
+    assert.ok(Math.abs(beklenen - sonuc.components.total) < 1e-9,
+      'toplam = agirlik x bilesen olmali')
+
+    // Egriler cizilebilmeli.
+    assert.strictEqual(sonuc.a.shape.length, sonuc.b.shape.length)
+    assert.ok(sonuc.a.shape.length > 1, 'sekil vektoru cizilebilecek uzunlukta olmali')
+    assert.strictEqual(sonuc.ctxNames.length, sonuc.a.ctx.length,
+      'baglam adlari ile degerler ayni uzunlukta olmali')
+  })
+})
+
+test('engine:compare: bulunamayan kayitta ANLASILIR hata verir', async () => {
+  await isciyle(async (cagir) => {
+    await assert.rejects(
+      () => cagir('engine:compare', { tf: TF, aTime: 1, bTime: 2 }),
+      /bulunamadı/)
+  })
+})

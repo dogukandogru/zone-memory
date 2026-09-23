@@ -663,3 +663,36 @@ table.tbl tr:hover td { background: var(--bg-hover); }
   :root { --side-w: 240px; }
   .tb-progress { display: none; }
 }
+
+/* ------------------------------------------------------------------ */
+/* "Neye gore benzetti" karsilastirmasi                                */
+/* ------------------------------------------------------------------ */
+/*
+ * Benzer ornek satirinin ALTINDA acilip kapanir. Listeden ayrisabilmesi icin
+ * icerlek ve sol kenarlikli; satirla ayni hizada baslamaz, boylece hangi
+ * ornege ait oldugu bakar bakmaz anlasilir.
+ */
+.match-compare {
+  margin: 2px 0 8px 14px;
+  padding: 8px 10px;
+  border-left: 2px solid var(--accent, #2962ff);
+  background: rgba(41, 98, 255, 0.05);
+  border-radius: 0 4px 4px 0;
+}
+
+.match-compare .compare-canvas {
+  display: block;
+  width: 100%;
+  height: 72px;
+  margin: 4px 0 6px;
+}
+
+/* Efsanedeki renk isaretleri: cizimdeki iki egriyle AYNI renkte olmali. */
+.match-compare .compare-key {
+  font-weight: 700;
+  letter-spacing: -1px;
+}
+.match-compare .compare-key.now { color: #26a69a; }
+.match-compare .compare-key.past { color: #787b86; }
+
+.match-compare table { margin-top: 4px; }

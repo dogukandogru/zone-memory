@@ -38,6 +38,38 @@ const SEANS_ADLARI = { Asia: 'Asya', London: 'Londra', 'New York': 'New York', O
 
 const RENK = { up: '#26a69a', down: '#ef5350', dim: '#787b86', accent: '#2962ff', warn: '#f2b40e' }
 
+/**
+ * Baglam degerlerinin okunabilir adlari ("neye gore benzetti" tablosu icin).
+ * Kaynak liste: src/core/learn/features.js CTX_NAMES. Listede olmayan bir ad
+ * gelirse ham hali yazilir, yani yeni bir deger eklenince ekran bozulmaz.
+ */
+const CTX_ETIKET = {
+  rsi: 'RSI',
+  atrPct: 'ATR (fiyatin %)',
+  distSma20Atr: 'SMA20 uzaklığı (ATR)',
+  distSma50Atr: 'SMA50 uzaklığı (ATR)',
+  hourSin: 'Saat (sin)',
+  hourCos: 'Saat (cos)',
+  dowSin: 'Gün (sin)',
+  dowCos: 'Gün (cos)',
+  zoneWidthAtr: 'Kutu genişliği (ATR)',
+  zoneAge: 'Kutu yaşı',
+  zoneFlow: 'Akış gücü',
+  penetration: 'Bölgeye giriş',
+  scoreRatio: 'Skor oranı',
+  pFlow: 'Bileşen: akış',
+  pTrend: 'Bileşen: trend',
+  pSession: 'Bileşen: seans',
+  pRejection: 'Bileşen: fitil reddi',
+  pVolume: 'Bileşen: hacim',
+  isSupport: 'Destek mi',
+  trendState: 'Trend durumu',
+  isForm: 'Oluşum mu',
+  bbDistAtr: 'Bant dışına taşma (ATR)',
+  volRatio: 'Hacim oranı',
+  entryDistAtr: 'Giriş uzaklığı (ATR)',
+}
+
 /** Listelerde bir kerede cizilecek azami satir (arayuzu tikamamak icin). */
 const AZAMI_SATIR = 500
 
@@ -252,6 +284,84 @@ function tiklamaBagla(satir, geri, veri) {
 /* ------------------------------------------------------------------ */
 /* drawSparkline                                                       */
 /* ------------------------------------------------------------------ */
+
+/**
+ * IKI SEKIL EGRISINI UST USTE cizer.
+ *
+ * NEDEN: benzerlik listesinde yalnizca bir sayi vardi (0,942) ve kullanici
+ * "neye gore benzetmis" sorusunu ekrandan cevaplayamiyordu. Varsayilan
+ * benzerlik olcutu GORSEL SEKIL oldugu icin, benzetmenin tamami bu iki
+ * egrinin ortusmesidir; en dogru aciklama resmin kendisidir.
+ *
+ * Iki egri de kendi icinde 0..1'e normalize edilir, cunku Pearson
+ * korelasyonu olcegi ve kaydirmayi zaten yok sayar: ekranda da ayni
+ * karsilastirma gorunmeli.
+ *
+ * @param {HTMLCanvasElement} canvas
+ * @param {ArrayLike<number>} a Simdiki kurulumun sekli
+ * @param {ArrayLike<number>} b Gecmis ornegin sekli
+ * @param {{height?:number, aColor?:string, bColor?:string}} [opts]
+ */
+export function drawSekilKarsilastirma(canvas, a, b, opts) {
+  if (!canvas || typeof canvas.getContext !== 'function') return
+  const o = opts || {}
+  const gen = Math.max(8, Math.round(canvas.clientWidth || 260))
+  const yuk = Math.max(6, Math.round(Number.isFinite(o.height) ? o.height : 72))
+  const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) ? window.devicePixelRatio : 1
+  canvas.width = Math.round(gen * dpr)
+  canvas.height = Math.round(yuk * dpr)
+  canvas.style.height = yuk + 'px'
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  ctx.clearRect(0, 0, gen, yuk)
+
+  const normalize = (dizi) => {
+    const n = dizi ? dizi.length | 0 : 0
+    if (n < 2) return null
+    let enAz = Infinity
+    let enCok = -Infinity
+    for (let i = 0; i < n; i++) {
+      const v = Number(dizi[i])
+      if (!Number.isFinite(v)) continue
+      if (v < enAz) enAz = v
+      if (v > enCok) enCok = v
+    }
+    if (!Number.isFinite(enAz) || !Number.isFinite(enCok)) return null
+    const aralik = enCok - enAz
+    const out = new Array(n)
+    for (let i = 0; i < n; i++) {
+      const v = Number(dizi[i])
+      out[i] = !Number.isFinite(v) ? NaN : (aralik > 0 ? (v - enAz) / aralik : 0.5)
+    }
+    return out
+  }
+
+  const ciz = (dizi, renk, kalinlik, kesikli) => {
+    const d = normalize(dizi)
+    if (!d) return
+    const n = d.length
+    const pad = 4
+    const ic = yuk - pad * 2
+    ctx.beginPath()
+    let basladi = false
+    for (let i = 0; i < n; i++) {
+      if (!Number.isFinite(d[i])) { basladi = false; continue }
+      const x = n > 1 ? (i / (n - 1)) * (gen - 2) + 1 : gen / 2
+      const y = pad + (1 - d[i]) * ic
+      if (!basladi) { ctx.moveTo(x, y); basladi = true } else ctx.lineTo(x, y)
+    }
+    ctx.strokeStyle = renk
+    ctx.lineWidth = kalinlik
+    ctx.setLineDash(kesikli ? [4, 3] : [])
+    ctx.stroke()
+    ctx.setLineDash([])
+  }
+
+  // Gecmis ornek once ve daha soluk: ustte duran SIMDIKI egridir.
+  ciz(b, o.bColor || RENK.dim, 1.5, true)
+  ciz(a, o.aColor || RENK.up, 2, false)
+}
 
 /**
  * Mini cizgi grafigi cizer. Dizideki NaN degerler (isinma bolgeleri)
@@ -962,6 +1072,7 @@ export function renderSignalDetail(el, signal, opts) {
 
   const cizimler = []
   const ornegeGit = typeof o.onMatchSelect === 'function' ? o.onMatchSelect : null
+  const karsilastir = typeof o.onMatchCompare === 'function' ? o.onMatchCompare : null
 
   for (let i = 0; i < eslesmeler.length; i++) {
     const m = eslesmeler[i]
@@ -999,6 +1110,32 @@ export function renderSignalDetail(el, signal, opts) {
 
     el.appendChild(satir)
 
+    // NEYE GORE BENZETTI: satirin altinda acilip kapanan karsilastirma.
+    if (karsilastir) {
+      const kutu = h('div', 'match-compare')
+      kutu.hidden = true
+      el.appendChild(kutu)
+      let yuklendi = false
+      satir.addEventListener('click', async () => {
+        if (!kutu.hidden) { kutu.hidden = true; return }
+        kutu.hidden = false
+        if (yuklendi) return
+        yuklendi = true
+        kutu.appendChild(h('div', 'small muted', 'Karşılaştırma hazırlanıyor...'))
+        try {
+          const veri = await karsilastir(signal, m)
+          bosalt(kutu)
+          if (veri) karsilastirmayiCiz(kutu, veri, signal, m)
+          else kutu.appendChild(h('div', 'small muted', 'Karşılaştırma alınamadı.'))
+        } catch (err) {
+          bosalt(kutu)
+          kutu.appendChild(h('div', 'small muted',
+            'Karşılaştırma alınamadı: ' + (err && err.message ? err.message : String(err))))
+          yuklendi = false
+        }
+      })
+    }
+
     const seri = eslesmeSerisi(m)
     cizimler.push({ cnv, seri, basarili: sonuc.sinif === 'up', notr: sonuc.sinif === 'muted' })
   }
@@ -1019,9 +1156,83 @@ export function renderSignalDetail(el, signal, opts) {
   const notlar = ['Mini grafikler seyir taslağıdır: kesik dikey çizgi sinyal anını, ' +
     'sonrası lehte ve aleyhte azami hareketi gösterir.']
   if (ornegeGit) notlar.push('Bir örneğe tıklayınca grafik o tarihe gider.')
+  if (karsilastir) {
+    notlar.push('Aynı tıklama, altta "neye göre benzetti" karşılaştırmasını açar; ' +
+      'tekrar tıklayınca kapanır.')
+  }
   for (let i = 0; i < notlar.length; i++) {
     el.appendChild(h('div', 'small muted', notlar[i]))
   }
+}
+
+/**
+ * "NEYE GORE BENZETTI" karsilastirmasini cizer.
+ *
+ * Uc parca: iki sekil egrisi ust uste, benzerlik dokumu (hangi bilesen hangi
+ * agirlikla toplama katildi) ve baglam degerlerinin yan yana karsilastirmasi.
+ *
+ * Agirligi SIFIR olan bilesenler de gosterilir, ama katkisi "-" yazilir:
+ * kullanici hem neye bakildigini hem neye BAKILMADIGINI gormeli.
+ *
+ * @param {HTMLElement} kap
+ * @param {object} veri engine:compare ciktisi
+ * @param {object} signal
+ * @param {object} eslesme
+ */
+function karsilastirmayiCiz(kap, veri, signal, eslesme) {
+  const w = veri.weights || { shape: 0, ctx: 0, dtw: 0 }
+  const c = veri.components || { shape: 0, ctx: 0, dtw: 0, total: 0 }
+
+  // 1) Iki egri ust uste.
+  kap.appendChild(h('div', 'small muted', 'ŞEKİL KARŞILAŞTIRMASI'))
+  const cnv = document.createElement('canvas')
+  cnv.className = 'compare-canvas'
+  kap.appendChild(cnv)
+  const efsane = h('div', 'small muted')
+  efsane.appendChild(h('span', 'compare-key now', '\u25ac'))
+  efsane.appendChild(document.createTextNode(' şimdi (' + formatDateTime(signal.time) + ')  '))
+  efsane.appendChild(h('span', 'compare-key past', '\u25ac'))
+  efsane.appendChild(document.createTextNode(' örnek (' + formatDateTime(eslesme.time) + ')'))
+  kap.appendChild(efsane)
+
+  // 2) Benzerlik dokumu.
+  const satirlar = [
+    ['Şekil (görsel eğri)', c.shape, w.shape],
+    ['Bağlam (24 değer)', c.ctx, w.ctx],
+    ['Getiri dizisi', c.dtw, w.dtw],
+  ].map(([ad, deger, agirlik]) => [
+    ad,
+    formatNumber(deger, 3),
+    formatPercent(agirlik, 0),
+    agirlik > 0 ? formatNumber(deger * agirlik, 3) : '-',
+  ])
+  satirlar.push(['TOPLAM BENZERLİK', '', '', formatNumber(c.total, 3)])
+  kap.appendChild(tablo(['Bileşen', 'Değer', 'Ağırlık', 'Katkı'], satirlar))
+
+  // 3) Baglam degerleri yan yana. Agirligi sifir olsa bile neyin tuttugunu
+  //    gormek isteyen olur; en cok AYRISAN alanlar basa alinir.
+  const adlar = Array.isArray(veri.ctxNames) ? veri.ctxNames : []
+  const a = Array.isArray(veri.a && veri.a.ctx) ? veri.a.ctx : []
+  const b = Array.isArray(veri.b && veri.b.ctx) ? veri.b.ctx : []
+  if (adlar.length > 0 && a.length === adlar.length && b.length === adlar.length) {
+    const kayitlar = []
+    for (let i = 0; i < adlar.length; i++) {
+      const fark = Math.abs(sayi(a[i], 0) - sayi(b[i], 0))
+      kayitlar.push({ ad: adlar[i], a: a[i], b: b[i], fark: fark })
+    }
+    kayitlar.sort((x, y) => y.fark - x.fark)
+    const gosterilen = kayitlar.slice(0, 8).map((k) => [
+      CTX_ETIKET[k.ad] || k.ad,
+      formatNumber(k.a, 2),
+      formatNumber(k.b, 2),
+      formatNumber(k.fark, 2),
+    ])
+    kap.appendChild(h('div', 'small muted', 'EN ÇOK AYRIŞAN BAĞLAM DEĞERLERİ'))
+    kap.appendChild(tablo(['Değer', 'Şimdi', 'Örnek', 'Fark'], gosterilen))
+  }
+
+  // Cizim olculeri yerlesim sonrasi bellidir.
+  drawSekilKarsilastirma(cnv, veri.a ? veri.a.shape : null, veri.b ? veri.b.shape : null)
 }
 
 /* ------------------------------------------------------------------ */

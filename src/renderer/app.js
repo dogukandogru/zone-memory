@@ -1965,6 +1965,7 @@ function sinyalPaneliniCiz() {
       goster(n.ayrinti, true)
       renderSignalDetail(n.ayrinti, s, {
         onMatchSelect: ornegeGit,
+        onMatchCompare: ornekKarsilastir,
         risk: durum.ayarlar ? durum.ayarlar.risk : null,
       })
       geriDugmesiEkle(n.ayrinti, 'Ayrıntıyı kapat', () => {
@@ -1982,6 +1983,7 @@ function sinyalPaneliniCiz() {
     // Ayri ayrinti kabi yoksa listenin yerine ayrintiyi ciz.
     renderSignalDetail(n.liste, s, {
       onMatchSelect: ornegeGit,
+      onMatchCompare: ornekKarsilastir,
       risk: durum.ayarlar ? durum.ayarlar.risk : null,
     })
     geriDugmesiEkle(n.liste, 'Sinyal listesine dön', () => {
@@ -1993,6 +1995,26 @@ function sinyalPaneliniCiz() {
       sinyalPaneliniCiz()
     })
   }
+}
+
+/**
+ * "NEYE GORE BENZETTI": secili sinyal ile bir gecmis ornegin karsilastirmasi.
+ *
+ * Olaylar ZAMANLA bulunur, kimlikle degil: boylece eski sinyal dosyalariyla
+ * da calisir (onlarda olay kimligi yazili olmayabilir).
+ *
+ * @param {object} sinyal
+ * @param {object} eslesme
+ * @returns {Promise<object|null>}
+ */
+async function ornekKarsilastir(sinyal, eslesme) {
+  if (!sinyal || !eslesme) return null
+  return await cagir('engine:compare', {
+    tf: durum.tf,
+    aTime: sayi(sinyal.time, 0),
+    bTime: sayi(eslesme.time, 0),
+    cfgPatch: durum.ayarYamasiKayitli || null,
+  })
 }
 
 /**

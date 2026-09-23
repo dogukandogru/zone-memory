@@ -1156,6 +1156,78 @@ handlers['engine:zones'] = async function (payload) {
 }
 
 /** Hafiza olaylarinin hafif ozeti (features haric). */
+/**
+ * IKI OLAYIN NEYE GORE BENZETILDIGI.
+ *
+ * NEDEN: arayuz "en benzer gecmis ornekler" listesini gosteriyordu ama
+ * kullanici benzerligin NEREDEN geldigini goremiyordu. Yalnizca bir sayi
+ * vardi (0,942) ve o sayinin sekilden mi baglamdan mi geldigi, sekiller
+ * gercekten ne kadar ortustugu gorunmuyordu.
+ *
+ * Olaylar ZAMANLA bulunur, kimlikle degil: boylece komut ESKI sinyal
+ * dosyalariyla da calisir (onlarda olay kimligi yazili olmayabilir).
+ *
+ * @param {{tf:string, aTime:number, bTime:number, cfgPatch?:object}} payload
+ */
+handlers['engine:compare'] = async function (payload) {
+  const tf = requireTf(payload.tf)
+  const mem = await getMemory(tf, false)
+  if (!mem || !Array.isArray(mem.events) || mem.events.length === 0) {
+    throw new Error('Karşılaştırma için hafıza yok. Önce "Geçmişi Tara" çalıştırın.')
+  }
+  const aTime = num(payload.aTime, 0)
+  const bTime = num(payload.bTime, 0)
+  const bul = (t) => {
+    if (!(t > 0)) return null
+    for (let i = 0; i < mem.events.length; i++) {
+      const e = mem.events[i]
+      if (e && e.time === t && e.features && e.features.shape) return e
+    }
+    return null
+  }
+  const a = bul(aTime)
+  const b = bul(bTime)
+  if (!a || !b) {
+    throw new Error('Karşılaştırılacak kayıt hafızada bulunamadı. ' +
+      'Hafıza yeniden kurulmuş olabilir, "Geçmişi Tara" sonrası tekrar deneyin.')
+  }
+
+  const sim = core('learn/similarity')
+  const uygulanan = core('learn/presets').resolveCfg(
+    tf, payload.cfgPatch || null, mem.meta || null)
+  const agirlik = sim.agirlikCoz(uygulanan.signalCfg)
+  const dokum = sim.similarity(a.features, b.features, agirlik)
+
+  const dizi = (v) => (v ? Array.prototype.slice.call(v) : [])
+  const olayOzeti = (e) => ({
+    id: num(e.id, -1),
+    time: num(e.time, 0),
+    kind: e.kind === 'form' ? 'form' : 'touch',
+    direction: e.direction || null,
+    price: num(e.price, 0),
+    outcome: typeof e.outcome === 'string' ? e.outcome : '',
+    success: e.success === true,
+    // Egrinin cizilebilmesi icin sekil vektoru; baglam da yan yana
+    // karsilastirilabilsin diye ham degerleriyle.
+    shape: dizi(e.features.shape),
+    ctx: dizi(e.features.ctx),
+  })
+
+  return {
+    tf: tf,
+    weights: agirlik,
+    ctxNames: Array.isArray(mem.ctxNames) ? mem.ctxNames.slice() : [],
+    components: {
+      shape: num(dokum.shapeSim, 0),
+      ctx: num(dokum.ctxSim, 0),
+      dtw: num(dokum.dtwSim, 0),
+      total: num(dokum.score, 0),
+    },
+    a: olayOzeti(a),
+    b: olayOzeti(b),
+  }
+}
+
 handlers['engine:touches'] = async function (payload) {
   const tf = requireTf(payload.tf)
   const mem = await getMemory(tf, false)
