@@ -74,13 +74,27 @@ export function zoneBrokenAt(zone, asOf) {
  */
 export function zoneSpanAt(zone, asOf) {
   if (!zone) return null
-  const start = sayiya(zone.createdTime)
+
+  // IKI AYRI ZAMAN, KARISTIRILMAMALI:
+  //
+  //   createdTime : kutunun ONAYLANDIGI an. Pivot ancak kendisinden pivotLen
+  //                 bar SONRA kesinlesir, kutu o ana kadar bilinmez.
+  //   pivotTime   : kutunun CIZILDIGI yer. Pine kutuyu pivot barindan baslatir
+  //                 (`box.new(left = bar_index - pivotLen, ...)`).
+  //
+  // Port bir donem ikisini de createdTime sayiyordu ve kutular TradingView'a
+  // gore soldan bes bar kirpik ciziliyordu (100 yerine 95 bar genislik).
+  // Ileriye bakma degildir: kutu yine ancak onaylandiktan SONRA gorunur,
+  // yalnizca sol kenari pivota kadar uzanir. TradingView'in yaptigi da budur.
+  const bilinir = sayiya(zone.createdTime)
+  const sol = sayiya(zone.pivotTime)
+  const start = isNum(sol) ? sol : bilinir
   let end = zoneRightTime(zone)
-  if (!isNum(start) || !isNum(end)) return null
+  if (!isNum(start) || !isNum(end) || !isNum(bilinir)) return null
 
   if (asOf !== null && asOf !== undefined) {
-    // Henuz dogmamis kutu o anda EKRANDA YOKTUR.
-    if (start > asOf) return null
+    // Henuz ONAYLANMAMIS kutu o anda EKRANDA YOKTUR.
+    if (bilinir > asOf) return null
     if (end > asOf) end = asOf
   }
   if (end < start) end = start

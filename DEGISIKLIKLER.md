@@ -176,6 +176,12 @@ olay geldiginde ayni turdeki en benzer gecmis olaylarla karsilastirilip
   etiketiyle yazilabiliyordu.
 - **extendMemory hic cagrilmiyordu** ama belgeler artimli guncelleme vaat
   ediyordu; baglansa bar indeksleri kayardi.
+- **Kutular soldan bes bar kirpik ciziliyordu.** Cizim, pivotun ONAYLANDIGI
+  bardan basliyordu; Pine ise kutuyu PIVOT barindan baslatir
+  (`box.new(left = bar_index - pivotLen, ...)`). Kutular 100 yerine 95 bar
+  genisligindeydi. Ileriye bakma degil: kutu yine ancak onaylandiktan sonra
+  GORUNUR, yalnizca sol kenari pivota kadar uzanir, TradingView'in yaptigi da
+  budur.
 - **Calismasi biten kutular ekrandan siliniyordu.** Kullanici bunu ekranda
   gordu: TradingView'da kutu kirildiktan sonra da duruyor, bizde kayboluyordu.
   Sebep, portun ESKI indikator surumune yazilmis olmasiydi. Guncel surumde

@@ -20,13 +20,20 @@ async function mod() {
 
 const SAAT = 3600
 
-/** Ornek kutu: 100. saatte dogar, 200. saatte biter. */
+/**
+ * Ornek kutu.
+ *
+ * Pivot 95. saatte, ONAY 100. saatte (Pine: pivot ancak pivotLen bar sonra
+ * kesinlesir), bitis 200. saatte. Iki zamanin AYRI olmasi onemli: kutu
+ * pivottan CIZILIR ama ancak onaydan sonra GORUNUR.
+ */
 function kutu(ek) {
   return Object.assign({
     id: 1,
     isSupport: true,
     top: 2000,
     bottom: 1990,
+    pivotTime: 95 * SAAT,
     createdTime: 100 * SAAT,
     endTime: 200 * SAAT,
     broken: false,
@@ -34,24 +41,34 @@ function kutu(ek) {
   }, ek || {})
 }
 
-test('zoneSpanAt: kisit yokken kutu kendi araligiyla gelir', async () => {
+test('zoneSpanAt: sol kenar PIVOT barindan baslar, onay barindan degil', async () => {
   const { zoneSpanAt } = await mod()
   const a = zoneSpanAt(kutu(), null)
-  assert.deepStrictEqual(a, { start: 100 * SAAT, end: 200 * SAAT })
+  // Pine: box.new(left = bar_index - pivotLen) -> pivot bari.
+  // Port bir donem onay barindan basliyordu ve kutular TradingView'a gore
+  // soldan bes bar kirpik ciziliyordu.
+  assert.deepStrictEqual(a, { start: 95 * SAAT, end: 200 * SAAT })
+
+  // pivotTime tasimayan eski kayitlarda onay barina duser.
+  const eski = kutu({ pivotTime: null })
+  assert.strictEqual(zoneSpanAt(eski, null).start, 100 * SAAT)
 })
 
-test('zoneSpanAt: o andan sonra dogan kutu HIC cizilmez', async () => {
+test('zoneSpanAt: henuz ONAYLANMAMIS kutu HIC cizilmez', async () => {
   const { zoneSpanAt } = await mod()
-  // Sinyal 90. saatte; kutu 100. saatte dogacak. O anda ekranda yoktur.
+  // Sinyal 90. saatte. Kutunun pivotu 95, onayi 100: o anda kutu BILINMIYOR.
   assert.strictEqual(zoneSpanAt(kutu(), 90 * SAAT), null)
-  // Tam dogus aninda gorunur (sinyal cogu zaman kutunun dogdugu bardadir).
-  assert.deepStrictEqual(zoneSpanAt(kutu(), 100 * SAAT), { start: 100 * SAAT, end: 100 * SAAT })
+  // Pivot gecmis olsa bile onay gelmediyse yine gorunmez. ILERIYE BAKMA
+  // KORUMASI BURADA: pivot 95'te ama kutu 100'den once cizilemez.
+  assert.strictEqual(zoneSpanAt(kutu(), 97 * SAAT), null)
+  // Onay aninda gorunur ve sol kenari PIVOTA kadar uzanir.
+  assert.deepStrictEqual(zoneSpanAt(kutu(), 100 * SAAT), { start: 95 * SAAT, end: 100 * SAAT })
 })
 
 test('zoneSpanAt: sag kenar o anda durur', async () => {
   const { zoneSpanAt } = await mod()
   const a = zoneSpanAt(kutu(), 150 * SAAT)
-  assert.strictEqual(a.start, 100 * SAAT)
+  assert.strictEqual(a.start, 95 * SAAT)
   assert.strictEqual(a.end, 150 * SAAT, 'kutu gelecege dogru uzatilmamali')
 
   // An, kutunun bitisinden sonraysa kirpma olmaz.
@@ -91,7 +108,7 @@ test('zoneRightTime: bitis yoksa dogus anina duser, gecersizde NaN', async () =>
 test('zoneSpanAt: ters aralik duzeltilir, gecersiz kutu null doner', async () => {
   const { zoneSpanAt } = await mod()
   const ters = kutu({ endTime: 50 * SAAT })
-  assert.deepStrictEqual(zoneSpanAt(ters, null), { start: 100 * SAAT, end: 100 * SAAT })
+  assert.deepStrictEqual(zoneSpanAt(ters, null), { start: 95 * SAAT, end: 95 * SAAT })
   assert.strictEqual(zoneSpanAt({ createdTime: 'x', endTime: 'y' }, null), null)
   assert.strictEqual(zoneSpanAt(null, null), null)
 })
