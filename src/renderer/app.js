@@ -21,6 +21,7 @@ import { isaretMetni, sinyalOzetiMetni } from './istatistik.mjs'
 import {
   renderSignals,
   renderSignalDetail,
+  sonucEtiketi,
   renderZones,
   renderMemory,
   renderSettings,
@@ -773,7 +774,7 @@ function isaretleriCiz() {
         position: 'aboveBar',
         shape: 'circle',
         color: RENK.warn,
-        text: 'ÖRNEK ' + (ornek.success ? 'saygı' : 'kırılım'),
+        text: 'ÖRNEK ' + sonucEtiketi(ornek).ad.toLocaleLowerCase('tr'),
       })
     }
   }
@@ -2153,7 +2154,13 @@ async function ornegeGit(m) {
   const zaman = sayi(m.time, 0)
   if (!(zaman > 0)) return
 
-  durum.vurguluOrnek = { time: zaman, success: !!m.success }
+  // `outcome` de tasinir: sonuc UC DEGERLIDIR (tuttu / kirildi / zaman
+  // asimi) ve isaret bunu dogru yazabilmeli.
+  durum.vurguluOrnek = {
+    time: zaman,
+    success: !!m.success,
+    outcome: typeof m.outcome === 'string' ? m.outcome : '',
+  }
 
   // Kip aciksa kilit ORNEGIN anina tasinir. Sinyalin anini birakmak,
   // ornegin sonucunu da gostermek demekti ve rozet yanlis tarihi yazardi.
@@ -2176,7 +2183,7 @@ async function ornegeGit(m) {
     try { view.scrollToTime(zaman, { minSpan: 80, maxSpan: 900 }) } catch (err) { /* onemsiz */ }
   }
   bildir('Örneğe gidildi: ' + formatDateTime(zaman) +
-    ', sonuç ' + (m.success ? 'bölge tuttu' : 'bölge kırıldı'))
+    ', sonuç: ' + sonucEtiketi(m).ad)
 }
 
 /** Ayrinti kabina geri dugmesi ekler. */

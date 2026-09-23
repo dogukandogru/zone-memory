@@ -609,7 +609,11 @@ function outcomeAdi(outcome) {
 }
 
 /**
- * Benzer kayit satirinda gosterilecek KISA sonuc etiketi.
+ * KISA sonuc etiketi. Grafik isareti de bunu kullanir: sonuc kelimesi TEK
+ * YERDE yazilir, yoksa ekranin bir kosesinde "Tuttu", otekinde baska bir
+ * sozcuk cikar. Nitekim grafik isareti bir donem "saygi" yaziyordu; bu,
+ * `respect` etiketinin birebir cevirisiydi ve kullaniciya hicbir sey
+ * anlatmiyordu.
  *
  * Uc degerlidir. Eski hal yalnizca `success` alanina bakip her basarisizligi
  * "Kirilim" diye gosteriyordu; oysa 15m'de form basarisizliklarinin %26'si
@@ -619,7 +623,7 @@ function outcomeAdi(outcome) {
  * @param {{outcome?:string, success?:boolean}} m
  * @returns {{ad:string, sinif:string}}
  */
-function sonucEtiketi(m) {
+export function sonucEtiketi(m) {
   const o = m && typeof m.outcome === 'string' ? m.outcome : ''
   if (o === 'respect') return { ad: 'Tuttu', sinif: 'up' }
   if (o === 'break') return { ad: 'Kırıldı', sinif: 'down' }

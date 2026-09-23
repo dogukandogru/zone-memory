@@ -98,3 +98,32 @@ test('src altinda yok sayilan tek dosya uretilen yapi damgasidir', (t) => {
   const fazlalik = yokSayilan.filter((d) => !beklenen.includes(d))
   assert.deepStrictEqual(fazlalik, [], `kaynak dosyalar yok sayiliyor: ${fazlalik.join(', ')}`)
 })
+
+// KULLANICIYA GOSTERILEN SONUC KELIMESI TEK YERDEN GELIR.
+//
+// Grafik isareti bir donem "ÖRNEK saygı" yaziyordu. Bu, `respect` etiketinin
+// birebir cevirisiydi ve kullaniciya hicbir sey anlatmiyordu; ustelik ikili
+// oldugu icin zaman asimini "kirilim" gosteriyordu. Sonuc kelimeleri artik
+// tek bir yardimcidan (panels.js sonucEtiketi) geliyor.
+test('arayuz metinlerinde ham etiket cevirisi kullanilmaz', () => {
+  // Yalnizca ANLAMSIZ ceviri yasaklanir. "kırılım" bilerek disarida:
+  // "bileşen kırılımı" / "yıl kırılımı" bambaska bir anlamda ve mesrudur.
+  const YASAK = ['saygı']
+  const dosyalar = ['app.js', 'panels.js', 'overlay.js', 'chart.js', 'index.html']
+  const bulgular = []
+  for (const ad of dosyalar) {
+    const yol = path.join(KOK, 'src', 'renderer', ad)
+    if (!fs.existsSync(yol)) continue
+    const satirlar = fs.readFileSync(yol, 'utf8').split('\n')
+    for (let i = 0; i < satirlar.length; i++) {
+      const satir = satirlar[i]
+      // Kuralin kendisini anlatan yorum satirlari muaf.
+      if (/^\s*(\/\/|\*|\/\*)/.test(satir)) continue
+      for (const k of YASAK) {
+        if (satir.includes(k)) bulgular.push(ad + ':' + (i + 1) + ': ' + satir.trim().slice(0, 70))
+      }
+    }
+  }
+  assert.deepStrictEqual(bulgular, [],
+    'sonuc kelimesi sonucEtiketi() uzerinden gelmeli:\n' + bulgular.join('\n'))
+})
