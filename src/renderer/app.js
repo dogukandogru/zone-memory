@@ -94,6 +94,9 @@ const durum = {
   // Otomatik hazirlik (eksik mum indirme ve gerekirse tarama) suruyor mu.
   hazirlikCalisiyor: false,
   taramaCalisiyor: false,
+  // Tarama olcumu gecersiz kildi, ekran dolunca test yeniden calistirilacak.
+  // Testin hazirligin ICINDE beklenmesi kullaniciyi bos grafige baktiriyordu.
+  olcumYenilensin: false,
   canli: false,
   // Isciden gelen sinyal listesi kirpildi mi (U8).
   sinyalToplam: 0,
@@ -1453,11 +1456,12 @@ async function tfHazirlaIc(tf, ayar) {
     }
   }
 
-  // Sinyal listesi gecersiz kaldiysa testi KENDIMIZ calistiririz. Tarama
-  // bayragi birakildiktan SONRA, cunku test kendi kilidini kuruyor.
-  if (otomatikTest) {
-    await testCalistir()
-  }
+  // Sinyal listesi gecersiz kaldiysa testi KENDIMIZ calistiririz, ama BURADA
+  // DEGIL: bu fonksiyon grafik yuklenmeden once calisiyor ve testi burada
+  // beklemek kullaniciyi dakikalarca BOS EKRANA baktiriyordu (gercek gecişte
+  // goruldu: depo ve hafiza hazirdi, grafik hala "Veri yok" diyordu).
+  // Cagiranlar once `hepsiniYukle` ile ekrani doldurur, sonra testi baslatir.
+  if (otomatikTest) durum.olcumYenilensin = true
 
   ilerleme(100, 'Hazır')
   motorDurumu('hazır')
@@ -1498,6 +1502,7 @@ async function tfDegistir(tf) {
   await tfHazirla(tf)
 
   await hepsiniYukle()
+  await olcumYenilemesiGerekiyorsa()
   if (oncekiCanli) await canliBaslat()
 }
 
@@ -2381,6 +2386,18 @@ function testPaneliniCiz() {
   csvDugmeleriniTazele()
 }
 
+/**
+ * Tarama olcumu gecersiz kildiysa testi calistirir.
+ *
+ * Cagiranlar bunu `hepsiniYukle` sonrasinda cagirir: test dakikalar surebilir
+ * ve ekran dolmadan beklenirse kullanici bos grafige bakar.
+ */
+async function olcumYenilemesiGerekiyorsa() {
+  if (!durum.olcumYenilensin) return
+  durum.olcumYenilensin = false
+  await testCalistir()
+}
+
 /** Yuruyen ileri testi calistirir. */
 async function testCalistir() {
   if (durum.testCalisiyor) return
@@ -2515,6 +2532,7 @@ function olaylariBagla() {
       bildir('Canlı akışta boşluk var, eksik dönem indiriliyor.')
       await tfHazirla(durum.tf)
       await hepsiniYukle()
+      await olcumYenilemesiGerekiyorsa()
     } catch (err) {
       hataGoster('Eksik dönem kapatılamadı: ' + (err && err.message ? err.message : String(err)))
     } finally {
@@ -2981,6 +2999,7 @@ async function baslat() {
   await tfHazirla(durum.tf)
 
   await hepsiniYukle()
+  await olcumYenilemesiGerekiyorsa()
 
   // Canli takip: ayar aciksa uygulama acilir acilmaz baslar. En SONA birakildi,
   // cunku grafik ve saglayici listesi hazir olmadan baslatmak anlamsiz. Hata

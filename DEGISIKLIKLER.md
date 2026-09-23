@@ -176,6 +176,10 @@ olay geldiginde ayni turdeki en benzer gecmis olaylarla karsilastirilip
   etiketiyle yazilabiliyordu.
 - **extendMemory hic cagrilmiyordu** ama belgeler artimli guncelleme vaat
   ediyordu; baglansa bar indeksleri kayardi.
+- **Acilista bos grafik.** Olcum yenilenmesi gerektiginde test, grafik
+  yuklenmeden ONCE calisiyordu; kullanici depo ve hafiza hazir oldugu halde
+  dakikalarca "Veri yok" yazan bos bir ekrana bakiyordu. Test artik ekran
+  dolduktan sonra basliyor.
 - **Tek veri kaynagi: OANDA.** Kutulara TradingView'da OANDA:XAUUSD
   grafiginde bakiliyor; uygulama ise gecmiste HistData, canlida Binance
   PAXGUSDT (bir token, yani vekil) kullaniyordu. Olculdu: ayni donemde
