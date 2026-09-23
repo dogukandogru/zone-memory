@@ -176,6 +176,16 @@ olay geldiginde ayni turdeki en benzer gecmis olaylarla karsilastirilip
   etiketiyle yazilabiliyordu.
 - **extendMemory hic cagrilmiyordu** ama belgeler artimli guncelleme vaat
   ediyordu; baglansa bar indeksleri kayardi.
+- **OANDA anahtari artik pakete gomulu geliyor.** Musteri guncelledikten
+  sonra "OANDA icin API anahtari gerekli" uyarisini aliyordu. Anahtar artik
+  kurulum dosyasinin icinde geliyor, kimse elle girmiyor. Depo herkese acik
+  oldugu icin anahtar depoya YAZILMIYOR: GitHub'in sirrinda duruyor ve
+  yalnizca paketleme aninda dosyaya dokuluyor. Ayrica gomulu anahtar artik
+  yalnizca BOSLUGU dolduruyor; ayar dosyasinda bos bir anahtar kaliysa onu da
+  dolduruyor, girilmis bir anahtari ise asla ezmiyor.
+  Not: bu bir sir saklama yontemi degildir, kurulum dosyasini eline geciren
+  anahtari cikarabilir. Deneme hesabi anahtari oldugu icin yetkisi piyasa
+  verisi okumakla sinirli.
 - **Bir guncelleme musterinin sinyal listesini siliyordu.** Indikator
   varsayilanlari degisince ayar izi tutmuyor ve tarama olcum dosyalarini
   SILIYORDU. Kullanici hicbir sey degistirmemis oluyor, uygulamayi acip

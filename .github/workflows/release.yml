@@ -94,11 +94,42 @@ jobs:
               --notes "Otomatik yayin. Degisiklikler icin DEGISIKLIKLER.md dosyasina bakin."
           fi
 
+      # ANAHTAR DEPO SIRRINDAN GELIR.
+      #
+      # Depo herkese acik (surumleri yayinlayabilmek icin boyle yapildi), bu
+      # yuzden anahtar depoya YAZILAMAZ. Sir olarak durur ve yalnizca burada,
+      # paketleme aninda dosyaya dokulur. Komut satiri yerine ortam degiskeni:
+      # arguman kosucunun surec listesinde gorunur.
+      #
+      # DIKKAT: bu bir sir saklama yontemi DEGILDIR. Kurulum dosyasini eline
+      # gecirenler anahtari cikarabilir. Amac yalnizca musterinin ve bizim
+      # anahtari elle girmememiz. Deneme (practice) hesabi anahtari oldugu
+      # icin yetkisi piyasa verisi okumakla sinirli.
       - name: Paketle ve yayinla
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ZONE_MEMORY_OANDA_KEY: ${{ secrets.OANDA_API_KEY }}
         run: node scripts/prepare-dist.mjs --win --no-data --publish
+
+      # Anahtar gercekten pakete girdi mi. Girmediyse musteri yine "API
+      # anahtari gerekli" ekranini gorur ve bunu ancak o soyleyince ogreniriz.
+      # Anahtarin KENDISI yazdirilmaz, yalnizca var/yok.
+      - name: Gomulu anahtar dogrulamasi
+        shell: bash
+        run: |
+          dosya=src/main/apiKeys.local.json
+          if [ ! -f "$dosya" ]; then
+            echo "HATA: $dosya yok, kurulum anahtarsiz cikti."
+            echo "Depo sirri OANDA_API_KEY tanimli mi?"
+            exit 1
+          fi
+          node -e '
+            const a = require("./src/main/apiKeys.local.json")
+            const k = typeof a.oanda === "string" ? a.oanda.trim() : ""
+            if (!k) { console.error("HATA: oanda anahtari BOS."); process.exit(1) }
+            console.log("oanda anahtari yerinde, " + k.length + " karakter")
+          '
 
       # Yine de iki surum olustuysa erken yakala: bozuk bir yayin, musterinin
       # guncelleme alamamasi demek ve bunu ancak aylar sonra fark ederdik.

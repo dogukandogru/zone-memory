@@ -90,7 +90,11 @@ test('src altinda yok sayilan tek dosya uretilen yapi damgasidir', (t) => {
     return t.skip('git calistirilamadi')
   }
   const yokSayilan = cikti.split('\n').map((s) => s.trim()).filter(Boolean)
-  const beklenen = ['src/build-info.json']
+  // src/build-info.json  : her yapida uretilir.
+  // src/main/apiKeys.local.json : pakete gomulen API anahtari. Depo HERKESE
+  //   ACIK (surum yayinlamak icin boyle), dolayisiyla anahtar git'e GIRMEMELI.
+  //   Yayinda GitHub deposunun sirrindan uretilir, yerelde elle olusturulur.
+  const beklenen = ['src/build-info.json', 'src/main/apiKeys.local.json']
   const fazlalik = yokSayilan.filter((d) => !beklenen.includes(d))
   assert.deepStrictEqual(fazlalik, [], `kaynak dosyalar yok sayiliyor: ${fazlalik.join(', ')}`)
 })

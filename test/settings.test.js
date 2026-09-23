@@ -238,3 +238,59 @@ test('bozuk gomulu anahtar dosyasi uygulamayi durdurmaz', () => {
     fs.unlinkSync(ANAHTAR_DOSYASI)
   }
 })
+
+// GOMULU ANAHTAR BOSLUGU DOLDURUR, GIRILMIS ANAHTARI EZMEZ.
+//
+// Kilitlenen tuzak: gomulu anahtar VARSAYILANDIR, kullanicinin yamasi ise
+// varsayilani ezer. Kullanici ayar ekranini bir kez acip kaydettiyse yamada
+// `apiKeys.oanda: ""` kalabiliyor; o zaman pakete gomulu anahtar hicbir zaman
+// devreye girmiyor ve kullanici yine "API anahtari gerekli" hatasi aliyor.
+// Sebebi de gorunmez, ayarlarda alan dolu gibi durur.
+
+/** Gelistiricinin gercek anahtar dosyasini bozmadan sahte dosyayla calisir. */
+function sahteAnahtarDosyasiyla(icerik, govde) {
+  const yedek = ANAHTAR_DOSYASI + '.test-yedegi'
+  const vardi = fs.existsSync(ANAHTAR_DOSYASI)
+  if (vardi) fs.renameSync(ANAHTAR_DOSYASI, yedek)
+  fs.writeFileSync(ANAHTAR_DOSYASI, JSON.stringify(icerik))
+  try {
+    govde()
+  } finally {
+    fs.unlinkSync(ANAHTAR_DOSYASI)
+    if (vardi) fs.renameSync(yedek, ANAHTAR_DOSYASI)
+  }
+}
+
+test('yamada BOS kalan anahtar gomulu olanla doldurulur', () => {
+  sahteAnahtarDosyasiyla({ oanda: 'GOMULU_OANDA' }, () => {
+    const { dir, settings } = tazeAyarlar()
+
+    // Kullanici ayar ekranini acip kaydetmis: yamada bos anahtar duruyor.
+    settings.applySetPayload({ patch: { apiKeys: { oanda: '' } } })
+    assert.strictEqual(diskten(dir).apiKeys.oanda, '',
+      'once bos degerin gercekten diske yazildigini dogrula')
+
+    // BU TESTIN BUTUN KONUSU: bos deger gomulu anahtari ezmemeli.
+    settings.reset()
+    assert.strictEqual(settings.get('apiKeys.oanda'), 'GOMULU_OANDA')
+  })
+})
+
+test('gomulu anahtar GIRILMIS anahtari ezmez', () => {
+  sahteAnahtarDosyasiyla({ oanda: 'GOMULU_OANDA' }, () => {
+    const { settings } = tazeAyarlar()
+    settings.applySetPayload({ key: 'apiKeys.oanda', value: 'KULLANICININ_KENDI' })
+    settings.reset()
+    assert.strictEqual(settings.get('apiKeys.oanda'), 'KULLANICININ_KENDI',
+      'kullanicinin girdigi anahtar her zaman onceliklidir')
+  })
+})
+
+test('yalnizca bosluk iceren anahtar da bos sayilir', () => {
+  sahteAnahtarDosyasiyla({ oanda: 'GOMULU_OANDA' }, () => {
+    const { settings } = tazeAyarlar()
+    settings.applySetPayload({ key: 'apiKeys.oanda', value: '   ' })
+    settings.reset()
+    assert.strictEqual(settings.get('apiKeys.oanda'), 'GOMULU_OANDA')
+  })
+})

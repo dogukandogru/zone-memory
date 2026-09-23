@@ -385,6 +385,32 @@ function yapraklar(obj, onek, out) {
 }
 
 /**
+ * BOS KALAN ANAHTARLARI GOMULU OLANLA DOLDURUR.
+ *
+ * Gomulu anahtar varsayilandir, ama kullanicinin yamasi varsayilani EZER.
+ * Kullanici ayar ekranini bir kez acip kaydettiyse (ya da bir alani elle
+ * temizlediyse) yamada `apiKeys.oanda: ""` duruyor olabilir; o zaman pakete
+ * gomulu anahtar hicbir zaman devreye girmez ve kullanici yine "API anahtari
+ * gerekli" hatasini alir. Sebebi de gorunmez, cunku ayarlarda "anahtar var"
+ * gibi durur.
+ *
+ * Kural: gomulu anahtar yalnizca BOSLUGU doldurur, girilmis bir anahtari
+ * ASLA ezmez.
+ *
+ * @param {object} birlesik Varsayilanlarla birlestirilmis ayar nesnesi
+ */
+function gomuluAnahtarlariTamamla(birlesik) {
+  const gomulu = gomuluAnahtarlar()
+  if (!birlesik || !isPlainObject(birlesik.apiKeys)) return
+  for (const ad of Object.keys(gomulu)) {
+    const simdiki = birlesik.apiKeys[ad]
+    if (typeof simdiki !== 'string' || simdiki.trim() === '') {
+      birlesik.apiKeys[ad] = gomulu[ad]
+    }
+  }
+}
+
+/**
  * `tam` nesnesinin `taban` ile ayni olmayan alanlarini dondurur (derin fark).
  * @param {object} tam
  * @param {object} taban
@@ -490,6 +516,7 @@ function load() {
   const goc = ayarGocu(parsed || {})
   patchCache = goc.yama
   cache = deepMerge(DEFAULTS, patchCache)
+  gomuluAnahtarlariTamamla(cache)
   if (goc.gocuruldu && raw) {
     // Dosyayi yeni bicime cevir; basarisiz olursa bellekteki hali gecerlidir.
     try {

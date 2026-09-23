@@ -18,6 +18,7 @@
 //   node scripts/prepare-dist.mjs --win                    (NSIS kurulumu, wine gerekir)
 //   node scripts/prepare-dist.mjs --win --tasinabilir      (kurulumsuz klasor + zip)
 //   node scripts/prepare-dist.mjs --win --polygon-key ABC123
+//   ZONE_MEMORY_OANDA_KEY=... node scripts/prepare-dist.mjs --win   (CI yolu)
 //   node scripts/prepare-dist.mjs --win --no-data          (veri gomme)
 //   node scripts/prepare-dist.mjs --win --dry-run          (paketleme, sadece hazirla)
 //   node scripts/prepare-dist.mjs --win --no-data --publish (surum yayinla, CI)
@@ -82,8 +83,9 @@ function yaz(satir) {
 }
 
 /** Anahtar dosyasini yazar ya da (anahtar verilmediyse) siler. */
-function anahtariKur(polygon, twelvedata) {
-  if (!polygon && !twelvedata) {
+function anahtariKur(anahtarlar) {
+  const dolu = Object.keys(anahtarlar).filter((ad) => anahtarlar[ad])
+  if (dolu.length === 0) {
     if (fs.existsSync(ANAHTAR_DOSYASI)) {
       fs.unlinkSync(ANAHTAR_DOSYASI)
       yaz('  API anahtari: dosya silindi (anahtarsiz yapi)')
@@ -92,16 +94,13 @@ function anahtariKur(polygon, twelvedata) {
     }
     return
   }
-  const icerik = {
-    polygon: polygon || '',
-    twelvedata: twelvedata || '',
-  }
+  const icerik = {}
+  for (const ad of Object.keys(anahtarlar)) icerik[ad] = anahtarlar[ad] || ''
   fs.writeFileSync(ANAHTAR_DOSYASI, JSON.stringify(icerik, null, 2) + '\n')
-  const gorunen = []
-  if (polygon) gorunen.push('polygon ...' + polygon.slice(-4))
-  if (twelvedata) gorunen.push('twelvedata ...' + twelvedata.slice(-4))
   // Anahtarin TAMAMI HICBIR ZAMAN yazdirilmaz: bu cikti ekrana, CI gunlugune
-  // ve terminal gecmisine duser.
+  // ve terminal gecmisine duser. Son dort hane yalnizca "dogru anahtar mi"
+  // sorusunu cevaplamak icin.
+  const gorunen = dolu.map((ad) => ad + ' ...' + anahtarlar[ad].slice(-4))
   yaz('  API anahtari: gomuldu (' + gorunen.join(', ') + ')')
 }
 
@@ -187,8 +186,22 @@ function veriyiKopyala(kaynakDir) {
 function main() {
   const arg = argumanlariAyristir(process.argv.slice(2))
 
-  const polygon = typeof arg['polygon-key'] === 'string' ? arg['polygon-key'].trim() : ''
-  const twelvedata = typeof arg['twelvedata-key'] === 'string' ? arg['twelvedata-key'].trim() : ''
+  // ANAHTARLAR: once komut satiri, yoksa ORTAM DEGISKENI.
+  //
+  // Ortam degiskeni yolu CI icindir. GitHub Actions'ta anahtar depo SIRRINDA
+  // durur; depo herkese acik oldugu icin anahtar dosyaya yazilip commit
+  // EDILEMEZ. Komut satiri yerine ortam degiskeni kullaniyoruz: arguman,
+  // kosucudaki surec listesinde gorunur.
+  const anahtar = (adArg, adEnv) => {
+    if (typeof arg[adArg] === 'string' && arg[adArg].trim() !== '') return arg[adArg].trim()
+    const e = process.env[adEnv]
+    return typeof e === 'string' ? e.trim() : ''
+  }
+  const anahtarlar = {
+    polygon: anahtar('polygon-key', 'ZONE_MEMORY_POLYGON_KEY'),
+    twelvedata: anahtar('twelvedata-key', 'ZONE_MEMORY_TWELVEDATA_KEY'),
+    oanda: anahtar('oanda-key', 'ZONE_MEMORY_OANDA_KEY'),
+  }
   const veriYok = arg['no-data'] === true
   const kuruMu = arg['dry-run'] === true
   const kaynakDir = typeof arg['data-dir'] === 'string' ? arg['data-dir'] : varsayilanDataDir()
@@ -209,7 +222,7 @@ function main() {
 
   yaz('\nMusteri kurulumu hazirlaniyor')
   yaz('-'.repeat(52))
-  anahtariKur(polygon, twelvedata)
+  anahtariKur(anahtarlar)
 
   if (veriYok) {
     if (fs.existsSync(GOMULU_KLASOR)) fs.rmSync(GOMULU_KLASOR, { recursive: true, force: true })
