@@ -52,7 +52,25 @@ const { wilson } = require('./stats')
 // Yeni indikatorun gercek olcumu README 1. bolumdedir (17 Eylul 2026):
 // hicbir zaman diliminde kanitlanmis katma deger yok. Tekrar uretmek icin
 // `node scripts/measure-all.mjs`.
+/**
+ * SINYAL KIPLERI.
+ *
+ *   'hepsi'   Her kutu olusumu ve her dokunus sinyaldir. Gecmis sonuc,
+ *             isabet orani, TP/SL ve R/R HIC hesaplanmaz; hedef ve zarar
+ *             durdur kullanicinin kendi karari.
+ *   'hafiza'  Eski davranis: kNN ile benzer gecmis kurulumlar bulunur, tutma
+ *             oranina ve plan matematigine gore sinyal SUZULUR.
+ *
+ * Varsayilan 'hepsi'. Kullanicinin istegi: "sadece sinyali uretsin, tp ve sl
+ * kismi kullaniciya kalsin, tuttu tutmadi ve kar oranlarini da kaldiralim".
+ *
+ * 'hafiza' yolu KODDA DURUYOR, silinmedi: kNN, ozellik cikarimi, benzerlik ve
+ * olcum katmani ciddi bir emek ve geri donulmek istenirse tek ayarla donulur.
+ */
+const SINYAL_KIPLERI = ['hepsi', 'hafiza']
+
 const DEFAULT_SIGNAL_CFG = {
+  mode: 'hepsi',
   k: 25,
   minSimilarity: 0.80,
   minMatches: 15,
@@ -970,6 +988,7 @@ function evaluateTouch (touch, features, memory, prototypes, cfg, beforeTime, ek
 }
 
 module.exports = {
+  SINYAL_KIPLERI,
   DEFAULT_SIGNAL_CFG,
   evaluateTouch,
   findCandidates,

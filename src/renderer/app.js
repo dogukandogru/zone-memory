@@ -21,6 +21,7 @@ import { isaretMetni, sinyalOzetiMetni } from './istatistik.mjs'
 import {
   renderSignals,
   renderSignalDetail,
+  sadeSinyalMi,
   sonucEtiketi,
   renderZones,
   renderMemory,
@@ -846,7 +847,9 @@ function planBitisZamani(s, zaman) {
 
 function planCizgileri(s) {
   if (!view) return
-  if (!s) {
+  // 'hepsi' kipinde plan YOKTUR: hedef ve zarar durdur kullanicinin karari.
+  // Cizgileri temizleyip cikariz, yoksa onceki sinyalin cizgileri asili kalir.
+  if (!s || sadeSinyalMi(s)) {
     if (typeof view.clearPlanLines === 'function') {
       try { view.clearPlanLines() } catch (err) { /* onemsiz */ }
     }

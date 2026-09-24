@@ -536,12 +536,19 @@ test('ayar izi DEGISINCE olcum dosyalari silinmez, .onceki olarak yedeklenir', a
       'arayuz listeyi yeniden kurmak icin bunu bilmeli')
 
     // BU TESTIN BUTUN KONUSU: veri kaybolmadi, yerini degistirdi.
-    assert.strictEqual(fs.existsSync(kok + '.signals.json'), false, 'gecersiz liste yerinde kalmamali')
     assert.strictEqual(fs.existsSync(kok + '.signals.json.onceki'), true, 'liste YEDEKLENMELI')
     assert.strictEqual(fs.existsSync(kok + '.backtest.json.onceki'), true, 'ozet YEDEKLENMELI')
 
     const yedek = JSON.parse(fs.readFileSync(kok + '.signals.json.onceki', 'utf8'))
     assert.deepStrictEqual(yedek, [{ id: 1, fired: true }], 'yedek icerigi BOZULMAMALI')
+
+    // 'hepsi' kipinde tarama YERINE TAZE liste yazar. Yerinde kalan dosya
+    // ESKI liste DEGIL, yenisidir; eskisi yalnizca yedekte durur.
+    if (fs.existsSync(kok + '.signals.json')) {
+      const simdiki = JSON.parse(fs.readFileSync(kok + '.signals.json', 'utf8'))
+      assert.notDeepStrictEqual(simdiki, yedek,
+        'yerinde kalan liste ESKI liste olmamali')
+    }
   })
 })
 

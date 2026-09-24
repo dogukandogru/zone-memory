@@ -1118,6 +1118,32 @@ handlers['engine:scan'] = async function (payload, ctx) {
     signalCache = { tf: null, signals: null }
   }
 
+  // 'hepsi' KIPI: SINYAL LISTESI DOGRUDAN TARAMADAN CIKAR.
+  //
+  // SIRA ONEMLI: yedekleme blogundan SONRA yazilir. Once yazilsaydi
+  // yedekleme taze listeyi `.onceki` ekine tasir ve liste kaybolurdu.
+  //
+  // Bu kipte gecmis sonuc, isabet orani, TP/SL ve R/R hic hesaplanmaz; her
+  // kutu olusumu ve her dokunus sinyaldir, hedef ve zarar durdur kullanicinin
+  // karari. Dolayisiyla geriye teste de gerek yok: liste taramanin kendisiyle
+  // dolar ve kullanici dakikalarca test beklemez.
+  const sinyalKipi = uygulanan.signalCfg && uygulanan.signalCfg.mode === 'hafiza'
+    ? 'hafiza'
+    : 'hepsi'
+  if (sinyalKipi === 'hepsi') {
+    ctx.progress(95, 'Sinyaller yazılıyor')
+    const liste = []
+    for (let i = 0; i < events.length; i++) {
+      const e = events[i]
+      if (!e) continue
+      liste.push(olaydanSinyal(e, tf))
+    }
+    await writeJsonAtomic(paths.signalsPath(tf), liste)
+    signalCache = { tf: tf, signals: liste }
+    log(liste.length + ' sinyal yazıldı (her kutu oluşumu ve her dokunuş).')
+  }
+
+
   ctx.progress(97, 'Özet hazırlanıyor')
   let summary = null
   try {
@@ -2249,15 +2275,27 @@ handlers['engine:live-tick'] = async function (payload) {
           logs.push('Hafıza farklı bir ayarla kuruldu, sinyal üretilmedi. "Geçmişi Tara" çalıştırın.')
         }
       }
-      const uretilebilir = hafizaVar && izUyum !== false && !(rejim && rejim.bozuk)
-      const protos = uretilebilir && adaylar.length > 0 ? await getProtos(tf, false) : []
+      // 'hepsi' KIPI: her olay dogrudan sinyaldir. Hafiza, benzerlik ve
+      // plan hesabi HIC calismaz; dolayisiyla "hafiza bos" veya "ayar izi
+      // tutmuyor" gibi engeller de gecerli degildir.
+      const canliKip = canliCfg.signalCfg && canliCfg.signalCfg.mode === 'hafiza'
+        ? 'hafiza'
+        : 'hepsi'
+      const uretilebilir = canliKip === 'hepsi' ||
+        (hafizaVar && izUyum !== false && !(rejim && rejim.bozuk))
+      const protos = canliKip === 'hafiza' && uretilebilir && adaylar.length > 0
+        ? await getProtos(tf, false)
+        : []
       let ozellikYok = 0
 
       for (let i = 0; i < adaylar.length; i++) {
         const cand = adaylar[i]
         const hafif = lightEvent(cand)
         let sig = null
-        if (uretilebilir) {
+        if (canliKip === 'hepsi') {
+          // Olaydan dogrudan sinyal: plan, oran ve benzer ornek YOK.
+          sig = olaydanSinyal(cand, tf)
+        } else if (uretilebilir) {
           const feats = core('learn/features').buildFeatures(sub, cand, ind.context,
             payload.featureCfg !== undefined ? payload.featureCfg : (memMeta && memMeta.featureCfg))
           if (!feats) {
@@ -2504,6 +2542,45 @@ handlers['engine:live-log'] = async function (payload) {
  * @param {Array} trades
  * @param {{events:Array}} memory
  */
+/**
+ * 'hepsi' kipinde bir olaydan sinyal kaydi uretir.
+ *
+ * KASITLI OLARAK EKSIK: winRate, matchCount, rr, entry, tp1, tp2, sl,
+ * confidence, evidence, topMatches ve outcome YOKTUR. Bu kipte oyle bir
+ * bilgi uretilmiyor; bos deger yazmak yerine alani hic koymuyoruz ki arayuz
+ * "hesaplanmadi" ile "sifir cikti" arasinda karar verebilsin.
+ *
+ * @param {Object} e Hafizadaki olay
+ * @param {string} tf
+ * @returns {Object}
+ */
+function olaydanSinyal(e, tf) {
+  const kind = e.kind === 'form' ? 'form' : 'touch'
+  return {
+    id: 'sig-' + kind + '-' + num(e.zoneId, 0) + '-' + num(e.time, 0),
+    mode: 'hepsi',
+    fired: true,
+    tf: tf,
+    kind: kind,
+    sniper: !!e.sniper,
+    eventId: num(e.id, -1),
+    zoneId: num(e.zoneId, 0),
+    time: num(e.time, 0),
+    bar: num(e.bar, -1),
+    direction: e.direction || (e.isSupport ? 'BUY' : 'SELL'),
+    isSupport: !!e.isSupport,
+    price: num(e.price, 0),
+    zoneTop: num(e.zoneTop, 0),
+    zoneBottom: num(e.zoneBottom, 0),
+    zoneFlow: num(e.zoneFlow, 0),
+    zoneAgeBars: num(e.zoneAgeBars, 0),
+    atr: num(e.atr, 0),
+    volRatio: num(e.volRatio, 0),
+    score: num(e.score, 0),
+    maxScore: num(e.maxScore, 0),
+  }
+}
+
 function tradesToSignals(trades, memory) {
   const byId = new Map()
   if (memory && Array.isArray(memory.events)) {

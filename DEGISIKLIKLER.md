@@ -176,6 +176,20 @@ olay geldiginde ayni turdeki en benzer gecmis olaylarla karsilastirilip
   etiketiyle yazilabiliyordu.
 - **extendMemory hic cagrilmiyordu** ama belgeler artimli guncelleme vaat
   ediyordu; baglansa bar indeksleri kayardi.
+- **Sinyal kipi: her kurulum sinyal.** Artik varsayilan kip "hepsi": her kutu
+  olusumu ve kutuya her donus sinyaldir. Gecmis sonuc, isabet orani, TP/SL ve
+  R/R HIC hesaplanmaz; hedef ve zarar durdur kullanicinin kendi karari.
+  Ekranda kurulumun kendi bilgisi durur: kutu yuksekligi, kutu yasi, akis
+  gucu, hacim orani, ATR ve indikatorun bilesik skoru.
+  Olculdu (5m): 24.219 sinyal, gunde yaklasik 3 tane.
+  Bu kipte geriye teste de gerek yok, liste dogrudan taramadan cikiyor; yani
+  kullanici dakikalarca test beklemiyor.
+  Eski davranis KALDIRILMADI: Ayarlar'dan "Hafizadan suz" secilirse kNN,
+  benzerlik, plan ve olcum katmani eskisi gibi calisir.
+- **Olay turu rozetleri ayri renkte.** Listede iki tur yan yana duruyor
+  (11.325 olusum, 12.886 dokunus) ve ayni renkteyken ayirt edilemiyorlardi.
+  Olusum mavi, dokunus mor, sniper kehribar. Yon etiketi zaten yesil/kirmizi
+  kullandigi icin tur rozetleri baska renklerden secildi.
 - **Kutuya donusde de sinyal uretiliyor.** Dokunus olayi zaten vardi ve
   aciksti ama sinyale donusmuyordu: esik MUTLAK bir sayidir, oysa turlerin
   taban orani cok farklidir. Olculdu (5m, 24.218 olay): olusum gecmiste

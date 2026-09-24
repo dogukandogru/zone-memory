@@ -700,3 +700,34 @@ table.tbl tr:hover td { background: var(--bg-hover); }
 .match-compare .compare-key.past { color: #f5be3c; }
 
 .match-compare table { margin-top: 4px; }
+
+/* ------------------------------------------------------------------ */
+/* Olay turu rozetleri                                                 */
+/* ------------------------------------------------------------------ */
+/*
+ * Listede iki tur yan yana duruyor (olculdu: 11.325 olusum, 12.886 dokunus)
+ * ve ayni renkteyken bir bakista ayirt edilemiyorlardi.
+ *
+ * RENK SECIMI: yon etiketi (AL/SAT) zaten yesil ve kirmizi kullaniyor, bu
+ * yuzden tur rozetleri BASKA hue'lardan secildi. Aksi halde "yesil rozet =
+ * alis" diye okunur ve iki ayri bilgi birbirine karisir.
+ *   olusum  mavi   : kutunun DOGDUGU an
+ *   dokunus mor    : fiyatin kutuya GERI DONDUGU an
+ *   sniper  kehribar: indikatorun kendi sinyali, nadir ve one cikmali
+ */
+.badge.badge-form {
+  background: rgba(41, 98, 255, 0.16);
+  border-color: rgba(41, 98, 255, 0.55);
+  color: #7aa2ff;
+}
+.badge.badge-touch {
+  background: rgba(156, 99, 224, 0.16);
+  border-color: rgba(156, 99, 224, 0.55);
+  color: #c4a0f0;
+}
+.badge.badge-sniper {
+  background: rgba(242, 180, 14, 0.18);
+  border-color: rgba(242, 180, 14, 0.65);
+  color: #f2b40e;
+  font-weight: 700;
+}

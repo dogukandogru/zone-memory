@@ -450,6 +450,31 @@ function eslesmeSerisi(m) {
 /* ------------------------------------------------------------------ */
 
 /**
+ * Sinyal SADE kipte mi uretildi ('hepsi')?
+ *
+ * Alanin VARLIGINA da bakilir: eski kayitlarda `mode` yoktur ama plan ve oran
+ * alanlari vardir. Boylece kip degistiginde eski liste bozulmadan gorunur.
+ * @param {object} s
+ */
+export function sadeSinyalMi(s) {
+  if (!s) return false
+  if (s.mode === 'hepsi') return true
+  if (s.mode === 'hafiza') return false
+  // Kip yazili degil: plan alani yoksa sade kabul edilir.
+  return s.rr === undefined && s.tp1 === undefined && s.winRate === undefined
+}
+
+/** Kutu yuksekligini okunabilir yazar (ATR biriminde, varsa). */
+function kutuYuksekligi(s) {
+  const yuk = Math.abs(sayi(s.zoneTop, 0) - sayi(s.zoneBottom, 0))
+  const atr = sayi(s.atr, 0)
+  if (!(yuk > 0)) return 'Kutu'
+  return atr > 0
+    ? 'Kutu ' + formatNumber(yuk / atr, 2) + ' ATR'
+    : 'Kutu ' + formatPrice(yuk)
+}
+
+/**
  * Olay turunun okunabilir adi: kutu olusumu mu, bolgeye dokunus mu.
  * @param {string} kind
  * @param {boolean} [sniper] Pine'in kendi sinyali mi
@@ -466,12 +491,18 @@ function turAdi(kind, sniper) {
  */
 function turRozeti(kind, sniper) {
   if (sniper) {
-    const s = h('span', 'badge tiny', 'SNIPER')
+    const s = h('span', 'badge tiny badge-sniper', 'SNIPER')
     s.title = 'İndikatörün kendi sinyali: bölge süpürüldü, fitil reddetti, ' +
       'yapı kırıldı ve trend aynı yöndeydi. Nadir çıkar.'
     return s
   }
-  const e = h('span', 'badge tiny', kind === 'form' ? 'OLUŞUM' : 'DOKUNUŞ')
+  // AYRI RENK: listede iki tur yan yana duruyor (olculdu: 11.325 olusum,
+  // 12.886 dokunus). Ayni renkte olunca bir bakista ayirt edilemiyorlardi.
+  // Yon etiketi zaten yesil/kirmizi kullandigi icin tur rozetleri BASKA
+  // renklerden secildi, yoksa "AL/SAT" ile karisir.
+  const e = kind === 'form'
+    ? h('span', 'badge tiny badge-form', 'OLUŞUM')
+    : h('span', 'badge tiny badge-touch', 'DOKUNUŞ')
   e.title = kind === 'form'
     ? 'Kutunun doğduğu an, giriş onay barının kapanışı'
     : 'Kutuya ilk dokunuş, karar bar kapanışında, giriş sonraki barlarda bölge kenarına limit'
@@ -725,17 +756,30 @@ export function renderSignals(el, signals, opts) {
     orta.appendChild(document.createTextNode(formatDateTime(s.time) + '  ' + formatPrice(s.price)))
     orta.appendChild(turRozeti(s.kind, s.sniper))
     if (s.evidence) orta.appendChild(kanitRozeti(s.evidence))
-    const altMetin = s.fired
-      ? (tam(s.matchCount) + ' benzer kayıt, R/R ' + formatNumber(s.rr, 2))
-      : ('Üretilmedi: ' + (Array.isArray(s.reasons) && s.reasons.length
-        ? String(s.reasons[s.reasons.length - 1])
-        : 'eşikler geçilmedi'))
+    // 'hepsi' KIPI: gecmis sonuc, isabet orani ve R/R HIC hesaplanmaz.
+    // Ekranda kurulumun KENDI bilgisi gosterilir.
+    const sade = sadeSinyalMi(s)
+    const altMetin = sade
+      ? (kutuYuksekligi(s) + (sayi(s.zoneAgeBars, 0) > 0
+        ? ', kutu yaşı ' + tam(s.zoneAgeBars) + ' bar'
+        : ''))
+      : (s.fired
+        ? (tam(s.matchCount) + ' benzer kayıt, R/R ' + formatNumber(s.rr, 2))
+        : ('Üretilmedi: ' + (Array.isArray(s.reasons) && s.reasons.length
+          ? String(s.reasons[s.reasons.length - 1])
+          : 'eşikler geçilmedi')))
     orta.appendChild(h('span', 'row-sub', altMetin))
     satir.appendChild(orta)
 
     const sag = h('span', 'row-side')
     const sonuc = sonucBilgisi(s)
-    if (sonuc.hazir) {
+    if (sade) {
+      // Yalnizca kurulumun kendi gucu: indikatorun bilesik skoru.
+      const enCok = sayi(s.maxScore, 0)
+      sag.appendChild(h('span', null,
+        enCok > 0 ? tam(sayi(s.score, 0)) + '/' + tam(enCok) : '-'))
+      sag.appendChild(h('span', 'row-sub', 'skor'))
+    } else if (sonuc.hazir) {
       // Gerceklesen sonuc, beklentiden daha onemli oldugu icin ust satirda.
       const rozet = h('span', sonuc.sinif, sonuc.etiket)
       rozet.title = outcomeAdi(s.outcome) + ', beklenti %' +
@@ -803,6 +847,28 @@ export function renderSignalDetail(el, signal, opts) {
   const baslikSonek = signal.fired === false ? ' (sinyal üretilmedi)' : ''
   el.appendChild(bolumBasligi((alis ? 'AL sinyali' : 'SAT sinyali') + ' - ' +
     turAdi(signal.kind, signal.sniper) + ' - ' + formatDateTime(signal.time) + baslikSonek))
+
+  // 'hepsi' KIPI: plan, oran, benzer ornekler ve gerceklesen sonuc YOKTUR.
+  // Bu kipte oyle bir hesap yapilmiyor; hedef ve zarar durdur kullanicinin
+  // kendi karari. Ekrana kurulumun KENDI bilgileri yazilir.
+  if (sadeSinyalMi(signal)) {
+    const enCok = sayi(signal.maxScore, 0)
+    el.appendChild(statIzgara([
+      stat('Fiyat', formatPrice(signal.price)),
+      stat('Kutu', kutuYuksekligi(signal).replace('Kutu ', '')),
+      stat('Kutu yaşı', tam(signal.zoneAgeBars) + ' bar'),
+      stat('İndikatör skoru', enCok > 0 ? tam(signal.score) + '/' + tam(enCok) : '-'),
+    ]))
+    el.appendChild(kv('Bölge aralığı',
+      formatPrice(signal.zoneBottom) + ' - ' + formatPrice(signal.zoneTop)))
+    el.appendChild(kv('Akış gücü', formatNumber(signal.zoneFlow, 2)))
+    el.appendChild(kv('Hacim oranı', formatNumber(signal.volRatio, 2)))
+    el.appendChild(kv('ATR', formatNumber(signal.atr, 2)))
+    el.appendChild(h('div', 'small muted',
+      'Hedef ve zarar durdur bilinçli olarak hesaplanmıyor: bu kipte sistem ' +
+      'yalnızca kurulumu gösterir, seviyeleri siz belirlersiniz.'))
+    return
+  }
 
   // ORNEKLEM ROZETI: 5 kayitlik bir oran ile 40 kayitlik oran ayni
   // gorunmesin. Olculdu: gosterilen oran gerceklesenden ortalama 16,6 puan
@@ -1743,6 +1809,17 @@ function ayarGruplari(saglayiciSecenekleri) {
       alanlar: [
         { yol: 'signalCfg.k', ad: 'Komşu sayısı (k)', tip: 'sayi', adim: 1, min: 1, max: 200,
           not: 'Hafızadan alınan en benzer kayıt sayısı.' },
+        { yol: 'signalCfg.mode', ad: 'Sinyal kipi', tip: 'secim',
+          secenekler: [
+            { deger: 'hepsi', ad: 'Her kurulum sinyal (hedef/stop size kalır)' },
+            { deger: 'hafiza', ad: 'Hafızadan süz (geçmiş tutma oranına göre)' },
+          ],
+          not: 'HER KURULUM: her kutu oluşumu ve kutuya her dönüş sinyaldir. ' +
+            'Geçmiş sonuç, isabet oranı, TP/SL ve R/R hiç hesaplanmaz; hedef ve ' +
+            'zarar durdur sizin kararınız. 5 dakikalıkta günde yaklaşık 3 sinyal. ' +
+            'HAFIZADAN SÜZ: eski davranış. Geçmişte benzer kurulumların kaçının ' +
+            'tuttuğuna bakılır ve eşiği geçmeyen kurulum sinyal olmaz; ekranda ' +
+            'plan, oran ve benzer örnekler de gösterilir.' },
         { yol: 'featureCfg.shapeWindowBars', ad: 'Şekil penceresi (bar)',
           tip: 'sayi', adim: 8, min: 16, max: 512,
           not: 'Geçmişte benzer kurulum aranırken şeklin KAÇ BARA baktığı. ' +
