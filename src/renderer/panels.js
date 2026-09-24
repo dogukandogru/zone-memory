@@ -1752,6 +1752,69 @@ function ulasilmazEsikUyarisi(oku) {
 function ayarGruplari(saglayiciSecenekleri) {
   return [
     {
+      baslik: 'Sinyal nasıl üretilsin',
+      // `bozar` SADECE uyari metnini belirliyor. Bu gruptaki UC ayardan
+      // YALNIZCA sekil penceresi hafizayi gecersiz kilar; kip ve benzerlik
+      // agirligi kilmaz. Grup basligina genel uyari yazmak yerine, yeniden
+      // tarama gerektiren alanin KENDI notunda bu acikca yaziyor.
+      bozar: false,
+      not: 'Sinyalin ÇIKMA KOŞULUNU, geçmişte NE KADAR GERİYE bakılacağını ve ' +
+        'NEYE göre benzetileceğini bu üç ayar belirler. ' +
+        'Kutu oluşumu ile dokunuş AYRI havuzlardır: bir oluşum yalnızca ' +
+        'geçmişteki oluşumlarla, bir dokunuş yalnızca geçmişteki dokunuşlarla ' +
+        'karşılaştırılır. Yön de ayrıdır, AL yalnızca AL ile eşleşir. ' +
+        'Şekil penceresini değiştirmek hafızanın yeniden kurulmasını gerektirir; ' +
+        'kaydettikten sonra tarama kendiliğinden çalışır.',
+      alanlar: [
+        { yol: 'signalCfg.mode', ad: 'Sinyal kipi', tip: 'secim',
+          secenekler: [
+            { deger: 'benzerlik', ad: 'Geçmişte aynı yapı varsa sinyal' },
+            { deger: 'hepsi', ad: 'Her kurulum sinyal (benzerlik aranmaz)' },
+            { deger: 'hafiza', ad: 'Hafızadan süz (geçmiş tutma oranına göre)' },
+          ],
+          not: 'GEÇMİŞTE AYNI YAPI: kutu oluştuğunda o andaki grafiğin şekli ' +
+            'alınır, geçmişte aynı yapı aranır ve yeterince benzer kurulum ' +
+            'bulunursa sinyal üretilir. Hedef, zarar durdur, tutma oranı ve R/R ' +
+            'hiç hesaplanmaz; seviyeleri siz belirlersiniz. Kaç benzer kurulum ' +
+            'gerektiğini "En az eşleşme", ne kadar benzer olacağını "En az ' +
+            'benzerlik" belirler. ' +
+            'HER KURULUM: benzerlik de aranmaz, her kutu oluşumu ve her dönüş ' +
+            'sinyaldir. ' +
+            'HAFIZADAN SÜZ: eski davranış; benzerlere ek olarak geçmiş tutma ' +
+            'oranı ve plan matematiği de hesaplanır, eşiği geçmeyen kurulum ' +
+            'sinyal olmaz.' },
+        { yol: 'featureCfg.shapeWindowBars', ad: 'Şekil penceresi (bar)',
+          tip: 'sayi', adim: 8, min: 16, max: 512,
+          not: 'Geçmişte benzer kurulum aranırken şeklin KAÇ BARA baktığı. ' +
+            'Varsayılan 32. Şekil her zaman 16 noktadır; pencere büyüdükçe her ' +
+            'nokta daha çok barın ortalaması olur, yani daha geniş ama daha kaba ' +
+            'bir biçim karşılaştırılır. 5 dakikalıkta 32 bar yaklaşık 2,5 saat, ' +
+            '96 bar yaklaşık 8 saattir. ' +
+            'DİKKAT: bu değer özellik vektörünü değiştirir, yani HAFIZANIN ' +
+            'YENİDEN KURULMASI gerekir. Kaydettikten sonra tarama kendiliğinden ' +
+            'istenir ve ölçüm de yeniden hesaplanır. Pencere büyüdükçe serinin ' +
+            'başındaki olaylar kullanılamaz hale gelir (ilk pencere kadar bar).' },
+        { yol: 'signalCfg.weightPreset', ad: 'Benzerlik neye baksın', tip: 'secim',
+          secenekler: [
+            { deger: 'sekil', ad: 'Yalnızca görsel şekil' },
+            { deger: 'sekilAgirlikli', ad: 'Ağırlıkla şekil (%85 şekil)' },
+            { deger: 'dengeli', ad: 'Dengeli (%40 şekil, %40 bağlam)' },
+            { deger: 'baglamAgirlikli', ad: 'Ağırlıkla bağlam (%70 bağlam)' },
+            { deger: 'baglam', ad: 'Yalnızca bağlam' },
+            { deger: 'ozel', ad: 'Özel (aşağıdaki sayılar)' },
+          ],
+          not: 'Geçmişte benzer kurulum aranırken neye bakılacağı. ŞEKİL: son 32 ' +
+            'kapanışın normalize edilmiş eğrisi, yani grafiğin görünümü. BAĞLAM: ' +
+            'RSI, ATR, ortalamalara uzaklık, saat, kutu genişliği, kutu yaşı, hacim ' +
+            'oranı gibi 24 değer. Ölçüldü (doğrulama dilimi, eşikler kullanılmadan, ' +
+            'ölçüt AUC): 5m\'de yalnız şekil 0,6155 ve yalnız bağlam 0,6254; ' +
+            '15m\'de 0,5899 ve 0,6055. İki zaman diliminde de bağlam arttıkça ' +
+            'tahmin iyileşiyor, yani "yalnızca görsel şekil" ölçümde en zayıf ' +
+            'seçenektir. Aradaki fark küçüktür (0,01 AUC bandı). ' +
+            'Değiştirince sinyal listesi yeniden hesaplanır.' },
+      ],
+    },
+    {
       baslik: 'Bölge (kutu) ayarları',
       bozar: true,
       not: 'Kutu, hacimli bir pivotun Bollinger bandı dışına taştığı yerde doğar. ' +
@@ -1882,52 +1945,6 @@ function ayarGruplari(saglayiciSecenekleri) {
       alanlar: [
         { yol: 'signalCfg.k', ad: 'Komşu sayısı (k)', tip: 'sayi', adim: 1, min: 1, max: 200,
           not: 'Hafızadan alınan en benzer kayıt sayısı.' },
-        { yol: 'signalCfg.mode', ad: 'Sinyal kipi', tip: 'secim',
-          secenekler: [
-            { deger: 'benzerlik', ad: 'Geçmişte aynı yapı varsa sinyal' },
-            { deger: 'hepsi', ad: 'Her kurulum sinyal (benzerlik aranmaz)' },
-            { deger: 'hafiza', ad: 'Hafızadan süz (geçmiş tutma oranına göre)' },
-          ],
-          not: 'GEÇMİŞTE AYNI YAPI: kutu oluştuğunda o andaki grafiğin şekli ' +
-            'alınır, geçmişte aynı yapı aranır ve yeterince benzer kurulum ' +
-            'bulunursa sinyal üretilir. Hedef, zarar durdur, tutma oranı ve R/R ' +
-            'hiç hesaplanmaz; seviyeleri siz belirlersiniz. Kaç benzer kurulum ' +
-            'gerektiğini "En az eşleşme", ne kadar benzer olacağını "En az ' +
-            'benzerlik" belirler. ' +
-            'HER KURULUM: benzerlik de aranmaz, her kutu oluşumu ve her dönüş ' +
-            'sinyaldir. ' +
-            'HAFIZADAN SÜZ: eski davranış; benzerlere ek olarak geçmiş tutma ' +
-            'oranı ve plan matematiği de hesaplanır, eşiği geçmeyen kurulum ' +
-            'sinyal olmaz.' },
-        { yol: 'featureCfg.shapeWindowBars', ad: 'Şekil penceresi (bar)',
-          tip: 'sayi', adim: 8, min: 16, max: 512,
-          not: 'Geçmişte benzer kurulum aranırken şeklin KAÇ BARA baktığı. ' +
-            'Varsayılan 32. Şekil her zaman 16 noktadır; pencere büyüdükçe her ' +
-            'nokta daha çok barın ortalaması olur, yani daha geniş ama daha kaba ' +
-            'bir biçim karşılaştırılır. 5 dakikalıkta 32 bar yaklaşık 2,5 saat, ' +
-            '96 bar yaklaşık 8 saattir. ' +
-            'DİKKAT: bu değer özellik vektörünü değiştirir, yani HAFIZANIN ' +
-            'YENİDEN KURULMASI gerekir. Kaydettikten sonra tarama kendiliğinden ' +
-            'istenir ve ölçüm de yeniden hesaplanır. Pencere büyüdükçe serinin ' +
-            'başındaki olaylar kullanılamaz hale gelir (ilk pencere kadar bar).' },
-        { yol: 'signalCfg.weightPreset', ad: 'Benzerlik neye baksın', tip: 'secim',
-          secenekler: [
-            { deger: 'sekil', ad: 'Yalnızca görsel şekil' },
-            { deger: 'sekilAgirlikli', ad: 'Ağırlıkla şekil (%85 şekil)' },
-            { deger: 'dengeli', ad: 'Dengeli (%40 şekil, %40 bağlam)' },
-            { deger: 'baglamAgirlikli', ad: 'Ağırlıkla bağlam (%70 bağlam)' },
-            { deger: 'baglam', ad: 'Yalnızca bağlam' },
-            { deger: 'ozel', ad: 'Özel (aşağıdaki sayılar)' },
-          ],
-          not: 'Geçmişte benzer kurulum aranırken neye bakılacağı. ŞEKİL: son 32 ' +
-            'kapanışın normalize edilmiş eğrisi, yani grafiğin görünümü. BAĞLAM: ' +
-            'RSI, ATR, ortalamalara uzaklık, saat, kutu genişliği, kutu yaşı, hacim ' +
-            'oranı gibi 24 değer. Ölçüldü (doğrulama dilimi, eşikler kullanılmadan, ' +
-            'ölçüt AUC): 5m\'de yalnız şekil 0,6155 ve yalnız bağlam 0,6254; ' +
-            '15m\'de 0,5899 ve 0,6055. İki zaman diliminde de bağlam arttıkça ' +
-            'tahmin iyileşiyor, yani "yalnızca görsel şekil" ölçümde en zayıf ' +
-            'seçenektir. Aradaki fark küçüktür (0,01 AUC bandı). ' +
-            'Değiştirince sinyal listesi yeniden hesaplanır.' },
         { yol: 'signalCfg.minSimilarity', ad: 'En az benzerlik', tip: 'sayi', adim: 0.01, min: 0, max: 0.999,
           not: 'Bu eşiğin altındaki eşleşmeler sayılmaz. Ölçüldü: 0,80 eşiği rastgele ' +
             'çiftlerin yaklaşık %41\'ini geçiriyor, yani tek başına seçici değildir.' },
