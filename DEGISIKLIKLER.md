@@ -176,16 +176,22 @@ olay geldiginde ayni turdeki en benzer gecmis olaylarla karsilastirilip
   etiketiyle yazilabiliyordu.
 - **extendMemory hic cagrilmiyordu** ama belgeler artimli guncelleme vaat
   ediyordu; baglansa bar indeksleri kayardi.
-- **Sinyal kipi: her kurulum sinyal.** Artik varsayilan kip "hepsi": her kutu
-  olusumu ve kutuya her donus sinyaldir. Gecmis sonuc, isabet orani, TP/SL ve
-  R/R HIC hesaplanmaz; hedef ve zarar durdur kullanicinin kendi karari.
+- **Sinyal kipi: gecmiste ayni yapi varsa sinyal.** Varsayilan kip
+  "benzerlik": kutu olustugunda o andaki grafigin sekli alinir, gecmiste AYNI
+  YAPI aranir ve yeterince benzer kurulum bulunursa sinyal uretilir. Sinyalin
+  tek kapisi budur. Hedef, zarar durdur, tutma orani ve R/R HIC hesaplanmaz;
+  seviyeleri kullanici belirler. Ayrinti panelinde benzer gecmis kurulumlar
+  tarihleri ve benzerlik skorlariyla listelenir, "Neye gore?" dugmesiyle iki
+  sekil grafik uzerinde karsilastirilir; tuttu/tutmadi BILEREK gosterilmez.
+  Iki kip daha var: "Her kurulum" (benzerlik de aranmaz) ve "Hafizadan suz"
+  (eski davranis, tutma orani ve plan matematigi dahil).
   Ekranda kurulumun kendi bilgisi durur: kutu yuksekligi, kutu yasi, akis
   gucu, hacim orani, ATR ve indikatorun bilesik skoru.
-  Olculdu (5m): 24.219 sinyal, gunde yaklasik 3 tane.
-  Bu kipte geriye teste de gerek yok, liste dogrudan taramadan cikiyor; yani
+  Bu kiplerde geriye teste gerek yok, liste dogrudan taramadan cikiyor; yani
   kullanici dakikalarca test beklemiyor.
-  Eski davranis KALDIRILMADI: Ayarlar'dan "Hafizadan suz" secilirse kNN,
-  benzerlik, plan ve olcum katmani eskisi gibi calisir.
+  Kip degisince liste eskir ama ayar izi bunu yakalamaz; kayitlar kendi
+  kiplerini tasidigi icin uyusmazlik gorulunce liste kendiliginden yeniden
+  uretilir.
 - **Olay turu rozetleri ayri renkte.** Listede iki tur yan yana duruyor
   (11.325 olusum, 12.886 dokunus) ve ayni renkteyken ayirt edilemiyorlardi.
   Olusum mavi, dokunus mor, sniper kehribar. Yon etiketi zaten yesil/kirmizi

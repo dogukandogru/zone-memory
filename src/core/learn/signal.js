@@ -55,22 +55,26 @@ const { wilson } = require('./stats')
 /**
  * SINYAL KIPLERI.
  *
- *   'hepsi'   Her kutu olusumu ve her dokunus sinyaldir. Gecmis sonuc,
- *             isabet orani, TP/SL ve R/R HIC hesaplanmaz; hedef ve zarar
- *             durdur kullanicinin kendi karari.
- *   'hafiza'  Eski davranis: kNN ile benzer gecmis kurulumlar bulunur, tutma
- *             oranina ve plan matematigine gore sinyal SUZULUR.
+ *   'benzerlik'  VARSAYILAN. Gecmiste AYNI YAPI bulunursa sinyal uretilir.
+ *                kNN calisir, benzer gecmis kurulumlar bulunur ve ekranda
+ *                gosterilir; ama TP/SL, R/R, tutma orani ve gecmis sonuc
+ *                HIC hesaplanmaz. Sinyalin kapisi tek: yeterli sayida
+ *                yeterince benzer gecmis kurulum var mi.
+ *   'hepsi'      Hicbir kapi yok: her kutu olusumu ve her dokunus sinyaldir.
+ *                Benzerlik de aranmaz.
+ *   'hafiza'     Eski davranis: benzerlere ek olarak TUTMA ORANI ve plan
+ *                matematigi de hesaplanir, esigi gecmeyen kurulum sinyal
+ *                olmaz, ekranda plan ve oranlar gosterilir.
  *
- * Varsayilan 'hepsi'. Kullanicinin istegi: "sadece sinyali uretsin, tp ve sl
- * kismi kullaniciya kalsin, tuttu tutmadi ve kar oranlarini da kaldiralim".
- *
- * 'hafiza' yolu KODDA DURUYOR, silinmedi: kNN, ozellik cikarimi, benzerlik ve
- * olcum katmani ciddi bir emek ve geri donulmek istenirse tek ayarla donulur.
+ * Kullanicinin istegi iki parcaliydi ve ilk yazimda karistirildi:
+ * "tp ve sl kullaniciya kalsin, tuttu tutmadi ve kar oranlarini kaldiralim"
+ * ama "gecmise donuk ayni yapi varsa sinyal olustursun". Yani kaldirilacak
+ * olan PLAN ve SONUC matematigiydi, BENZERLIK ARAMASI degil.
  */
-const SINYAL_KIPLERI = ['hepsi', 'hafiza']
+const SINYAL_KIPLERI = ['benzerlik', 'hepsi', 'hafiza']
 
 const DEFAULT_SIGNAL_CFG = {
-  mode: 'hepsi',
+  mode: 'benzerlik',
   k: 25,
   minSimilarity: 0.80,
   minMatches: 15,

@@ -1127,20 +1127,67 @@ handlers['engine:scan'] = async function (payload, ctx) {
   // kutu olusumu ve her dokunus sinyaldir, hedef ve zarar durdur kullanicinin
   // karari. Dolayisiyla geriye teste de gerek yok: liste taramanin kendisiyle
   // dolar ve kullanici dakikalarca test beklemez.
-  const sinyalKipi = uygulanan.signalCfg && uygulanan.signalCfg.mode === 'hafiza'
-    ? 'hafiza'
-    : 'hepsi'
+  const kipAyari = uygulanan.signalCfg ? uygulanan.signalCfg.mode : null
+  const sinyalKipi = kipAyari === 'hafiza' || kipAyari === 'hepsi' ? kipAyari : 'benzerlik'
+
   if (sinyalKipi === 'hepsi') {
     ctx.progress(95, 'Sinyaller yazılıyor')
     const liste = []
     for (let i = 0; i < events.length; i++) {
-      const e = events[i]
-      if (!e) continue
-      liste.push(olaydanSinyal(e, tf))
+      if (events[i]) liste.push(olaydanSinyal(events[i], tf))
     }
     await writeJsonAtomic(paths.signalsPath(tf), liste)
     signalCache = { tf: tf, signals: liste }
     log(liste.length + ' sinyal yazıldı (her kutu oluşumu ve her dokunuş).')
+  } else if (sinyalKipi === 'benzerlik') {
+    // BENZERLIK KIPI: gecmiste AYNI YAPI bulunursa sinyal.
+    //
+    // kNN calisir ve komsular ONBELLEGE kurulur (aday havuzu kurali ileriye
+    // bakmayi engeller: bir olay ancak SONUCU BELLI olduktan sonra komsu
+    // olabilir). Sinyalin kapisi tek: yeterli sayida yeterince benzer gecmis
+    // kurulum var mi. Tutma orani, plan ve R/R HIC hesaplanmaz.
+    ctx.progress(93, 'Benzer geçmiş kurulumlar aranıyor')
+    const cc = core('learn/candcache')
+    const cache = cc.buildCandidates(
+      { tf: tf, ctxNames: built.ctxNames, events: events },
+      { signalCfg: uygulanan.signalCfg },
+      (pct, msg) => ctx.progress(93 + num(pct, 0) * 0.04, msg)
+    )
+    const hazir = cc.prepareEvents({ events: events })
+    const sirali = hazir.events
+    const k = cache.k
+    const enAzBenzer = Math.max(1, Math.round(num(uygulanan.signalCfg.minMatches, 5)))
+    const enAzYakinlik = num(uygulanan.signalCfg.minSimilarity, 0.8)
+
+    ctx.progress(97, 'Sinyaller yazılıyor')
+    const liste = []
+    for (let i = 0; i < sirali.length; i++) {
+      const e = sirali[i]
+      if (!e) continue
+      const komsular = []
+      for (let j = 0; j < k; j++) {
+        const ix = cache.idx[i * k + j]
+        if (ix < 0) continue
+        const benzerlik = cache.sim[i * k + j]
+        if (!(benzerlik >= enAzYakinlik)) continue
+        const komsu = sirali[ix]
+        if (!komsu) continue
+        komsular.push({ id: num(komsu.id, -1), time: num(komsu.time, 0), similarity: benzerlik })
+      }
+      // KAPI: gecmiste yeterince benzer yapi var mi.
+      if (komsular.length < enAzBenzer) continue
+      const sig = olaydanSinyal(e, tf)
+      sig.mode = 'benzerlik'
+      sig.matchCount = komsular.length
+      sig.avgSimilarity = komsular.reduce((t, m) => t + m.similarity, 0) / komsular.length
+      // Ekranda gosterilecek en benzer birkaci; tamami dosyayi sisirir.
+      sig.topMatches = komsular.slice(0, 6)
+      liste.push(sig)
+    }
+    await writeJsonAtomic(paths.signalsPath(tf), liste)
+    signalCache = { tf: tf, signals: liste }
+    log(liste.length + ' sinyal yazıldı (geçmişte en az ' + enAzBenzer +
+      ' benzer kurulum bulunanlar).')
   }
 
 

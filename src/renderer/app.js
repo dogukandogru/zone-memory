@@ -2051,6 +2051,41 @@ async function ornekKarsilastir(sinyal, eslesme) {
   return veri
 }
 
+/**
+ * SINYAL KIPI DEGISTIYSE YENIDEN TARA.
+ *
+ * 'benzerlik' ve 'hepsi' kiplerinde sinyal listesi TARAMADAN cikar. Kip
+ * degisince liste eskir ama ayar izi (cfgHash) bunu YAKALAMAZ: iz indikator
+ * ayarini ve etiket tanimini tutar, sinyal kipini degil. Kayitlar kendi
+ * kiplerini tasidigi icin karsilastirma dosyadan yapilir.
+ *
+ * Bu, uygulamanin VARSAYILANI bir guncellemeyle degistiginde de calisir;
+ * kullanici hicbir sey yapmamis olsa bile liste kendini tazeler.
+ */
+async function sinyalKipiDegistiyseTara() {
+  const ayar = durum.ayarlar || {}
+  const etkin = ayar.signalCfg && ayar.signalCfg.mode ? String(ayar.signalCfg.mode) : 'benzerlik'
+  // 'hafiza' kipinde liste testten gelir, taramadan degil.
+  if (etkin === 'hafiza') return
+  const liste = Array.isArray(durum.signals) ? durum.signals : []
+  if (liste.length === 0) return
+  const yazili = liste[0] && liste[0].mode ? String(liste[0].mode) : 'hafiza'
+  if (yazili === etkin) return
+
+  bildir('Sinyal kipi değişti, liste yeniden üretiliyor.')
+  try {
+    await cagir('engine:scan', {
+      tf: durum.tf,
+      params: ayar.indicatorParams,
+      featureCfg: ayar.featureCfg || null,
+      cfgPatch: durum.ayarYamasiKayitli || null,
+    })
+    await sinyalleriYukle()
+  } catch (err) {
+    hataGoster('Liste yeniden üretilemedi: ' + hataMetni(err))
+  }
+}
+
 /** Grafikteki karsilastirma egrilerini kaldirir. */
 function karsilastirmayiTemizle() {
   if (overlay && typeof overlay.setKarsilastirma === 'function') overlay.setKarsilastirma(null)
@@ -3189,6 +3224,7 @@ async function baslat() {
 
   // Acilista da eksigi tamamla: uygulama gunlerce kapali kalmis olabilir.
   await tfHazirla(durum.tf)
+  await sinyalKipiDegistiyseTara()
 
   await hepsiniYukle()
   await olcumYenilemesiGerekiyorsa()

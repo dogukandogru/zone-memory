@@ -867,6 +867,79 @@ export function renderSignalDetail(el, signal, opts) {
     el.appendChild(h('div', 'small muted',
       'Hedef ve zarar durdur bilinçli olarak hesaplanmıyor: bu kipte sistem ' +
       'yalnızca kurulumu gösterir, seviyeleri siz belirlersiniz.'))
+
+    // BENZER GECMIS KURULUMLAR. Bu kipte sinyalin CIKMA SEBEBI zaten bunlar:
+    // gecmiste ayni yapi bulundugu icin sinyal uretildi. Tutma orani ve sonuc
+    // BILEREK gosterilmez, yalnizca ne zaman ve ne kadar benzer.
+    const eslesmeler = Array.isArray(signal.topMatches) ? signal.topMatches : []
+    if (eslesmeler.length > 0) {
+      el.appendChild(bolumBasligi('Geçmişte bulunan benzer ' +
+        tam(signal.matchCount) + ' kurulum'))
+      el.appendChild(h('div', 'small muted',
+        'Sinyalin çıkma sebebi bu: aynı yapı geçmişte de oluşmuş. ' +
+        'Ortalama benzerlik ' + formatNumber(signal.avgSimilarity, 3) + '.'))
+      const ornegeGit2 = typeof o.onMatchSelect === 'function' ? o.onMatchSelect : null
+      const karsilastir2 = typeof o.onMatchCompare === 'function' ? o.onMatchCompare : null
+      for (let i = 0; i < eslesmeler.length; i++) {
+        const m = eslesmeler[i]
+        const satir = h('div', 'row' + (ornegeGit2 ? ' clickable' : ''))
+        if (ornegeGit2) {
+          satir.title = 'Grafikte bu örneğe git'
+          tiklamaBagla(satir, ornegeGit2, m)
+        }
+        const sol = h('span', 'row-side')
+        sol.appendChild(h('span', null, formatDate(m.time)))
+        sol.appendChild(h('span', 'row-sub', formatTime(m.time)))
+        satir.appendChild(sol)
+        const orta = h('span', 'row-main grow')
+        orta.appendChild(h('span', 'row-sub', 'benzerlik ' + formatNumber(m.similarity, 3)))
+        satir.appendChild(orta)
+        const sag = h('span', 'row-side')
+        if (karsilastir2) {
+          const kutu = h('div', 'match-compare')
+          kutu.hidden = true
+          const dugme = h('button', 'btn mini compare-btn', 'Neye göre?')
+          dugme.type = 'button'
+          dugme.title = 'Bu örnekle şimdiki kurulumun şekillerini grafik üzerinde karşılaştır'
+          sag.appendChild(dugme)
+          let yuklendi = false
+          dugme.addEventListener('click', async (olay) => {
+            olay.stopPropagation()
+            if (!kutu.hidden) {
+              kutu.hidden = true
+              dugme.classList.remove('active')
+              try { karsilastir2(signal, null) } catch (err) { /* onemsiz */ }
+              return
+            }
+            kutu.hidden = false
+            dugme.classList.add('active')
+            if (yuklendi) {
+              try { karsilastir2(signal, m) } catch (err) { /* onemsiz */ }
+              return
+            }
+            yuklendi = true
+            kutu.appendChild(h('div', 'small muted', 'Karşılaştırma hazırlanıyor...'))
+            try {
+              const veri = await karsilastir2(signal, m)
+              bosalt(kutu)
+              if (veri) karsilastirmayiCiz(kutu, veri, signal, m)
+              else kutu.appendChild(h('div', 'small muted', 'Karşılaştırma alınamadı.'))
+            } catch (err) {
+              bosalt(kutu)
+              kutu.appendChild(h('div', 'small muted', 'Karşılaştırma alınamadı: ' +
+                (err && err.message ? err.message : String(err))))
+              yuklendi = false
+            }
+          })
+          satir.appendChild(sag)
+          el.appendChild(satir)
+          el.appendChild(kutu)
+          continue
+        }
+        satir.appendChild(sag)
+        el.appendChild(satir)
+      }
+    }
     return
   }
 
@@ -1811,15 +1884,21 @@ function ayarGruplari(saglayiciSecenekleri) {
           not: 'Hafızadan alınan en benzer kayıt sayısı.' },
         { yol: 'signalCfg.mode', ad: 'Sinyal kipi', tip: 'secim',
           secenekler: [
-            { deger: 'hepsi', ad: 'Her kurulum sinyal (hedef/stop size kalır)' },
+            { deger: 'benzerlik', ad: 'Geçmişte aynı yapı varsa sinyal' },
+            { deger: 'hepsi', ad: 'Her kurulum sinyal (benzerlik aranmaz)' },
             { deger: 'hafiza', ad: 'Hafızadan süz (geçmiş tutma oranına göre)' },
           ],
-          not: 'HER KURULUM: her kutu oluşumu ve kutuya her dönüş sinyaldir. ' +
-            'Geçmiş sonuç, isabet oranı, TP/SL ve R/R hiç hesaplanmaz; hedef ve ' +
-            'zarar durdur sizin kararınız. 5 dakikalıkta günde yaklaşık 3 sinyal. ' +
-            'HAFIZADAN SÜZ: eski davranış. Geçmişte benzer kurulumların kaçının ' +
-            'tuttuğuna bakılır ve eşiği geçmeyen kurulum sinyal olmaz; ekranda ' +
-            'plan, oran ve benzer örnekler de gösterilir.' },
+          not: 'GEÇMİŞTE AYNI YAPI: kutu oluştuğunda o andaki grafiğin şekli ' +
+            'alınır, geçmişte aynı yapı aranır ve yeterince benzer kurulum ' +
+            'bulunursa sinyal üretilir. Hedef, zarar durdur, tutma oranı ve R/R ' +
+            'hiç hesaplanmaz; seviyeleri siz belirlersiniz. Kaç benzer kurulum ' +
+            'gerektiğini "En az eşleşme", ne kadar benzer olacağını "En az ' +
+            'benzerlik" belirler. ' +
+            'HER KURULUM: benzerlik de aranmaz, her kutu oluşumu ve her dönüş ' +
+            'sinyaldir. ' +
+            'HAFIZADAN SÜZ: eski davranış; benzerlere ek olarak geçmiş tutma ' +
+            'oranı ve plan matematiği de hesaplanır, eşiği geçmeyen kurulum ' +
+            'sinyal olmaz.' },
         { yol: 'featureCfg.shapeWindowBars', ad: 'Şekil penceresi (bar)',
           tip: 'sayi', adim: 8, min: 16, max: 512,
           not: 'Geçmişte benzer kurulum aranırken şeklin KAÇ BARA baktığı. ' +
