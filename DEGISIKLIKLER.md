@@ -176,6 +176,16 @@ olay geldiginde ayni turdeki en benzer gecmis olaylarla karsilastirilip
   etiketiyle yazilabiliyordu.
 - **extendMemory hic cagrilmiyordu** ama belgeler artimli guncelleme vaat
   ediyordu; baglansa bar indeksleri kayardi.
+- **Kutuya donusde de sinyal uretiliyor.** Dokunus olayi zaten vardi ve
+  aciksti ama sinyale donusmuyordu: esik MUTLAK bir sayidir, oysa turlerin
+  taban orani cok farklidir. Olculdu (5m, 24.218 olay): olusum gecmiste
+  %46,6 tutmus, dokunus %18,1; 12.893 dokunus olayindan yalnizca 2'si
+  sinyale donusuyordu. Artik dokunusun KENDI esigi var (varsayilan %30),
+  olusumunki degismedi.
+- **Kutu yasi siniri.** Olay anindaki kutu yasi ayardaki degeri asarsa sinyal
+  uretilmiyor (varsayilan 100 bar, 0 kapatir). Kutunun cizim omru 100 bardir
+  ama izlenmeye 600 bara kadar devam ediyor, yani cok eski bir kutuya gelen
+  dokunus da olay uretebiliyordu.
 - **Sekil penceresi artik ayarlanabiliyor.** Gecmiste benzer kurulum
   aranirken seklin KAC BARA baktigi kodda 32 olarak sabitti; kullanici
   "sadece cok kisa oncesine bakiyor" dedi ve haklıydı. Ayarlar'dan 16 ile 512

@@ -112,6 +112,33 @@ const DEFAULT_SIGNAL_CFG = {
   // Bu, isabet orani ile risk/odulu tek bir olcute baglar. 0 esigi baskabas,
   // pozitif esik pay birakir.
   minExpectancy: 0.10,
+  /**
+   * KUTU YASI SINIRI (bar). Olay anindaki kutu yasi bunu asarsa sinyal
+   * uretilmez. 0 veya negatif kapatir.
+   *
+   * Kutu cizim uzunlugu 100 bardir ama izlenmeye 600 bara kadar devam eder
+   * (maxAgeBars), yani cok eski bir kutuya gelen dokunus da olay uretebilir.
+   * Bu sinir, sinyali kutunun cizili omruyle sinirlar.
+   */
+  maxZoneAgeBars: 100,
+  /**
+   * DOKUNUSUN KENDI ISABET ESIGI. null ise `minWinRate` kullanilir.
+   *
+   * NEDEN AYRI BIR ALAN: esikler MUTLAK sayilardir ama turlerin taban orani
+   * cok farklidir. Olculdu (5m, OANDA, 24.218 olay): olusum gecmiste %46,6
+   * tutmus, dokunus %18,1. Tek bir "%50 isabet" esigi dokunusu KURULUM kotu
+   * oldugu icin degil OLCU baska oldugu icin eliyordu: 12.893 dokunus
+   * olayindan yalnizca 2'si sinyale donusuyordu.
+   *
+   * Basabas noktalari da farklidir: dokunusta medyan R/R 2,45 oldugu icin
+   * %28,9 isabet yeter; olusumda R/R 1,00 ve %50 gerekir.
+   *
+   * AYRI AD OLMASI KASITLI: ayni adli alani "tur bazinda ezmek" ilk yazimda
+   * denendi ve cagiranin ACIKCA verdigi degeri sessizce yok sayiyordu (esik
+   * taramasi ve dort test buna takildi). Ayri ad, ayara bakan herkesin iki
+   * esigi birden gormesini saglar.
+   */
+  touchMinWinRate: 0.30,
 }
 
 /** Eslesme yokken kullanilan ATR tabanli varsayilan plan carpanlari. */
@@ -242,8 +269,18 @@ function turBelirle (t) {
  * @param {Object} [cfg]
  * @returns {Object}
  */
-function ayarCoz (cfg) {
+function ayarCoz (cfg, kind) {
   const conf = Object.assign({}, DEFAULT_SIGNAL_CFG, cfg || {})
+  // DOKUNUSUN KENDI ISABET ESIGI (bkz. touchMinWinRate). null ise dokunma.
+  //
+  // DIKKAT, BU PROJEDE BES KEZ ISIRAN TUZAK: `Number(null)` SIFIRDIR. Duz
+  // `Number.isFinite(Number(x))` yazmak, null degeri "gecerli sifir esik"
+  // sayip dokunus esigini TAMAMEN KAPATIYORDU. Tur once acikca sayi mi diye
+  // bakilir.
+  if (kind !== 'form' && typeof conf.touchMinWinRate === 'number' &&
+      Number.isFinite(conf.touchMinWinRate)) {
+    conf.minWinRate = conf.touchMinWinRate
+  }
   conf.weights = agirlikCoz(conf)
   return conf
 }
@@ -339,7 +376,7 @@ function findCandidates (touch, features, memory, cfg, beforeTime) {
  */
 function decideFromCandidates (ev, candidates, levels, cfg, ek) {
   const t = ev || {}
-  const conf = ayarCoz(cfg)
+  const conf = ayarCoz(cfg, turBelirle(t))
   const baglam = ek || {}
 
   const minSimilarity = clamp(num(conf.minSimilarity, 0.8), 0, 0.999999)
@@ -728,8 +765,16 @@ function decideFromCandidates (ev, candidates, levels, cfg, ek) {
   const haberEngeli = haberDk > 0 && haber !== null &&
     Number.isFinite(haber.deltaMin) && Math.abs(haber.deltaMin) <= haberDk
 
+  // KUTU YASI SINIRI. Kutunun cizim omru 100 bardir ama izlenmeye 600 bara
+  // kadar devam eder (maxAgeBars), yani cok eski bir kutuya gelen dokunus da
+  // olay uretebiliyordu. Bu kapi sinyali kutunun cizili omruyle sinirlar.
+  // 0 veya negatif deger kapatir.
+  const maxYas = num(conf.maxZoneAgeBars, 0)
+  const kutuYasi = Math.max(0, num(t.zoneAgeBars, 0))
+  const yasEngeli = maxYas > 0 && kutuYasi > maxYas
+
   const fired = matchCount >= minMatches && winRate >= minWinRate && liftOk && rrOk && evOk &&
-    !formRiskBlocked && !haberEngeli
+    !formRiskBlocked && !haberEngeli && !yasEngeli
 
   // Gerekceler: sinyalin neden olustugu veya neden olusmadigi.
   if (!features || !features.shape) {
@@ -807,6 +852,10 @@ function decideFromCandidates (ev, candidates, levels, cfg, ek) {
     }
     if (matchCount > 0 && winRate < minWinRate) {
       reasons.push('Başarı oranı yetersiz (%' + toPct(winRate) + ' < %' + toPct(minWinRate) + '), sinyal üretilmedi')
+    }
+    if (yasEngeli) {
+      reasons.push('Kutu çok yaşlı (' + Math.round(kutuYasi) + ' > ' + Math.round(maxYas) +
+        ' bar), sinyal üretilmedi')
     }
     if (matchCount >= minMatches && winRate >= minWinRate && !rrOk) {
       reasons.push('Risk/ödül yetersiz (' + rr.toFixed(2) + ' < ' + minRr.toFixed(2) +

@@ -382,10 +382,16 @@ test('taban TUR BAZINDA hesaplanir: yalnizca form tetiklenirse taban form tabani
   // form: %50 basarili, dokunus: %25 basarili. Esik 0.45 oldugu icin yalnizca
   // form olaylari sinyal uretir (dokunus gecmisi esigi hicbir noktada gecemez;
   // en yuksek degeri bes adaylik havuzda 0.40'tir).
+  // `touchMinWinRate: null`: bu test TEK esikli kurguyu olcuyor. Dokunusun
+  // kendi esigi devrede olsaydi 0.30 kullanilir ve %40'lik havuzla sinyal
+  // uretirdi, yani kurgunun on kosulu bozulurdu.
   const mem = karisikHafiza(80, 4, 8)
   const r = runBacktest(mem, [], Object.assign({}, CFG, {
     warmupEvents: 0,
-    signalCfg: { minMatches: 3, minWinRate: 0.45, minExpectancy: -Infinity, minRr: 0 },
+    signalCfg: {
+      minMatches: 3, minWinRate: 0.45, minExpectancy: -Infinity, minRr: 0,
+      touchMinWinRate: null,
+    },
   }))
   const s = r.summary
   const kirilim = new Map(s.byKind.map((k) => [k.kind, k]))
@@ -518,7 +524,12 @@ test('zaman asimi islemleri ozette ayri raporlanir', () => {
     embargoSec: 0,
     costUsd: 0,
     costPct: 0,
-    signalCfg: { minMatches: 3, minWinRate: 0, minExpectancy: -Infinity, minRr: 0 },
+    // `touchMinWinRate: null`: bu test "esik sifir, hepsi gecsin" kurgusunu
+    // olcuyor; dokunusun kendi esigi devrede olsaydi 0.30'a yukselirdi.
+    signalCfg: {
+      minMatches: 3, minWinRate: 0, minExpectancy: -Infinity, minRr: 0,
+      touchMinWinRate: null,
+    },
   })
   assert.ok(r.summary.fired > 0, 'islem uretilmeliydi')
   assert.equal(r.summary.timeouts, r.summary.fired, 'tum islemler zaman asimi')

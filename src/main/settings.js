@@ -300,6 +300,8 @@ const SINIRLAR = {
   'backtestCfg.slippageAtr': [0, 2],
   'backtestCfg.warmupPerBucket': [0, 5000],
   'featureCfg.shapeWindowBars': [16, 512],
+  'signalCfg.touchMinWinRate': [0, 1],
+  'signalCfg.maxZoneAgeBars': [0, 2000],
   'signalCfg.k': [1, 200],
   'signalCfg.minSimilarity': [0, 0.999],
   'signalCfg.minMatches': [1, 1000],

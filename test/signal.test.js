@@ -98,10 +98,13 @@ test('eslesme sayisi esigin ALTINDA ise fired false', () => {
 })
 
 test('basari orani esigin ALTINDA ise fired false', () => {
-  // 10 kayit, 3 basarili -> winRate 0.30 < 0.60
-  const s = evaluateTouch(dokunus('BUY'), ozellik(), hafizaKur(10, 3, 'BUY'), [], {}, null)
+  // DIKKAT: dokunusun esigi TUR BAZINDA ezilir (byKind.touch.minWinRate 0.30),
+  // cunku dokunusun taban orani olusumunkinden cok dusuktur. Bu test esigin
+  // ALTINDA kalmayi olcuyor, o yuzden oran dokunusun kendi esiginin de
+  // altinda secilir: 10 kayit, 2 basarili -> 0.20 < 0.30.
+  const s = evaluateTouch(dokunus('BUY'), ozellik(), hafizaKur(10, 2, 'BUY'), [], {}, null)
   assert.equal(s.matchCount, 10)
-  assert.ok(Math.abs(s.winRate - 0.3) < 1e-9)
+  assert.ok(Math.abs(s.winRate - 0.2) < 1e-9)
   assert.equal(s.fired, false)
   assert.ok(s.reasons.some((r) => r.includes('Başarı oranı yetersiz')))
 })
@@ -290,7 +293,11 @@ test('confidence 0..1 arasinda kirpilir', () => {
 // ---------------------------------------------------------------------------
 
 test('dusuk tutma oranli eslesme YUKSEK GUVEN almaz', () => {
-  const esik = { minMatches: 5, minWinRate: 0.60 }
+  // `byKind` bosaltilir: bu test TEK esikli davranisi olcuyor, tur bazinda
+  // ezme devrede olsaydi dokunus 0.30 esigini kullanirdi.
+  // `touchMinWinRate: null`: bu test TEK esikli davranisi olcuyor, dokunusun
+  // kendi esigi devrede olsaydi 0.30 kullanilirdi.
+  const esik = { minMatches: 5, minWinRate: 0.60, touchMinWinRate: null }
   // Ayni eslesme sayisi ve ayni benzerlik, yalnizca tutma orani farkli.
   const yazi = evaluateTouch(dokunus('BUY'), ozellik(), hafizaKur(20, 10, 'BUY'), [], esik, null)
   const yuksek = evaluateTouch(dokunus('BUY'), ozellik(), hafizaKur(20, 20, 'BUY'), [], esik, null)
@@ -656,4 +663,59 @@ test('agirlik on ayari: taninmayan ad elle agirliklara duser', () => {
   // Eski bir ayar dosyasinda olmayan bir ad varsa uygulama durmamali.
   const w = agirlikCoz({ weightPreset: 'boyle-bir-sey-yok' })
   assert.deepStrictEqual(w, Object.assign({}, DEFAULT_WEIGHTS))
+})
+
+// KUTU YASI SINIRI VE DOKUNUSUN KENDI ESIGI
+//
+// Kullanici iki sey istedi: kutuya donusde de sinyal uretilsin, ve kutu
+// 100 bardan yasliysa uretilmesin.
+//
+// Dokunus zaten olay uretiyordu ama sinyale donusmuyordu: esik MUTLAK bir
+// sayidir, oysa turlerin taban orani cok farklidir. Olculdu (5m, 24.218
+// olay): olusum %46,6 tutmus, dokunus %18,1; 12.893 dokunus olayindan
+// yalnizca 2'si sinyale donusuyordu.
+
+test('dokunusun KENDI isabet esigi vardir, olusumunki degismez', () => {
+  // Havuz %35 tutmus: olusum esigini (0.50) gecmez, dokunusunkini (0.30) gecer.
+  const esik = { minMatches: 5, minWinRate: 0.50, minExpectancy: -Infinity, minRr: 0 }
+  const d = evaluateTouch(dokunus('BUY'), ozellik(), hafizaKur(20, 7, 'BUY'), [], esik, null)
+  assert.ok(Math.abs(d.winRate - 0.35) < 1e-9, 'kurgu: oran 0.35 olmali')
+  assert.equal(d.fired, true, 'dokunus kendi esigiyle sinyal uretmeli')
+})
+
+test('touchMinWinRate null ise dokunus da ust duzey esigi kullanir', () => {
+  // DIKKAT: `Number(null)` SIFIRDIR. Duz sayiya cevirme kullanilsaydi null,
+  // "gecerli sifir esik" sayilip dokunus esigini tamamen kapatirdi.
+  const esik = {
+    minMatches: 5, minWinRate: 0.50, minExpectancy: -Infinity, minRr: 0,
+    touchMinWinRate: null,
+  }
+  const d = evaluateTouch(dokunus('BUY'), ozellik(), hafizaKur(20, 7, 'BUY'), [], esik, null)
+  assert.equal(d.fired, false, 'null esigi kapatmali, ust duzey 0.50 gecerli olmali')
+})
+
+test('kutu 100 bardan yasliysa sinyal uretilmez', () => {
+  const esik = { minMatches: 5, minWinRate: 0.30, minExpectancy: -Infinity, minRr: 0 }
+  const iyiHavuz = () => hafizaKur(20, 16, 'BUY')
+
+  const genc = Object.assign(dokunus('BUY'), { zoneAgeBars: 40 })
+  const yasli = Object.assign(dokunus('BUY'), { zoneAgeBars: 240 })
+
+  assert.equal(evaluateTouch(genc, ozellik(), iyiHavuz(), [], esik, null).fired, true,
+    'genc kutuda sinyal uretilmeli')
+
+  const s = evaluateTouch(yasli, ozellik(), iyiHavuz(), [], esik, null)
+  assert.equal(s.fired, false, 'yasli kutuda sinyal uretilmemeli')
+  assert.ok(s.reasons.some((r) => r.includes('Kutu çok yaşlı')),
+    'sebep acikca yazilmali: ' + JSON.stringify(s.reasons))
+})
+
+test('kutu yasi siniri 0 ile kapatilabilir', () => {
+  const esik = {
+    minMatches: 5, minWinRate: 0.30, minExpectancy: -Infinity, minRr: 0,
+    maxZoneAgeBars: 0,
+  }
+  const yasli = Object.assign(dokunus('BUY'), { zoneAgeBars: 500 })
+  assert.equal(evaluateTouch(yasli, ozellik(), hafizaKur(20, 16, 'BUY'), [], esik, null).fired,
+    true, 'sinir kapaliyken yas engellememeli')
 })

@@ -1787,6 +1787,21 @@ function ayarGruplari(saglayiciSecenekleri) {
         { yol: 'signalCfg.minExpectancy', ad: 'En az beklenen değer (R)', tip: 'sayi', adim: 0.05, min: -1, max: 5,
           not: 'Beklenen değer = tutma oranı x R/R - kırılma oranı + zaman aşımı katkısı. ' +
             'Yüksek isabet tek başına yetmez, matematiğin de olumlu olması gerekir.' },
+        { yol: 'signalCfg.touchMinWinRate', ad: 'Dokunuşta en az isabet oranı',
+          tip: 'sayi', adim: 0.01, min: 0, max: 1,
+          not: 'Fiyat kutuya geri döndüğünde üretilen sinyal için ayrı eşik. ' +
+            'Boş bırakılırsa üstteki genel eşik kullanılır. Neden ayrı: eşikler ' +
+            'mutlak sayıdır ama türlerin taban oranı çok farklıdır. Ölçüldü ' +
+            '(5m, 24.218 olay): oluşum geçmişte %46,6 tutmuş, dokunuş %18,1. Tek ' +
+            'bir eşik dokunuşu kurulum kötü olduğu için değil ölçü başka olduğu ' +
+            'için eliyordu. Başabaş noktaları da farklı: dokunuşta medyan R/R ' +
+            '2,45 olduğu için %28,9 isabet yeter, oluşumda R/R 1,00 ve %50 gerekir.' },
+        { yol: 'signalCfg.maxZoneAgeBars', ad: 'En fazla kutu yaşı (bar)',
+          tip: 'sayi', adim: 10, min: 0, max: 2000,
+          not: 'Olay anındaki kutu yaşı bunu aşarsa sinyal üretilmez. 0 kapatır. ' +
+            'Kutunun çizim ömrü 100 bardır ama izlenmeye 600 bara kadar devam ' +
+            'eder, yani çok eski bir kutuya gelen dokunuş da olay üretebiliyordu. ' +
+            'Ölçüldü: dokunuşların %82,6\'sı zaten 100 bardan genç kutulara geliyor.' },
         { yol: 'signalCfg.priorStrength', ad: 'Kalibrasyon önseli (sanal gözlem)', tip: 'sayi', adim: 1, min: 0, max: 200,
           not: 'Gösterilen oran, havuzun taban oranına doğru bu ağırlıkta çekilir. ' +
             '20 değeri "20 kayıtlık bir ön bilgi" demektir ve 5 eşleşmelik bir oranın ' +
