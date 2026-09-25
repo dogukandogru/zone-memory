@@ -874,18 +874,16 @@ export function renderSignalDetail(el, signal, opts) {
       stat('İndikatör skoru', enCok > 0 ? tam(signal.score) + '/' + tam(enCok) : '-'),
     ]))
     if (guvenVar) {
-      // NE OLDUGU ACIKCA YAZILIR. Bu yuzde "bu sinyal kazandirir" DEMEK
-      // DEGILDIR: bu kipte sonuc bilgisi hic hesaplanmiyor. Soyledigi tek sey,
-      // bu yapinin gecmiste ne kadar cok orneginin bulundugudur.
+      // NE OLDUGUNU SOYLER, UYARMAZ. Kullanici uyari metnini istemedi
+      // ("uyarıyı yazmana gerek yok"); yuzdenin tanimi kaliyor, cunku tanim
+      // olmadan sayinin neyi olctugu anlasilmaz.
       el.appendChild(h('div', 'small muted',
         'Güven, geçmişte bulunan benzer kurulum sayısının KENDİ TÜRÜ İÇİNDEKİ ' +
         'sıralamasıdır: bu kurulumun, aynı türdeki kurulumların %' + g + "'inden " +
         'daha çok geçmiş örneği var' +
         (sayi(signal.poolCount, 0) > 0
           ? ' (aynı türden toplam ' + tam(signal.poolCount) + ' kayıt tarandı)'
-          : '') + '. ' +
-        'Bu oran kazanç ihtimali DEĞİLDİR: bu kipte sonuç hiç hesaplanmıyor, ' +
-        'yalnızca yapının ne kadar tanıdık olduğu ölçülüyor.'))
+          : '') + '.'))
     }
     el.appendChild(kv('Bölge aralığı',
       formatPrice(signal.zoneBottom) + ' - ' + formatPrice(signal.zoneTop)))

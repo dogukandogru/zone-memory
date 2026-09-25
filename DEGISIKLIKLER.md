@@ -187,9 +187,8 @@ olay geldiginde ayni turdeki en benzer gecmis olaylarla karsilastirilip
   demektir. Mutlak olcek kullanilmadi, cunku turlerin sayilari cok farkli
   (olusum medyan 1.236, dokunus 391); tek olcek dokunusu surekli dusuk
   gosterirdi.
-  DIKKAT: bu yuzde KAZANC IHTIMALI DEGILDIR. Bu kipte sonuc hic
-  hesaplanmiyor; yuzde yalnizca yapinin ne kadar tanidik oldugunu soyluyor
-  ve ekranda bu acikca yaziyor.
+  Ekranda yuzdenin TANIMI yaziyor (hangi turun icinde kacinci oldugu), uyari
+  metni yazmiyor: kullanici istemedi.
 - **Sinyal kipi: gecmiste ayni yapi varsa sinyal.** Varsayilan kip
   "benzerlik": kutu olustugunda o andaki grafigin sekli alinir, gecmiste AYNI
   YAPI aranir ve yeterince benzer kurulum bulunursa sinyal uretilir. Sinyalin
