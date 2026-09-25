@@ -176,6 +176,20 @@ olay geldiginde ayni turdeki en benzer gecmis olaylarla karsilastirilip
   etiketiyle yazilabiliyordu.
 - **extendMemory hic cagrilmiyordu** ama belgeler artimli guncelleme vaat
   ediyordu; baglansa bar indeksleri kayardi.
+- **Benzer kayit sayisi artik `k` ile sinirli degil, sinyalde GUVEN yuzdesi
+  var.** Ekranda hep "25 benzer kayit" yaziyordu; 25, kNN'in "en benzer
+  kacini getir" ayariydi. "Gecmiste kac benzer kurulum var" sorusu bundan
+  ayridir. Olculdu (5m): olusumda medyan 1.236 benzer kayit varken k=25
+  kayitlarin %97,3'unde kesiyordu. Artik esigi gecen TUM kayitlar sayiliyor
+  ve bu, aramanin zaten yaptigi gecise eklendigi icin ek maliyet getirmiyor.
+  Guven, sayinin KENDI TURU ICINDEKI yuzdelik dilimidir: "%90" demek, bu
+  kurulumun ayni turdeki kurulumlarin %90'indan daha cok gecmis ornegi var
+  demektir. Mutlak olcek kullanilmadi, cunku turlerin sayilari cok farkli
+  (olusum medyan 1.236, dokunus 391); tek olcek dokunusu surekli dusuk
+  gosterirdi.
+  DIKKAT: bu yuzde KAZANC IHTIMALI DEGILDIR. Bu kipte sonuc hic
+  hesaplanmiyor; yuzde yalnizca yapinin ne kadar tanidik oldugunu soyluyor
+  ve ekranda bu acikca yaziyor.
 - **Sinyal kipi: gecmiste ayni yapi varsa sinyal.** Varsayilan kip
   "benzerlik": kutu olustugunda o andaki grafigin sekli alinir, gecmiste AYNI
   YAPI aranir ve yeterince benzer kurulum bulunursa sinyal uretilir. Sinyalin

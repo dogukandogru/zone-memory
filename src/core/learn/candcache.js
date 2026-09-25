@@ -208,6 +208,9 @@ function buildCandidates (memory, cfg, onProgress) {
   // havuzdaki basari sayisi. Kalibrasyon bunlari kullanir.
   const baseN = new Int32Array(n)
   const baseWins = new Int32Array(n)
+  // Esigi gecen benzer kayit sayisi ve havuzun buyuklugu (olay basina).
+  const benzerSayi = new Int32Array(n)
+  const havuzSayi = new Int32Array(n)
   const cache = {
     version: CANDCACHE_VERSION,
     key: cacheKey(memory, conf),
@@ -217,6 +220,8 @@ function buildCandidates (memory, cfg, onProgress) {
     sim: sim,
     baseN: baseN,
     baseWins: baseWins,
+    benzerSayi: benzerSayi,
+    havuzSayi: havuzSayi,
   }
   if (n === 0) return cache
 
@@ -272,6 +277,9 @@ function buildCandidates (memory, cfg, onProgress) {
       baseWins[i] = Number.isFinite(adaylar.baseRate) && adaylar.baseRate !== null
         ? Math.round(adaylar.baseRate * baseN[i])
         : 0
+      // Esigi gecen TUM benzer kayit sayisi (k ile sinirli degil).
+      benzerSayi[i] = Number.isFinite(adaylar.similarCount) ? adaylar.similarCount : 0
+      havuzSayi[i] = Number.isFinite(adaylar.poolCount) ? adaylar.poolCount : 0
 
       const off = i * k
       const m = adaylar.length < k ? adaylar.length : k

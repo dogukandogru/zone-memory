@@ -774,11 +774,23 @@ export function renderSignals(el, signals, opts) {
     const sag = h('span', 'row-side')
     const sonuc = sonucBilgisi(s)
     if (sade) {
-      // Yalnizca kurulumun kendi gucu: indikatorun bilesik skoru.
-      const enCok = sayi(s.maxScore, 0)
-      sag.appendChild(h('span', null,
-        enCok > 0 ? tam(sayi(s.score, 0)) + '/' + tam(enCok) : '-'))
-      sag.appendChild(h('span', 'row-sub', 'skor'))
+      // GUVEN: kendi turu icindeki yuzdelik dilim. "Bu kurulumun gecmiste,
+      // kendi turundeki kurulumlarin %X'inden daha cok ornegi var."
+      if (Number.isFinite(Number(s.confidence))) {
+        const g = Math.round(Number(s.confidence))
+        const kutu = h('span', g >= 75 ? 'up' : (g <= 25 ? 'down' : null), '%' + g)
+        kutu.title = 'Geçmişte ' + tam(s.similarCount) + ' benzer kurulum bulundu' +
+          (sayi(s.poolCount, 0) > 0 ? ' (aynı türden toplam ' + tam(s.poolCount) + ' kayıt içinde)' : '') +
+          '. Yüzde, bu sayının kendi türü içindeki sıralamasıdır: ' +
+          'kurulumların %' + g + "'inden daha çok geçmiş örneği var."
+        sag.appendChild(kutu)
+        sag.appendChild(h('span', 'row-sub', tam(s.similarCount) + ' benzer'))
+      } else {
+        const enCok = sayi(s.maxScore, 0)
+        sag.appendChild(h('span', null,
+          enCok > 0 ? tam(sayi(s.score, 0)) + '/' + tam(enCok) : '-'))
+        sag.appendChild(h('span', 'row-sub', 'skor'))
+      }
     } else if (sonuc.hazir) {
       // Gerceklesen sonuc, beklentiden daha onemli oldugu icin ust satirda.
       const rozet = h('span', sonuc.sinif, sonuc.etiket)
@@ -853,12 +865,28 @@ export function renderSignalDetail(el, signal, opts) {
   // kendi karari. Ekrana kurulumun KENDI bilgileri yazilir.
   if (sadeSinyalMi(signal)) {
     const enCok = sayi(signal.maxScore, 0)
+    const guvenVar = Number.isFinite(Number(signal.confidence))
+    const g = guvenVar ? Math.round(Number(signal.confidence)) : 0
     el.appendChild(statIzgara([
-      stat('Fiyat', formatPrice(signal.price)),
+      stat('Benzer kurulum', guvenVar ? tam(signal.similarCount) : '-'),
+      stat('Güven', guvenVar ? '%' + g : '-', g >= 75 ? 'up' : (g <= 25 ? 'down' : null)),
       stat('Kutu', kutuYuksekligi(signal).replace('Kutu ', '')),
-      stat('Kutu yaşı', tam(signal.zoneAgeBars) + ' bar'),
       stat('İndikatör skoru', enCok > 0 ? tam(signal.score) + '/' + tam(enCok) : '-'),
     ]))
+    if (guvenVar) {
+      // NE OLDUGU ACIKCA YAZILIR. Bu yuzde "bu sinyal kazandirir" DEMEK
+      // DEGILDIR: bu kipte sonuc bilgisi hic hesaplanmiyor. Soyledigi tek sey,
+      // bu yapinin gecmiste ne kadar cok orneginin bulundugudur.
+      el.appendChild(h('div', 'small muted',
+        'Güven, geçmişte bulunan benzer kurulum sayısının KENDİ TÜRÜ İÇİNDEKİ ' +
+        'sıralamasıdır: bu kurulumun, aynı türdeki kurulumların %' + g + "'inden " +
+        'daha çok geçmiş örneği var' +
+        (sayi(signal.poolCount, 0) > 0
+          ? ' (aynı türden toplam ' + tam(signal.poolCount) + ' kayıt tarandı)'
+          : '') + '. ' +
+        'Bu oran kazanç ihtimali DEĞİLDİR: bu kipte sonuç hiç hesaplanmıyor, ' +
+        'yalnızca yapının ne kadar tanıdık olduğu ölçülüyor.'))
+    }
     el.appendChild(kv('Bölge aralığı',
       formatPrice(signal.zoneBottom) + ' - ' + formatPrice(signal.zoneTop)))
     el.appendChild(kv('Akış gücü', formatNumber(signal.zoneFlow, 2)))
@@ -873,11 +901,11 @@ export function renderSignalDetail(el, signal, opts) {
     // BILEREK gosterilmez, yalnizca ne zaman ve ne kadar benzer.
     const eslesmeler = Array.isArray(signal.topMatches) ? signal.topMatches : []
     if (eslesmeler.length > 0) {
-      el.appendChild(bolumBasligi('Geçmişte bulunan benzer ' +
-        tam(signal.matchCount) + ' kurulum'))
+      el.appendChild(bolumBasligi('En benzer ' + tam(eslesmeler.length) + ' örnek'))
       el.appendChild(h('div', 'small muted',
         'Sinyalin çıkma sebebi bu: aynı yapı geçmişte de oluşmuş. ' +
-        'Ortalama benzerlik ' + formatNumber(signal.avgSimilarity, 3) + '.'))
+        'Toplam ' + tam(signal.similarCount) + ' benzer kurulum bulundu, ' +
+        'aşağıda en benzer ' + tam(eslesmeler.length) + ' tanesi var.'))
       const ornegeGit2 = typeof o.onMatchSelect === 'function' ? o.onMatchSelect : null
       const karsilastir2 = typeof o.onMatchCompare === 'function' ? o.onMatchCompare : null
       for (let i = 0; i < eslesmeler.length; i++) {

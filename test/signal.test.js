@@ -719,3 +719,40 @@ test('kutu yasi siniri 0 ile kapatilabilir', () => {
   assert.equal(evaluateTouch(yasli, ozellik(), hafizaKur(20, 16, 'BUY'), [], esik, null).fired,
     true, 'sinir kapaliyken yas engellememeli')
 })
+
+// BENZER KAYIT SAYIMI `k` ILE SINIRLI DEGILDIR.
+//
+// Kullanici fark etti: ekranda hep "25 benzer kayit" yaziyordu. 25, kNN'in
+// `k` ayariydi; "en benzer kacini getir" demek. "Gecmiste kac benzer kurulum
+// var" sorusu bundan AYRIDIR ve k'ya takilmamalidir.
+//
+// Olculdu (5m, gercek hafiza): olusumda medyan 1.236 benzer kayit varken
+// k=25 kayitlarin %97,3'unde kesiyordu.
+
+test('similarCount, k ile SINIRLI DEGILDIR', () => {
+  // 40 kayitlik hafiza, k yalnizca 5.
+  const mem = hafizaKur(40, 20, 'BUY')
+  const cfg = { k: 5, minSimilarity: 0, minMatches: 1, minWinRate: 0, minRr: 0,
+    minExpectancy: -Infinity }
+  const adaylar = findCandidates(dokunus('BUY'), ozellik(), mem, cfg, null)
+
+  assert.ok(adaylar.length <= 5, 'donen liste k ile sinirli olmali: ' + adaylar.length)
+  // BU TESTIN BUTUN KONUSU: sayim k'yi asmali.
+  assert.ok(adaylar.similarCount > 5,
+    'benzer kayit sayisi k ile sinirlanmamali: ' + adaylar.similarCount)
+  assert.ok(adaylar.poolCount >= adaylar.similarCount,
+    'havuz, benzerlerden kucuk olamaz')
+})
+
+test('similarCount esigi UYGULAR, havuzun tamamini saymaz', () => {
+  const mem = hafizaKur(40, 20, 'BUY')
+  const hepsi = findCandidates(dokunus('BUY'), ozellik(), mem,
+    { k: 5, minSimilarity: 0 }, null)
+  const dar = findCandidates(dokunus('BUY'), ozellik(), mem,
+    { k: 5, minSimilarity: 0.999999 }, null)
+
+  assert.ok(dar.similarCount <= hepsi.similarCount,
+    'daha yuksek esik daha az kayit saymali')
+  assert.strictEqual(hepsi.poolCount, dar.poolCount,
+    'havuz esikten ETKILENMEMELI, yalnizca benzer sayisi degisir')
+})

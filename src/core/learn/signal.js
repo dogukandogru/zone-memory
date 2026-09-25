@@ -352,6 +352,11 @@ function findCandidates (touch, features, memory, cfg, beforeTime) {
   // Havuzun kendi basari orani: secimin katma degeri ancak buna gore olculur.
   const taban = { n: 0, wins: 0 }
   opts.baseOut = taban
+  // BENZER KAYIT SAYIMI: `k` ile SINIRLI DEGILDIR. "Gecmiste kac benzer
+  // kurulum var" sorusu, "en benzer kacini getir" sorusundan ayridir.
+  const sayac = { benzer: 0, havuz: 0 }
+  opts.countOut = sayac
+  opts.countThreshold = num(conf.minSimilarity, 0.8)
   const raw = knn(features, memory, opts) || []
   // Havuz bilgisi diziye SAYILAMAZ alan olarak takilir: cagiranlar diziyi
   // kopyalayip karsilastiriyor, gorunur bir alan esitligi bozardi.
@@ -362,6 +367,13 @@ function findCandidates (touch, features, memory, cfg, beforeTime) {
   })
   Object.defineProperty(candidates, 'baseN', {
     value: taban.n, enumerable: false, configurable: true,
+  })
+  // Esigi gecen TUM kayitlarin sayisi ve havuzun tamami.
+  Object.defineProperty(candidates, 'similarCount', {
+    value: sayac.benzer, enumerable: false, configurable: true,
+  })
+  Object.defineProperty(candidates, 'poolCount', {
+    value: sayac.havuz, enumerable: false, configurable: true,
   })
   // Komsu dislama ve zaman filtresi burada bir kez daha uygulanir.
   for (let i = 0; i < raw.length; i++) {

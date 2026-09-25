@@ -400,6 +400,21 @@ function knn (query, memory, opts) {
 
   // Cagiran `baseOut` verirse havuz sayaclari doldurulur (bkz. asagisi).
   const tabanCikti = o.baseOut && typeof o.baseOut === 'object' ? o.baseOut : null
+  /**
+   * BENZER KAYIT SAYACI.
+   *
+   * `k` yalnizca EN BENZER kac tanesinin dondurulecegini belirler; "gecmiste
+   * kac benzer kurulum var" sorusu bundan bagimsizdir ve k'ya takilmamalidir.
+   * Sayim, zaten tum havuzu gezen on eleme gecisinde yapilir, yani ek maliyet
+   * yoktur.
+   *
+   * DIKKAT: sayim ON PUAN uzerinden yapilir (sekil + baglam), DTW haric.
+   * Varsayilan agirlikta DTW'nin pay i SIFIRDIR, yani sayim tam dogrudur.
+   * DTW agirligi verilirse sayim YAKLASIKTIR; tam olmasi icin her aday icin
+   * DTW hesaplanmasi gerekirdi ve bu, sayimi kNN kadar pahali yapardi.
+   */
+  const sayacCikti = o.countOut && typeof o.countOut === 'object' ? o.countOut : null
+  const sayimEsigi = Number.isFinite(o.countThreshold) ? o.countThreshold : null
   // TABAN PENCERESI (S9, varsayilan kapali): havuz oranini yalnizca son N yila
   // bakarak hesaplar. Rejim degistiginde (yillik taban 15m dokunusta 2018'de
   // %15,5, 2020'de %33,1) eski donemin orani kalibrasyon tabanini baskiliyor.
@@ -409,6 +424,10 @@ function knn (query, memory, opts) {
   const tabanEnErken = (tabanPencereYil > 0 && Number.isFinite(o.queryTime))
     ? o.queryTime - tabanPencereYil * 365.25 * 86400
     : null
+  if (sayacCikti) {
+    sayacCikti.benzer = 0
+    sayacCikti.havuz = 0
+  }
   if (tabanCikti) {
     tabanCikti.n = 0
     tabanCikti.wins = 0
@@ -488,6 +507,12 @@ function knn (query, memory, opts) {
     const ctxSim = query.ctx && f.ctx ? (cosine(query.ctx, f.ctx) + 1) / 2 : 0
     // On eleme puani: skorun DTW disindaki kismi.
     const onPuan = w.shape * shapeSim + w.ctx * ctxSim
+
+    // Havuzun tamami ve esigi gecenler burada sayilir (bkz. sayacCikti).
+    if (sayacCikti) {
+      sayacCikti.havuz++
+      if (sayimEsigi === null || onPuan >= sayimEsigi) sayacCikti.benzer++
+    }
 
     if (hBoyut < M) {
       yiginEkle(hSim, hIdx, hBoyut, onPuan, i)

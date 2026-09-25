@@ -1159,6 +1159,34 @@ handlers['engine:scan'] = async function (payload, ctx) {
     const enAzBenzer = Math.max(1, Math.round(num(uygulanan.signalCfg.minMatches, 5)))
     const enAzYakinlik = num(uygulanan.signalCfg.minSimilarity, 0.8)
 
+    // GUVEN OLCEGI: TUR ICINDE YUZDELIK DILIM.
+    //
+    // Mutlak bir olcek ("1000 kayit = %100") yanlis olurdu, cunku turlerin
+    // sayilari cok farkli. Olculdu (5m): olusumda medyan 1.236 benzer kayit,
+    // dokunusta 391. Tek olcek kullanilsa dokunus neredeyse her zaman dusuk
+    // guven gorunurdu, oysa KENDI turu icinde yuksek olabilir.
+    //
+    // Yuzdelik dilim kendi kendini olcekler: "%90" demek, bu kurulumun kendi
+    // turundeki kurulumlarin %90'indan daha cok gecmis ornegi var demektir.
+    const kovaSayimlari = { form: [], touch: [] }
+    for (let i = 0; i < sirali.length; i++) {
+      const e = sirali[i]
+      if (!e) continue
+      kovaSayimlari[e.kind === 'form' ? 'form' : 'touch'].push(cache.benzerSayi[i])
+    }
+    const esikler = {}
+    for (const tur of ['form', 'touch']) {
+      const a = kovaSayimlari[tur]
+      a.sort((x, y) => x - y)
+      // 101 kirilim noktasi: %0'dan %100'e. Canli akis da bunlari kullanir.
+      const nokta = new Array(101)
+      for (let q = 0; q <= 100; q++) {
+        nokta[q] = a.length ? a[Math.min(a.length - 1, Math.floor((a.length - 1) * q / 100))] : 0
+      }
+      esikler[tur] = nokta
+    }
+    guvenEsikleriYaz(tf, esikler)
+
     ctx.progress(97, 'Sinyaller yazılıyor')
     const liste = []
     for (let i = 0; i < sirali.length; i++) {
@@ -1174,13 +1202,20 @@ handlers['engine:scan'] = async function (payload, ctx) {
         if (!komsu) continue
         komsular.push({ id: num(komsu.id, -1), time: num(komsu.time, 0), similarity: benzerlik })
       }
+      // TUM benzer kayitlarin sayisi; `k` ile sinirli DEGIL.
+      const benzerToplam = cache.benzerSayi[i]
       // KAPI: gecmiste yeterince benzer yapi var mi.
-      if (komsular.length < enAzBenzer) continue
+      if (benzerToplam < enAzBenzer) continue
       const sig = olaydanSinyal(e, tf)
       sig.mode = 'benzerlik'
+      sig.similarCount = benzerToplam
+      sig.poolCount = cache.havuzSayi[i]
+      sig.confidence = guvenYuzdesi(esikler[e.kind === 'form' ? 'form' : 'touch'], benzerToplam)
+      // Ekranda gosterilen en benzer birkaci (k ile sinirli olan kisim).
       sig.matchCount = komsular.length
-      sig.avgSimilarity = komsular.reduce((t, m) => t + m.similarity, 0) / komsular.length
-      // Ekranda gosterilecek en benzer birkaci; tamami dosyayi sisirir.
+      sig.avgSimilarity = komsular.length
+        ? komsular.reduce((t, m) => t + m.similarity, 0) / komsular.length
+        : 0
       sig.topMatches = komsular.slice(0, 6)
       liste.push(sig)
     }
@@ -2325,9 +2360,12 @@ handlers['engine:live-tick'] = async function (payload) {
       // 'hepsi' KIPI: her olay dogrudan sinyaldir. Hafiza, benzerlik ve
       // plan hesabi HIC calismaz; dolayisiyla "hafiza bos" veya "ayar izi
       // tutmuyor" gibi engeller de gecerli degildir.
-      const canliKip = canliCfg.signalCfg && canliCfg.signalCfg.mode === 'hafiza'
-        ? 'hafiza'
-        : 'hepsi'
+      // Guven kirilim noktalari surec boyunca bir kez okunur.
+      let canliGuvenEsikleri = null
+      const canliKipAyari = canliCfg.signalCfg ? canliCfg.signalCfg.mode : null
+      const canliKip = canliKipAyari === 'hafiza' || canliKipAyari === 'hepsi'
+        ? canliKipAyari
+        : 'benzerlik'
       const uretilebilir = canliKip === 'hepsi' ||
         (hafizaVar && izUyum !== false && !(rejim && rejim.bozuk))
       const protos = canliKip === 'hafiza' && uretilebilir && adaylar.length > 0
@@ -2342,6 +2380,43 @@ handlers['engine:live-tick'] = async function (payload) {
         if (canliKip === 'hepsi') {
           // Olaydan dogrudan sinyal: plan, oran ve benzer ornek YOK.
           sig = olaydanSinyal(cand, tf)
+        } else if (canliKip === 'benzerlik') {
+          // Gecmiste ayni yapi var mi. Guven olcegi TARAMANIN yazdigi
+          // kirilim noktalarindan okunur; canlida yeniden hesaplanamaz ve
+          // hesaplansaydi ekrandaki yuzde gecmis listeyle tutmazdi.
+          const feats = core('learn/features').buildFeatures(sub, cand, ind.context,
+            payload.featureCfg !== undefined ? payload.featureCfg : (memMeta && memMeta.featureCfg))
+          if (!feats) {
+            ozellikYok++
+          } else {
+            const adaylarListesi = core('learn/signal').findCandidates(
+              cand, feats, mem, canliCfg.signalCfg, num(cand.time, fetchedAt))
+            const toplam = Number.isFinite(adaylarListesi.similarCount)
+              ? adaylarListesi.similarCount
+              : adaylarListesi.length
+            const enAz = Math.max(1, Math.round(num(canliCfg.signalCfg.minMatches, 5)))
+            if (toplam >= enAz) {
+              sig = olaydanSinyal(cand, tf)
+              sig.mode = 'benzerlik'
+              sig.similarCount = toplam
+              sig.poolCount = Number.isFinite(adaylarListesi.poolCount)
+                ? adaylarListesi.poolCount
+                : 0
+              const esikler = canliGuvenEsikleri || (canliGuvenEsikleri = guvenEsikleriOku(tf) || {})
+              sig.confidence = guvenYuzdesi(
+                esikler[cand.kind === 'form' ? 'form' : 'touch'], toplam)
+              const ilk = adaylarListesi.slice(0, 6).map((m) => ({
+                id: num(m.event && m.event.id, -1),
+                time: num(m.event && m.event.time, 0),
+                similarity: num(m.similarity, 0),
+              }))
+              sig.matchCount = adaylarListesi.length
+              sig.avgSimilarity = ilk.length
+                ? ilk.reduce((t, m) => t + m.similarity, 0) / ilk.length
+                : 0
+              sig.topMatches = ilk
+            }
+          }
         } else if (uretilebilir) {
           const feats = core('learn/features').buildFeatures(sub, cand, ind.context,
             payload.featureCfg !== undefined ? payload.featureCfg : (memMeta && memMeta.featureCfg))
@@ -2589,6 +2664,44 @@ handlers['engine:live-log'] = async function (payload) {
  * @param {Array} trades
  * @param {{events:Array}} memory
  */
+/** Guven esiklerinin dosya yolu (tur basina 101 kirilim noktasi). */
+function guvenEsikYolu(tf) {
+  return paths.memoryPath(tf) + '.guven.json'
+}
+
+/** Esikleri diske yazar; canli akis da ayni olcegi kullanmali. */
+function guvenEsikleriYaz(tf, esikler) {
+  try {
+    fs.writeFileSync(guvenEsikYolu(tf), JSON.stringify(esikler))
+  } catch (err) {
+    // Yazilamazsa guven yuzdesi canlida hesaplanamaz, sinyal yine uretilir.
+  }
+}
+
+/** Esikleri diskten okur, yoksa null. */
+function guvenEsikleriOku(tf) {
+  try {
+    return JSON.parse(fs.readFileSync(guvenEsikYolu(tf), 'utf8'))
+  } catch (err) {
+    return null
+  }
+}
+
+/**
+ * Benzer kayit sayisini, kendi turu icindeki YUZDELIK DILIME cevirir.
+ *
+ * @param {number[]|null} nokta 101 kirilim noktasi (%0..%100)
+ * @param {number} sayi Bu kurulumun benzer kayit sayisi
+ * @returns {number} 0..100
+ */
+function guvenYuzdesi(nokta, sayi) {
+  if (!Array.isArray(nokta) || nokta.length !== 101) return 0
+  // Ilk gecilen kirilim noktasi dilimi verir.
+  let q = 0
+  while (q < 100 && sayi >= nokta[q + 1]) q++
+  return q
+}
+
 /**
  * 'hepsi' kipinde bir olaydan sinyal kaydi uretir.
  *
