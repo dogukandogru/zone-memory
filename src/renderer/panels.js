@@ -673,7 +673,9 @@ export function sonucEtiketi(m) {
  * @param {HTMLElement} el Liste kabi (ornek: #signalList)
  * @param {Array<object>} signals
  * @param {{onSelect?:(s:object)=>void, selectedId?:*, filter?:string,
- *          total?:number, truncated?:boolean}} [opts]
+ *          kind?:'form'|'touch', total?:number, truncated?:boolean}} [opts]
+ *   kind: TUR SEKMESI. Verilirse yalnizca o turun sinyalleri listelenir;
+ *   suzgecten AYRI calisir, cunku tur artik bir sekme, bir suzgec degil.
  */
 export function renderSignals(el, signals, opts) {
   if (!el) return
@@ -683,25 +685,33 @@ export function renderSignals(el, signals, opts) {
   const hepsi = Array.isArray(signals) ? signals.slice() : []
   hepsi.sort((a, b) => sayi(b && b.time, 0) - sayi(a && a.time, 0))
 
+  // TUR SEKMESI once uygulanir: "bu sekmede hic sinyal yok" ile "bu suzgecle
+  // gosterilecek sinyal yok" ayri seylerdir ve bos liste mesaji buna gore
+  // degisir.
+  const tur = o.kind === 'form' || o.kind === 'touch' ? o.kind : null
+  const turdekiler = tur === null
+    ? hepsi
+    : hepsi.filter((s) => s && (tur === 'form' ? s.kind === 'form' : s.kind !== 'form'))
+
   const suzgec = o.filter || 'all'
-  const liste = hepsi.filter((s) => {
+  // 'fired' suzgeci KALDIRILDI: bu kipte liste zaten yalnizca uretilen
+  // sinyalleri tasiyor, yani "yayinlananlar" ile "tumu" ayni seydi.
+  const liste = turdekiler.filter((s) => {
     if (!s) return false
-    if (suzgec === 'fired') return !!s.fired
     if (suzgec === 'buy') return s.direction !== 'SELL'
     if (suzgec === 'sell') return s.direction === 'SELL'
-    if (suzgec === 'form') return s.kind === 'form'
-    if (suzgec === 'touch') return s.kind !== 'form'
-    if (suzgec === 'won') return s.win === true
-    if (suzgec === 'lost') return s.win === false
     return true
   })
 
   if (liste.length === 0) {
     // Liste artik TARAMANIN ciktisi. Bir donem geriye testten geliyordu ve bu
     // mesaj kullaniciyi Test sekmesine yolluyordu; o sekme kaldirildi.
+    const turAdiMetni = tur === 'form' ? 'oluşum' : 'dokunuş'
     el.appendChild(bosKutu(hepsi.length === 0
       ? 'Bu zaman dilimi için sinyal yok. "Geçmişi Tara" ile hafızayı kurun.'
-      : 'Bu süzgeçle gösterilecek sinyal yok.'))
+      : (turdekiler.length === 0 && tur !== null
+        ? 'Bu zaman diliminde ' + turAdiMetni + ' sinyali yok.'
+        : 'Bu süzgeçle gösterilecek sinyal yok.')))
     return
   }
 
@@ -732,11 +742,13 @@ export function renderSignals(el, signals, opts) {
   //
   // Arayuz isciden yalnizca son N sinyali istiyor. Kirpma varsa ACIKCA
   // yaziyor, yoksa kullanici "toplam bu kadar sinyal var" saniyor.
+  // METIN IKI SEKMEYI DE ANLATIR: cekilen kayitlar olusum ve dokunus diye
+  // bolunuyor, dolayisiyla "listede N sinyal" demek yaniltici olurdu.
   const toplam = sayi(o.total, 0)
   if (o.truncated === true && toplam > hepsi.length) {
     el.appendChild(h('div', 'small muted',
-      'Listede en yeni ' + tam(hepsi.length) + ' sinyal gösteriliyor, toplam ' +
-      tam(toplam) + ' sinyal var.'))
+      'En yeni ' + tam(hepsi.length) + ' sinyal yüklendi (iki sekmeye bölünmüş), ' +
+      'toplam ' + tam(toplam) + ' sinyal var.'))
   }
 
   const adet = Math.min(liste.length, AZAMI_SATIR)

@@ -364,6 +364,16 @@ select.mini, input.mini { height: 20px; font-size: 10px; }
 .side-tab:hover { color: var(--text); background: var(--bg-hover); }
 .side-tab.active, .side-tab.aktif { color: var(--text); border-bottom-color: var(--accent); background: var(--bg-raise); }
 
+/* Sinyal turu alt sekmeleri: yan panel sekmeleriyle ayni gorunum, ama panel
+   basliginin ALTINDA durur ve yalnizca listeyi degistirir. */
+#signalKindTabs {
+  display: flex;
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel);
+}
+#signalKindTabs .badge { margin-left: 4px; }
+
 #sidePanelBody { position: relative; flex: 1 1 auto; min-height: 0; }
 
 /* Panel kaplari: yalnizca .active olan gorunur (app.js sinifi degistirir). */

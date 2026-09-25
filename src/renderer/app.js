@@ -89,6 +89,9 @@ const durum = {
   // Otomatik hazirlik (eksik mum indirme ve gerekirse tarama) suruyor mu.
   hazirlikCalisiyor: false,
   taramaCalisiyor: false,
+  // Sinyaller panelindeki acik TUR SEKMESI: 'form' (kutu olusumu) veya
+  // 'touch' (bolgeye donus). Ikisi ayri kurulumdur ve ayri listelenir.
+  sinyalTuru: 'form',
   canli: false,
   // Isciden gelen sinyal listesi kirpildi mi (U8).
   sinyalToplam: 0,
@@ -1183,7 +1186,10 @@ async function bolgeleriYukle(from, to) {
 
 /** Sinyalleri yukler, isaretleri ve paneli tazeler. */
 async function sinyalleriYukle() {
-  const ham = await cagirGuvenli('engine:signals', { tf: durum.tf, limit: 500 }, 'Sinyaller alınamadı')
+  // LIMIT 1000: liste OLUSUM ve DOKUNUS sekmelerine bolunuyor, yani cekilen
+  // kayitlarin kabaca yarisi her sekmeye dusuyor. 500'de her sekmede ~250
+  // satir kaliyordu; panel zaten en fazla 500 satir ciziyor.
+  const ham = await cagirGuvenli('engine:signals', { tf: durum.tf, limit: 1000 }, 'Sinyaller alınamadı')
   if (ham === null) return
   durum.signals = sinyalleriNormalle(ham)
   isaretleriCiz()
@@ -1880,9 +1886,51 @@ function sinyalPaneliNoktalari() {
     liste: el('signalList') || panelGovdesi('signals'),
     ayrinti: el('signalDetail'),
     bos: el('signalEmpty'),
-    rozet: el('signalCount'),
     suzgec: el('signalFilter'),
+    turSekmeleri: el('signalKindTabs'),
+    rozetForm: el('signalCountForm'),
+    rozetTouch: el('signalCountTouch'),
   }
+}
+
+/** Acik tur sekmesini gorsel olarak isaretler. */
+function turSekmeleriniIsaretle() {
+  const kap = el('signalKindTabs')
+  if (!kap) return
+  const dugmeler = kap.querySelectorAll('[data-kind]')
+  for (let i = 0; i < dugmeler.length; i++) {
+    const d = dugmeler[i]
+    const etkin = d.getAttribute('data-kind') === durum.sinyalTuru
+    d.classList.toggle('active', etkin)
+    d.setAttribute('aria-selected', etkin ? 'true' : 'false')
+  }
+}
+
+/**
+ * Sinyal turu sekmesini degistirir.
+ *
+ * SECILI SINYAL BASKA TURDEYSE BIRAKILIR. Aksi halde ayrinti panelinde,
+ * listede gorunmeyen bir sinyalin ayrintisi duruyor ve kullanici listede
+ * karsiligini bulamiyordu.
+ *
+ * @param {'form'|'touch'} tur
+ */
+function sinyalTurunuSec(tur) {
+  const yeni = tur === 'touch' ? 'touch' : 'form'
+  if (durum.sinyalTuru === yeni) return
+  durum.sinyalTuru = yeni
+  const secili = seciliSinyal()
+  if (secili) {
+    const seciliTur = secili.kind === 'form' ? 'form' : 'touch'
+    if (seciliTur !== yeni) {
+      durum.seciliSinyalId = null
+      durum.vurguluOrnek = null
+      karsilastirmayiTemizle()
+      anaKadarAyarla(null)
+    }
+  }
+  sinyalPaneliniCiz()
+  isaretleriCiz()
 }
 
 /** Sinyaller panelini cizer. */
@@ -1895,17 +1943,34 @@ function sinyalPaneliniCiz() {
     onSelect: (s) => sinyalSec(s),
     selectedId: durum.seciliSinyalId,
     filter: suzgec,
+    kind: durum.sinyalTuru,
     total: durum.sinyalToplam,
     truncated: durum.sinyalKirpildi,
   })
   goster(n.bos, false)
 
-  if (n.rozet) {
-    let uretilen = 0
-    for (let i = 0; i < durum.signals.length; i++) if (durum.signals[i] && durum.signals[i].fired) uretilen++
-    n.rozet.textContent = String(uretilen)
-    n.rozet.title = durum.signals.length + ' kayıt, ' + uretilen + ' üretilen sinyal'
+  // ROZETLER: her sekme KENDI sayisini gosterir. Tek bir toplam sayi,
+  // sekmeler ayrildiktan sonra hangi listeye ait oldugu belirsiz kalirdi.
+  let formAdet = 0
+  let touchAdet = 0
+  for (let i = 0; i < durum.signals.length; i++) {
+    const sg = durum.signals[i]
+    if (!sg) continue
+    if (sg.kind === 'form') formAdet++
+    else touchAdet++
   }
+  const rozetIpucu = durum.sinyalKirpildi
+    ? ' (yüklü listede; toplam ' + formatNumber(durum.sinyalToplam, 0) + ' sinyal var)'
+    : ''
+  if (n.rozetForm) {
+    n.rozetForm.textContent = String(formAdet)
+    n.rozetForm.title = formAdet + ' oluşum sinyali' + rozetIpucu
+  }
+  if (n.rozetTouch) {
+    n.rozetTouch.textContent = String(touchAdet)
+    n.rozetTouch.title = touchAdet + ' dokunuş sinyali' + rozetIpucu
+  }
+  turSekmeleriniIsaretle()
 
   const s = seciliSinyal()
   if (n.ayrinti) {
@@ -2214,6 +2279,10 @@ function seciliSinyal() {
 /** Bir sinyali secer: plan cizgileri, ayrinti paneli ve grafige kaydirma. */
 async function sinyalSec(s) {
   if (!s) return
+  // SECILEN SINYALIN SEKMESINE GEC. Secim yalnizca listeden gelmiyor: grafik
+  // isaretine tiklanabiliyor ve baska sekmedeki bir sinyal secilince listede
+  // karsiligi gorunmezdi.
+  durum.sinyalTuru = s.kind === 'form' ? 'form' : 'touch'
   durum.seciliSinyalId = s.id
   // Yeni bir sinyale gecilince onceki ornek vurgusu anlamini yitirir.
   durum.vurguluOrnek = null
@@ -2985,6 +3054,15 @@ function dugmeleriBagla() {
 
   const sinyalSuzgec = el('signalFilter')
   if (sinyalSuzgec) sinyalSuzgec.addEventListener('change', () => sinyalPaneliniCiz())
+
+  const turSekmeleri = el('signalKindTabs')
+  if (turSekmeleri) {
+    turSekmeleri.addEventListener('click', (olay) => {
+      const dugme = olay.target && olay.target.closest ? olay.target.closest('[data-kind]') : null
+      if (!dugme) return
+      sinyalTurunuSec(dugme.getAttribute('data-kind'))
+    })
+  }
 
   const bolgeSuzgec = el('zoneFilter')
   if (bolgeSuzgec) bolgeSuzgec.addEventListener('change', () => bolgePaneliniCiz())

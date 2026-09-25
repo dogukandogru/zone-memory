@@ -18,6 +18,7 @@ olay geldiginde ayni turdeki en benzer gecmis olaylarla karsilastirilip
 
 | Ne | Ne ise yarar |
 | --- | --- |
+| Sinyaller panelinde iki sekme: Olusum ve Dokunus | Kutu olusumu ve bolgeye donus ayri kurulumlardir ve hafizada ayri havuzlarda aranir; tek listede karisik durunca hangi turu inceledigi kaybolabiliyordu. Her sekme kendi sayisini gosterir, grafik isaretine tiklaninca o turun sekmesine gecilir, sekme degisince baska turdeki secim birakilir. Suzgecteki olu secenekler ("yayinlananlar", "tutanlar", "tutmayanlar": bu kipte sonuc yok, uretilmeyen sinyal listede yok) kaldirildi. Cekilen kayit siniri 500'den 1000'e cikti, cunku kayitlar iki sekmeye bolunuyor. |
 | Kural tabanli piyasa takvimi (`session.createMarketCalendar`) | Spot altinin acik oldugu saatleri New York kuralindan hesaplar. Vekil kaynaklarin (PAXG, XAUT) 7/24 uretti bi barlari boylece elenir. |
 | Tek vekil duzeltme yolu (`loader.normalizeProxy`) | Fiyat kaydirmasi, hacim olcegi ve piyasa saati suzgeci tek yerde uygulanir. Duzeltme hesaplanamazsa bar yazilmaz. |
 | Vekil aralik kaydi (`XAUUSD_<tf>.proxy.json`) | Hangi donemin vekil veriyle doldugunu tutar, o donem sonra spot veriyle degistirilebilir. |
