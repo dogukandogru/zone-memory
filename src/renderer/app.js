@@ -26,8 +26,6 @@ import {
   renderZones,
   renderMemory,
   renderSettings,
-  renderBacktest,
-  renderLiveLog,
   formatNumber,
   formatPercent,
   formatPrice,
@@ -88,17 +86,9 @@ const durum = {
   asOf: null,
   hafizaOzeti: null,
   prototipler: [],
-  testSonucu: null,
-  // Canli sinyal gunlugunun ozeti (`engine:live-log`). Canli performans ile
-  // Test sekmesinde olculen rakam ancak boylece karsilastirilabilir.
-  canliGunluk: null,
-  testCalisiyor: false,
   // Otomatik hazirlik (eksik mum indirme ve gerekirse tarama) suruyor mu.
   hazirlikCalisiyor: false,
   taramaCalisiyor: false,
-  // Tarama olcumu gecersiz kildi, ekran dolunca test yeniden calistirilacak.
-  // Testin hazirligin ICINDE beklenmesi kullaniciyi bos grafige baktiriyordu.
-  olcumYenilensin: false,
   canli: false,
   // Isciden gelen sinyal listesi kirpildi mi (U8).
   sinyalToplam: 0,
@@ -1210,28 +1200,7 @@ async function hafizayiYukle() {
       ? proto
       : (proto && Array.isArray(proto.prototypes) ? proto.prototypes : [])
   }
-  // Diske yazilmis son test ozeti. Onceden olcum yalnizca bellekteydi ve
-  // uygulama kapaninca kayboluyordu; "hangi ayarla ne olculdu" bilgisi
-  // kaybolmasin diye artik dosyadan geri yuklenir.
-  const sonTest = await cagirGuvenli('engine:backtest-last', { tf: durum.tf }, null)
-  if (sonTest && sonTest.found) durum.testSonucu = sonTest
-  else durum.testSonucu = null
-  // BENZERLIK AGIRLIGI DEGISMISSE OLCUM ESKIDIR.
-  //
-  // Ayar ekranindan degistirmek zaten testi yeniden calistiriyor. Yakalanmayan
-  // durum sudur: uygulamanin VARSAYILANI degisir (surum yukseltmesiyle) ve
-  // kullanici hicbir sey yapmamis olur. O zaman ekrandaki liste eski
-  // agirlikla, canli uretilen sinyaller yeni agirlikla hesaplanir ve ikisi
-  // sessizce ayrisir.
-  if (sonTest && sonTest.found && sonTest.weightsMatch === false) {
-    durum.olcumYenilensin = true
-  }
-  // Canli sinyal gunlugu: canli uretilen sinyaller ve sonuclanan etiketleri.
-  // Bu dosya taramadan ve hafiza silmeden bagimsiz birikir.
-  const canliGunluk = await cagirGuvenli('engine:live-log', { tf: durum.tf, limit: 50 }, null)
-  durum.canliGunluk = canliGunluk && canliGunluk.found ? canliGunluk : null
   hafizaPaneliniCiz()
-  testPaneliniCiz()
 }
 
 /** Saglayici listesini yukler, komut yoksa yerlesik listeye duser. */
@@ -1302,7 +1271,7 @@ function tfDugmeleriniKur() {
  * yazilabiliyordu.
  */
 function mesgulMu() {
-  return !!(durum.taramaCalisiyor || durum.testCalisiyor || durum.hazirlikCalisiyor)
+  return !!(durum.taramaCalisiyor || durum.hazirlikCalisiyor)
 }
 
 /** Mesgulken degistirilemeyecek denetimleri kilitler. */
@@ -1362,9 +1331,8 @@ function senkronBeklemede(tf, simdi) {
  *   tarama    : hafiza hic yoksa, ESKI indikator surumunden kalmissa
  *               (memoryCurrent false) veya veri cekimi yeni bar ekledi ise
  *
- * Geriye test (sinyal listesi) BILEREK otomatik calistirilmaz: 1 dakikalikta
- * on binlerce olay uzerinde dakikalar suruyor ve zaman dilimi degistirmeyi
- * kullanilamaz hale getirirdi. Kullanici Test sekmesinden kendisi baslatir.
+ * Sinyal listesi taramanin ciktisidir; ayri bir adim yoktur (Test sekmesi
+ * kaldirildi).
  *
  * @param {string} tf
  * @returns {Promise<boolean>} bir sey degistiyse true
@@ -1393,8 +1361,6 @@ async function tfHazirlaIc(tf, ayar) {
   const tfSec = tfSaniye(tf)
   const simdi = Math.floor(Date.now() / 1000)
   let degisti = false
-  // Tarama, ayar izi degistigi icin sinyal listesini gecersiz kildi mi.
-  let otomatikTest = false
 
   // --- 1) Eksik mumlar -----------------------------------------------------
   // Hangi kaynak: depo BOSSA gecmis kaynagi (HistData) tum tarihi verir.
@@ -1456,22 +1422,16 @@ async function tfHazirlaIc(tf, ayar) {
       }, 'Geçmiş taranamadı')
       if (sonuc) {
         degisti = true
-        // AYAR IZI DEGISTIYSE sinyal listesi gecersiz kalmistir ve testi
-        // kullanicidan beklemek dogru degil: iz bir GUNCELLEMEYLE de
-        // degisebiliyor, yani kullanici hicbir sey yapmadan listesini bos
-        // buluyordu. Olculdu: test 5m'de ~9 sn, 15m'de ~3 sn, 1m'de ~45 sn;
-        // nadir gorulen bu durum icin beklenebilir bir sure.
-        if (sonuc.signalsInvalidated) {
-          const sebep = sonuc.invalidationReason === 'veri'
-            ? 'Veri kaynağı değiştiği için'
-            : 'Ayarlar değiştiği için'
-          bildir(tf + ' hafızası yeniden kuruldu. ' + sebep +
-            ' sinyal listesi de yeniden hesaplanıyor.')
-          otomatikTest = true
-        } else {
-          bildir(tf + ' hafızası hazır: ' + formatNumber(sayi(sonuc.events, 0), 0) + ' kayıt. ' +
-            'Sinyal listesi için Test sekmesinden testi çalıştırın.')
-        }
+        // SINYAL LISTESINI TARAMANIN KENDISI YAZAR. Bir donem liste geriye
+        // testten geliyordu ve burada otomatik test baslatiliyordu; Test
+        // sekmesi kaldirildi, tarama listeyi zaten diske yazdi.
+        const sebep = sonuc.signalsInvalidated
+          ? (sonuc.invalidationReason === 'veri'
+            ? ' Veri kaynağı değiştiği için eski liste yedeklendi.'
+            : ' Ayarlar değiştiği için eski liste yedeklendi.')
+          : ''
+        bildir(tf + ' hafızası hazır: ' +
+          formatNumber(sayi(sonuc.events, 0), 0) + ' kayıt.' + sebep)
       }
     } finally {
       durum.taramaCalisiyor = false
@@ -1479,13 +1439,6 @@ async function tfHazirlaIc(tf, ayar) {
       isBitti(taraDugmesi)
     }
   }
-
-  // Sinyal listesi gecersiz kaldiysa testi KENDIMIZ calistiririz, ama BURADA
-  // DEGIL: bu fonksiyon grafik yuklenmeden once calisiyor ve testi burada
-  // beklemek kullaniciyi dakikalarca BOS EKRANA baktiriyordu (gercek gecişte
-  // goruldu: depo ve hafiza hazirdi, grafik hala "Veri yok" diyordu).
-  // Cagiranlar once `hepsiniYukle` ile ekrani doldurur, sonra testi baslatir.
-  if (otomatikTest) durum.olcumYenilensin = true
 
   ilerleme(100, 'Hazır')
   motorDurumu('hazır')
@@ -1506,13 +1459,11 @@ async function tfDegistir(tf) {
   durum.zones = []
   // ONCEKI ZAMAN DILIMININ SAYILARI EKRANDA KALMASIN.
   //
-  // Test sonucu, hafiza ozeti ve sekil kumeleri tf degisince oldugu gibi
-  // duruyordu; basligta tf yazmadigi icin kullanici 1 dakikaligin sayilarini
-  // 15 dakikaliga ait sanip karar verebiliyordu.
-  durum.testSonucu = null
+  // Hafiza ozeti ve sekil kumeleri tf degisince oldugu gibi duruyordu;
+  // basligta tf yazmadigi icin kullanici 1 dakikaligin sayilarini 15
+  // dakikaliga ait sanip karar verebiliyordu.
   durum.hafizaOzeti = null
   durum.prototipler = []
-  durum.canliGunluk = null
   tfDugmeleriniIsaretle()
   planCizgileri(null)
   tvKaynagiGuncelle()
@@ -1526,7 +1477,6 @@ async function tfDegistir(tf) {
   await tfHazirla(tf)
 
   await hepsiniYukle()
-  await olcumYenilemesiGerekiyorsa()
   if (oncekiCanli) await canliBaslat()
 }
 
@@ -1717,12 +1667,6 @@ async function csvDisaAktar(ne) {
     'CSV yazılamadı')
   if (!sonuc || sonuc.cancelled) return
   bildir(formatNumber(sayi(sonuc.rows, 0), 0) + ' satır yazıldı: ' + String(sonuc.filePath))
-}
-
-/** Test CSV dugmesi yalnizca elde olcum varken etkin. */
-function csvDugmeleriniTazele() {
-  const testCsv = el('testExportBtn')
-  if (testCsv) testCsv.disabled = !(durum.testSonucu && durum.testSonucu.tf === durum.tf)
 }
 
 /**
@@ -1922,7 +1866,6 @@ function paneliCiz() {
     case 'zones': bolgePaneliniCiz(); break
     case 'memory': hafizaPaneliniCiz(); break
     case 'settings': ayarPaneliniCiz(); break
-    case 'test': testPaneliniCiz(); break
     default: sinyalPaneliniCiz(); break
   }
 }
@@ -2065,14 +2008,35 @@ async function ornekKarsilastir(sinyal, eslesme) {
 async function sinyalKipiDegistiyseTara() {
   const ayar = durum.ayarlar || {}
   const etkin = ayar.signalCfg && ayar.signalCfg.mode ? String(ayar.signalCfg.mode) : 'benzerlik'
-  // 'hafiza' kipinde liste testten gelir, taramadan degil.
+  // 'hafiza' kipi ARAYUZDEN KALDIRILDI ama motorda duruyor (ayar dosyasina elle
+  // yazilabilir). O kipte listeyi tarama YAZMAZ, dolayisiyla burada yeniden
+  // uretmeye kalkmak her acilista sonucsuz bir tarama baslatirdi.
   if (etkin === 'hafiza') return
   const liste = Array.isArray(durum.signals) ? durum.signals : []
   if (liste.length === 0) return
-  const yazili = liste[0] && liste[0].mode ? String(liste[0].mode) : 'hafiza'
+  // Listedeki kayitlar hangi kiple yazilmis. Kip alani olmayan kayitlar ESKI
+  // bicimdendir (kaldirilan R:R sisteminden kalma) ve yeniden uretilmeleri
+  // gerekir; bu yuzden bilinmeyen deger etkin kipe esit SAYILMAZ.
+  const yazili = liste[0] && liste[0].mode ? String(liste[0].mode) : ''
   if (yazili === etkin) return
 
-  bildir('Sinyal kipi değişti, liste yeniden üretiliyor.')
+  await listeyiYenidenUret(yazili
+    ? 'Sinyal kipi değişti, liste yeniden üretiliyor.'
+    : 'Sinyal listesi eski biçimden kalma, yeniden üretiliyor.')
+}
+
+/**
+ * Sinyal listesini TARAMAYLA yeniden uretir.
+ *
+ * Liste bir donem geriye testten geliyordu ve Test sekmesi vardi; artik listeyi
+ * taramanin kendisi yaziyor. Listeyi gecersiz kilan her degisiklik (sinyal
+ * kipi, benzerlik agirligi, eski bicimli dosya) bu tek yoldan gecer.
+ *
+ * @param {string} sebep Kullaniciya gosterilecek gerekce
+ */
+async function listeyiYenidenUret(sebep) {
+  const ayar = durum.ayarlar || {}
+  bildir(sebep)
   try {
     await cagir('engine:scan', {
       tf: durum.tf,
@@ -2572,9 +2536,9 @@ async function ayarlariKaydet(yama) {
 
   const yeniOnAyar = yeni && yeni.signalCfg ? yeni.signalCfg.weightPreset : undefined
   if (yeniOnAyar !== oncekiOnAyar) {
-    bildir('Benzerlik ayarı değişti, sinyal listesi yeniden hesaplanıyor.')
-    durum.olcumYenilensin = true
-    await olcumYenilemesiGerekiyorsa()
+    // TARAMA gerekir, test degil: agirlik komsu secimini belirler, dolayisiyla
+    // hem hafizadaki eslesmeler hem komsu onbellegi anahtari degisir.
+    await listeyiYenidenUret('Benzerlik ayarı değişti, sinyal listesi yeniden üretiliyor.')
   }
 }
 
@@ -2593,89 +2557,6 @@ async function ayarlariSifirla() {
   await ayarYamasiniYenile()
   ayarPaneliniCiz(true)
   saglayiciSecimleriniKur()
-}
-
-/** Test panelini cizer. */
-function testPaneliniCiz() {
-  const kap = panelGovdesi('test')
-  if (!kap) return
-  // SONUC BASKA BIR ZAMAN DILIMINE AITSE SOYLE. Test sururken zaman dilimi
-  // degistirilebiliyordu ve sonuc kontrol edilmeden gosteriliyordu.
-  const sonuc = durum.testSonucu
-  const baskaTf = sonuc && sonuc.tf && sonuc.tf !== durum.tf ? sonuc.tf : null
-  renderBacktest(kap, sonuc, {
-    running: durum.testCalisiyor,
-    otherTf: baskaTf,
-  })
-  // Test ozetinin ALTINA canli gunluk bolumu eklenir: "olculen" ile "canlida
-  // olan" yan yana durmadikca aradaki sapma gorunmez.
-  renderLiveLog(kap, durum.canliGunluk, { test: durum.testSonucu })
-  csvDugmeleriniTazele()
-}
-
-/**
- * Tarama olcumu gecersiz kildiysa testi calistirir.
- *
- * Cagiranlar bunu `hepsiniYukle` sonrasinda cagirir: test dakikalar surebilir
- * ve ekran dolmadan beklenirse kullanici bos grafige bakar.
- */
-async function olcumYenilemesiGerekiyorsa() {
-  if (!durum.olcumYenilensin) return
-  durum.olcumYenilensin = false
-  await testCalistir()
-}
-
-/** Yuruyen ileri testi calistirir. */
-async function testCalistir() {
-  if (durum.testCalisiyor) return
-  durum.testCalisiyor = true
-  mesgulKilidiUygula()
-  const dugme = el('testRunBtn')
-  isBasladi(dugme, 'Çalışıyor...')
-  testPaneliniCiz()
-  motorDurumu('test çalışıyor')
-  ilerleme(0, 'Test başlıyor')
-
-  // Bos birakilan kutu "degisiklik yok" demektir; sayi('') 0 dondugu icin
-  // isinma sessizce kapanip testi butun hafizaya acardi.
-  const isinmaEl = el('testWarmup')
-  const varsayilanIsinma = 500
-  const isinma = isinmaEl && isinmaEl.value.trim() !== ''
-    ? sayi(isinmaEl.value, varsayilanIsinma)
-    : varsayilanIsinma
-
-  try {
-    // Yuk BICIMI onemli: isci `payload.cfg` okur. Bir donem ust duzeyde
-    // gonderiliyordu ve sessizce yok sayiliyordu, yani Test sekmesi
-    // kullanicinin esiklerini degil hazir ayari olcuyordu.
-    const sonuc = await cagir('engine:backtest', {
-      tf: durum.tf,
-      cfg: {
-        warmupEvents: isinma,
-        cfgPatch: durum.ayarYamasiKayitli || null,
-      },
-    })
-    // Sonuc HANGI zaman dilimine ve NE ZAMAN ait oldugunu tasisin: test
-    // sururken tf degistirilebiliyor ve panel eski sonucu yeni tf'ye aitmis
-    // gibi gosteriyordu.
-    durum.testSonucu = Object.assign({ tf: durum.tf, olcumZamani: Math.floor(Date.now() / 1000) }, sonuc)
-    // Geriye test sinyal listesini de URETIR ve diske yazar. Yeniden okunmazsa
-    // Sinyaller sekmesi taramadan kalma bos listeyi gostermeye devam eder ve
-    // kullanici "testi calistirdim ama sinyal gelmedi" diye bakar.
-    await sinyalleriYukle()
-    const uretilen = sonuc && sonuc.summary ? sayi(sonuc.summary.fired, 0) : durum.signals.length
-    bildir('Test tamamlandı, ' + formatNumber(uretilen, 0) + ' sinyal Sinyaller sekmesine yazıldı.')
-    ilerleme(100, 'Tamamlandı')
-  } catch (err) {
-    hataGoster('Test başarısız: ' + hataMetni(err))
-  } finally {
-    durum.testCalisiyor = false
-    mesgulKilidiUygula()
-    isBitti(dugme)
-    testPaneliniCiz()
-    setTimeout(ilerlemeyiKapat, 1500)
-    motorDurumu('hazır')
-  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -2759,7 +2640,6 @@ function olaylariBagla() {
       bildir('Canlı akışta boşluk var, eksik dönem indiriliyor.')
       await tfHazirla(durum.tf)
       await hepsiniYukle()
-      await olcumYenilemesiGerekiyorsa()
     } catch (err) {
       hataGoster('Eksik dönem kapatılamadı: ' + (err && err.message ? err.message : String(err)))
     } finally {
@@ -3091,8 +2971,6 @@ function dugmeleriBagla() {
 
   const hafizaCsv = el('memoryExportBtn')
   if (hafizaCsv) hafizaCsv.addEventListener('click', () => csvDisaAktar('events'))
-  const testCsv = el('testExportBtn')
-  if (testCsv) testCsv.addEventListener('click', () => csvDisaAktar('trades'))
 
   const iptal = el('cancelBtn')
   if (iptal) {
@@ -3153,7 +3031,6 @@ function dugmeleriBagla() {
       durum.zones = []
       durum.seciliBolgeId = null
       durum.seciliSinyalId = null
-      durum.testSonucu = null
       anaKadarAyarla(null)
       isaretleriCiz()
       bolgeleriCiz()
@@ -3169,8 +3046,6 @@ function dugmeleriBagla() {
   const varsayilan = el('settingsResetBtn')
   if (varsayilan) varsayilan.addEventListener('click', () => ayarlariSifirla())
 
-  const testDugmesi = el('testRunBtn')
-  if (testDugmesi) testDugmesi.addEventListener('click', () => testCalistir())
 
   const form = el('settingsForm')
   if (form) form.addEventListener('submit', (ev) => ev.preventDefault())
@@ -3227,7 +3102,6 @@ async function baslat() {
   await sinyalKipiDegistiyseTara()
 
   await hepsiniYukle()
-  await olcumYenilemesiGerekiyorsa()
 
   // Canli takip: ayar aciksa uygulama acilir acilmaz baslar. En SONA birakildi,
   // cunku grafik ve saglayici listesi hazir olmadan baslatmak anlamsiz. Hata

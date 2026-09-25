@@ -130,6 +130,36 @@ test('signalText: metinlerde "güven" gecmez, sayim ve aralik gecer', async () =
   assert.strictEqual(isaretMetni(s), signalText.isaretMetni(s))
 })
 
+test('YENI BICIM: ozet ve isaret benzer kurulum sayisi ile guveni gosterir', async () => {
+  // Varsayilan kipte tutma orani HIC hesaplanmiyor. Bu dal olmadan ozet BOS
+  // donuyordu: alt seritte ve masaustu bildiriminde sinyalin yaninda hicbir
+  // sey yazmiyordu.
+  const yeni = {
+    kind: 'form', direction: 'BUY', mode: 'benzerlik',
+    similarCount: 1247, poolCount: 2829, confidence: 82, matchCount: 6,
+  }
+  const ozet = signalText.sinyalOzeti(yeni)
+  assert.match(ozet, /1247 benzer kurulum/)
+  assert.match(ozet, /güven %82/)
+  assert.strictEqual(signalText.isaretMetni(yeni), 'OL %82')
+
+  // TUZAK: `confidence` iki bicimde de var ama OLCEGI FARKLI. Eski R:R
+  // kaydinda 0..1 bir orandir; ayrim confidence ile yapilsaydi eski bir kayit
+  // "güven %1" gosterirdi. Ayrim `similarCount` ile yapilir.
+  const eski = { kind: 'form', matchCount: 15, winRate: 0.55, winRateRaw: 0.6, confidence: 0.59 }
+  assert.strictEqual(signalText.isaretMetni(eski), 'OL 9/15')
+  assert.ok(!/güven/i.test(signalText.sinyalOzeti(eski)))
+
+  // Guven yoksa isaret yalnizca onek gosterir, "%NaN" degil.
+  assert.strictEqual(signalText.isaretMetni({ kind: 'touch', similarCount: 5 }), 'DK')
+
+  // Arayuz kopyasi AYNI bicimi uretmeli (iki dosya birlikte degismeli).
+  const { sinyalOzetiMetni, isaretMetni } = await istatistik()
+  assert.strictEqual(sinyalOzetiMetni(yeni), ozet)
+  assert.strictEqual(isaretMetni(yeni), signalText.isaretMetni(yeni))
+  assert.strictEqual(isaretMetni(eski), signalText.isaretMetni(eski))
+})
+
 test('sinyal gerekcesinde "güven" ifadesi kalmadi', () => {
   const { evaluateTouch } = require('../src/core/learn/signal')
   const fixtures = require('./helpers/fixtures')

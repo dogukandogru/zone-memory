@@ -136,6 +136,16 @@ export function ornekRozeti(matchCount) {
 export function sinyalOzetiMetni(signal) {
   if (!signal) return ''
   const parcalar = []
+  // BENZERLIK KIPI: bkz. core/learn/signalText.js sinyalOzeti, ayni bicim.
+  // Ayrim `similarCount` ile yapilir; `confidence` iki bicimde de var ama
+  // olcegi farkli (eski 0..1, yeni 0..100).
+  const benzer = Number(signal.similarCount)
+  if (Number.isFinite(benzer)) {
+    parcalar.push(Math.round(benzer) + ' benzer kurulum')
+    const guven = Number(signal.confidence)
+    if (Number.isFinite(guven)) parcalar.push('güven %' + Math.round(guven))
+    return parcalar.join(', ')
+  }
   const sayimlar = sinyalSayilari(signal)
   if (sayimlar) parcalar.push(sayimlar.k + '/' + sayimlar.n + ' tuttu')
   const aralik = sinyalAraligi(signal)
@@ -148,10 +158,17 @@ export function sinyalOzetiMetni(signal) {
 }
 
 /**
- * Grafik isaretinin kisa metni: "OL 9/15".
+ * Grafik isaretinin kisa metni: "OL %82".
  *
- * Onceden "O %53" yaziyordu ve 3 kayittan 3'u ile 30 kayittan 16'si ayni
- * gorunuyordu.
+ * SAYI, O KIPTE HESAPLANAN SEYDIR. Varsayilan kipte tutma orani hic
+ * hesaplanmiyor, dolayisiyla isaretin yaninda GUVEN yuzdesi yazar: bu
+ * kurulumun kendi turundeki kurulumlarin yuzde kacindan daha cok gecmis
+ * ornegi oldugu. Bir donem burada "9/15 tuttu" yaziyordu; o alanlar
+ * kaldirilinca isaretlerde HIC sayi kalmadi ama grafigin efsanesi hala
+ * "yanindaki sayi: gecmiste kac kayittan kaci tuttu" diyordu.
+ *
+ * Eski kayitlar (kaldirilan R:R bicimi) icin eski gosterim korunur, yoksa
+ * kullanici yeniden tarayana kadar isaretler bos kalirdi.
  *
  * @param {Object} signal
  * @returns {string}
@@ -159,6 +176,11 @@ export function sinyalOzetiMetni(signal) {
 export function isaretMetni(signal) {
   if (!signal) return ''
   const onek = signal.kind === 'form' ? 'OL' : 'DK'
+  // Ayrim `similarCount` ile: `confidence` eski bicimde 0..1, yenide 0..100.
+  if (Number.isFinite(Number(signal.similarCount))) {
+    const guven = Number(signal.confidence)
+    return Number.isFinite(guven) ? onek + ' %' + Math.round(guven) : onek
+  }
   const sayimlar = sinyalSayilari(signal)
   if (sayimlar) return onek + ' ' + sayimlar.k + '/' + sayimlar.n
   const oran = Number(signal.winRate)

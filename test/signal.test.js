@@ -7,6 +7,7 @@ const assert = require('node:assert/strict')
 
 const {
   evaluateTouch, findCandidates, decideFromCandidates, DEFAULT_SIGNAL_CFG,
+  kutuYasiEngeli,
 } = require('../src/core/learn/signal')
 const fixtures = require('./helpers/fixtures')
 
@@ -755,4 +756,53 @@ test('similarCount esigi UYGULAR, havuzun tamamini saymaz', () => {
     'daha yuksek esik daha az kayit saymali')
   assert.strictEqual(hepsi.poolCount, dar.poolCount,
     'havuz esikten ETKILENMEMELI, yalnizca benzer sayisi degisir')
+})
+
+
+// KUTU YASI KAPISI (kutuYasiEngeli)
+// ---------------------------------------------------------------------------
+// Kullanici bu siniri acikca istedi: "Kutu uzunlugu 100 gecerse sinyal
+// uretmesin". Kural bir donem YALNIZCA `decide` icinde yaziliydi ve `decide`
+// varsayilan kipte (benzerlik) hic calismiyor: ayar ekranda duruyor, hicbir
+// sey yapmiyordu. Olculdu, duzeltilmeden once gercek 5m listesindeki 20.913
+// sinyalin 1.660'inda (%7,9) kutu yasi 100'un uzerindeydi, en yaslisi 598 bar.
+//
+// Kural artik TEK YERDE tanimli ve butun kipler onu cagirir; bu testler o tek
+// tanimi kilitler.
+
+test('kutu yasi kapisi: sinirin UZERI engellenir, siniri gecmeyen gecer', () => {
+  const cfg = { maxZoneAgeBars: 100 }
+  assert.strictEqual(kutuYasiEngeli({ zoneAgeBars: 101 }, cfg), true)
+  assert.strictEqual(kutuYasiEngeli({ zoneAgeBars: 598 }, cfg), true)
+  // TAM SINIR gecer: "100 gecerse" denildi, "100 olursa" degil.
+  assert.strictEqual(kutuYasiEngeli({ zoneAgeBars: 100 }, cfg), false)
+  assert.strictEqual(kutuYasiEngeli({ zoneAgeBars: 0 }, cfg), false)
+})
+
+test('kutu yasi kapisi: 0, negatif ve eksik sinir kapatir', () => {
+  // 0 acikca "kapali" demektir; ayarda da boyle yaziyor.
+  assert.strictEqual(kutuYasiEngeli({ zoneAgeBars: 9999 }, { maxZoneAgeBars: 0 }), false)
+  assert.strictEqual(kutuYasiEngeli({ zoneAgeBars: 9999 }, { maxZoneAgeBars: -5 }), false)
+  assert.strictEqual(kutuYasiEngeli({ zoneAgeBars: 9999 }, {}), false)
+  assert.strictEqual(kutuYasiEngeli({ zoneAgeBars: 9999 }, null), false)
+  // TUZAK: Number(null) === 0. Bu seansta bes kez yasandi; null sinir
+  // "kapali" olmali, "0" olmamali ama sonuc ayni: engel yok.
+  assert.strictEqual(kutuYasiEngeli({ zoneAgeBars: 9999 }, { maxZoneAgeBars: null }), false)
+})
+
+test('kutu yasi kapisi: yas alani yoksa veya sayi degilse engellemez', () => {
+  const cfg = { maxZoneAgeBars: 100 }
+  assert.strictEqual(kutuYasiEngeli({}, cfg), false)
+  assert.strictEqual(kutuYasiEngeli(null, cfg), false)
+  assert.strictEqual(kutuYasiEngeli({ zoneAgeBars: NaN }, cfg), false)
+  assert.strictEqual(kutuYasiEngeli({ zoneAgeBars: 'cok' }, cfg), false)
+  // Negatif yas anlamsizdir, engel sayilmaz.
+  assert.strictEqual(kutuYasiEngeli({ zoneAgeBars: -3 }, cfg), false)
+})
+
+test('kutu yasi kapisi VARSAYILAN ayarda aciktir (100 bar)', () => {
+  // Kullanicinin istedigi sinir varsayilan olmali, yoksa kural yalnizca elle
+  // acildiginda calisir.
+  assert.strictEqual(DEFAULT_SIGNAL_CFG.maxZoneAgeBars, 100)
+  assert.strictEqual(kutuYasiEngeli({ zoneAgeBars: 101 }, DEFAULT_SIGNAL_CFG), true)
 })

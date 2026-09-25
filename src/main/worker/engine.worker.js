@@ -1232,14 +1232,11 @@ handlers['engine:scan'] = async function (payload, ctx) {
   // YAKALAYAMAZ, cunku ayar hic degismemistir; degisen veridir ve eski sinyal
   // listesi artik baska bir veri kumesinin olaylarina isaret eder.
   //
-  // ISARET BURADA SILINMEZ. Bir donem tarama biter bitmez siliniyordu, ama
-  // olcumu asil yeniden kuran sey TARAMA DEGIL, ardindan gelen TESTTIR. Test
-  // en uzun adim; kullanici o sirada uygulamayi kapatirsa isaret gitmis,
-  // olcum dosyalari da yedege tasinmis oluyordu. Sonraki acilista hafiza
-  // guncel oldugu icin tarama hic calismiyor, eski iz de null oldugundan
-  // "olcum gecersiz" bir daha hic denmiyordu: liste KALICI olarak bos
-  // kaliyor ve kullanicinin elle test calistirmasi gerekiyordu.
-  // Isareti test tuketir (`engine:backtest`).
+  // ISARET BURADA DEGIL, LISTE YAZILDIKTAN SONRA SILINIR (asagiya bakin).
+  // Bir donem tarama biter bitmez siliniyordu, ama o zaman listeyi kuran sey
+  // tarama degil TESTTI: kullanici test sirasinda uygulamayi kapatirsa isaret
+  // gitmis, liste bos kalmis oluyordu. Simdi listeyi tarama kuruyor, bu yuzden
+  // isaret yine taramada tuketilir ama YAZIMDAN SONRA.
   const yenileIsareti = paths.olcumYenilePath(tf)
   const veriDegisti = await fileExists(yenileIsareti)
   const izDegisti = !!(eskiIz && eskiIz !== yeniIz) || veriDegisti
@@ -1272,11 +1269,16 @@ handlers['engine:scan'] = async function (payload, ctx) {
   const kipAyari = uygulanan.signalCfg ? uygulanan.signalCfg.mode : null
   const sinyalKipi = kipAyari === 'hafiza' || kipAyari === 'hepsi' ? kipAyari : 'benzerlik'
 
+  // KUTU YASI KAPISI: butun kiplerde gecerli, tanim core/learn/signal.js'te.
+  // Bir donem yalnizca `decide` icinde vardi ve `decide` varsayilan kipte hic
+  // calismiyor: ayar ekranda duruyor, hicbir sey yapmiyordu.
+  const yasEngelli = (e) => core('learn/signal').kutuYasiEngeli(e, uygulanan.signalCfg)
+
   if (sinyalKipi === 'hepsi') {
     ctx.progress(95, 'Sinyaller yazılıyor')
     const liste = []
     for (let i = 0; i < events.length; i++) {
-      if (events[i]) liste.push(olaydanSinyal(events[i], tf))
+      if (events[i] && !yasEngelli(events[i])) liste.push(olaydanSinyal(events[i], tf))
     }
     await writeJsonAtomic(paths.signalsPath(tf), liste)
     signalCache = { tf: tf, signals: liste }
@@ -1368,8 +1370,10 @@ handlers['engine:scan'] = async function (payload, ctx) {
       }
       // TUM benzer kayitlarin sayisi; `k` ile sinirli DEGIL.
       const benzerToplam = cache.benzerSayi[i]
-      // KAPI: gecmiste yeterince benzer yapi var mi.
+      // KAPI 1: gecmiste yeterince benzer yapi var mi.
       if (benzerToplam < enAzBenzer) continue
+      // KAPI 2: kutu cok yasli mi (kullanicinin istedigi 100 bar siniri).
+      if (yasEngelli(e)) continue
       const sig = olaydanSinyal(e, tf)
       sig.mode = 'benzerlik'
       sig.similarCount = benzerToplam
@@ -1387,6 +1391,27 @@ handlers['engine:scan'] = async function (payload, ctx) {
     signalCache = { tf: tf, signals: liste }
     log(liste.length + ' sinyal yazıldı (geçmişte en az ' + enAzBenzer +
       ' benzer kurulum bulunanlar).')
+  }
+
+  // OLCUM YENILEME ISARETI: LISTEYI YAZAN TUKETIR.
+  //
+  // Isaret "depo baska bir kaynaktan kuruldu, eski liste baska bir veri
+  // kumesine ait" demek. Bir donem onu TEST tuketiyordu, cunku listeyi asil
+  // kuran testti. Artik listeyi TARAMA kuruyor (benzerlik ve hepsi kipleri) ve
+  // Test sekmesi kaldirildi; isareti burada tuketmezsek kimse tuketmez ve
+  // isaret kalici olarak kalir. Kalmasi zararsiz gorunur ama degildir: komsu
+  // onbellegi koruma kontrolu bu isarete bakiyor, yani her tarama bastan
+  // hesaplanirdi (1 dakikalikta 5,5 dakika).
+  //
+  // SIRA ONEMLI: liste YAZILDIKTAN sonra silinir. Once silinseydi ve yazim
+  // sirasinda uygulama kapansaydi, sonraki acilista hafiza guncel oldugu icin
+  // tarama hic calismaz ve liste kalici olarak eski kalirdi.
+  if (sinyalKipi === 'benzerlik' || sinyalKipi === 'hepsi') {
+    try {
+      await fsp.unlink(yenileIsareti)
+    } catch (err) {
+      // Isaret yoksa sorun degil, olagan durum budur.
+    }
   }
 
 
@@ -2542,7 +2567,13 @@ handlers['engine:live-tick'] = async function (payload) {
         const cand = adaylar[i]
         const hafif = lightEvent(cand)
         let sig = null
-        if (canliKip === 'hepsi') {
+        // KUTU YASI KAPISI: tarama ile AYNI tanim (core/learn/signal.js).
+        // Canlida atlanirsa gecmis listede olmayan bir sinyal canlida cikar ve
+        // iki taraf birbirini tutmaz.
+        const canliYasEngeli = core('learn/signal').kutuYasiEngeli(cand, canliCfg.signalCfg)
+        if (canliYasEngeli) {
+          // Sessiz gecme: kutu cizim omrunu asmis, sinyal uretilmez.
+        } else if (canliKip === 'hepsi') {
           // Olaydan dogrudan sinyal: plan, oran ve benzer ornek YOK.
           sig = olaydanSinyal(cand, tf)
         } else if (canliKip === 'benzerlik') {

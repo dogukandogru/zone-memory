@@ -321,6 +321,31 @@ function ayarCoz (cfg, kind) {
  * @param {number|null} [beforeTime]
  * @returns {Array<{event:Object, similarity:number}>} Benzerlige gore azalan
  */
+/**
+ * KUTU YASI KAPISI: olay anindaki kutu yasi sinirin uzerinde mi.
+ *
+ * Kutunun cizim omru 100 bardir ama izlenmeye `maxAgeBars` (600) bara kadar
+ * devam eder, yani cok eski bir kutuya gelen dokunus da olay uretebiliyordu.
+ * Kullanici bu siniri acikca istedi: "Kutu uzunlugu 100 gecerse sinyal
+ * uretmesin".
+ *
+ * NEDEN AYRI FONKSIYON: kural bir donem YALNIZCA `decide` icinde yaziliydi ve
+ * `decide` varsayilan kipte (benzerlik) HIC calismiyor. Sonuc: ayar ekranda
+ * duruyor, hicbir sey yapmiyordu. Olculdu (gercek 5m listesi, 20.913 sinyal):
+ * 1.660 sinyalin (%7,9) kutu yasi 100'un uzerindeydi, en yaslisi 598 bar.
+ * Artik butun kipler bu tek fonksiyonu cagirir.
+ *
+ * @param {{zoneAgeBars?:number}} touch Olay (ya da sinyal kaydi)
+ * @param {{maxZoneAgeBars?:number}} cfg Cozulmus sinyal ayari
+ * @returns {boolean} true ise sinyal URETILMEZ. 0 veya negatif sinir kapatir.
+ */
+function kutuYasiEngeli (touch, cfg) {
+  const maxYas = num(cfg && cfg.maxZoneAgeBars, 0)
+  if (!(maxYas > 0)) return false
+  const yas = Math.max(0, num(touch && touch.zoneAgeBars, 0))
+  return yas > maxYas
+}
+
 function findCandidates (touch, features, memory, cfg, beforeTime) {
   const t = touch || {}
   const conf = ayarCoz(cfg)
@@ -799,13 +824,8 @@ function decideFromCandidates (ev, candidates, levels, cfg, ek) {
   const haberEngeli = haberDk > 0 && haber !== null &&
     Number.isFinite(haber.deltaMin) && Math.abs(haber.deltaMin) <= haberDk
 
-  // KUTU YASI SINIRI. Kutunun cizim omru 100 bardir ama izlenmeye 600 bara
-  // kadar devam eder (maxAgeBars), yani cok eski bir kutuya gelen dokunus da
-  // olay uretebiliyordu. Bu kapi sinyali kutunun cizili omruyle sinirlar.
-  // 0 veya negatif deger kapatir.
-  const maxYas = num(conf.maxZoneAgeBars, 0)
-  const kutuYasi = Math.max(0, num(t.zoneAgeBars, 0))
-  const yasEngeli = maxYas > 0 && kutuYasi > maxYas
+  // KUTU YASI SINIRI (tek tanim: kutuYasiEngeli).
+  const yasEngeli = kutuYasiEngeli(t, conf)
 
   const fired = matchCount >= minMatches && winRate >= minWinRate && liftOk && rrOk && evOk &&
     !formRiskBlocked && !haberEngeli && !yasEngeli
@@ -888,8 +908,8 @@ function decideFromCandidates (ev, candidates, levels, cfg, ek) {
       reasons.push('Başarı oranı yetersiz (%' + toPct(winRate) + ' < %' + toPct(minWinRate) + '), sinyal üretilmedi')
     }
     if (yasEngeli) {
-      reasons.push('Kutu çok yaşlı (' + Math.round(kutuYasi) + ' > ' + Math.round(maxYas) +
-        ' bar), sinyal üretilmedi')
+      reasons.push('Kutu çok yaşlı (' + Math.round(Math.max(0, num(t.zoneAgeBars, 0))) +
+        ' > ' + Math.round(num(conf.maxZoneAgeBars, 0)) + ' bar), sinyal üretilmedi')
     }
     if (matchCount >= minMatches && winRate >= minWinRate && !rrOk) {
       reasons.push('Risk/ödül yetersiz (' + rr.toFixed(2) + ' < ' + minRr.toFixed(2) +
@@ -1009,6 +1029,8 @@ module.exports = {
   evaluateTouch,
   findCandidates,
   decideFromCandidates,
+  // Kutu yasi kapisi: butun kipler ayni tanimi kullanir (bkz. kutuYasiEngeli).
+  kutuYasiEngeli,
   // Yon ve tur tanimlari: onbellek (learn/candcache.js) aday havuzlarini
   // bunlara gore boldugu icin kural iki modulde ayri yazilamaz.
   yonBelirle,

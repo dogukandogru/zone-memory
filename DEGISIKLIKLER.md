@@ -96,6 +96,48 @@ olay geldiginde ayni turdeki en benzer gecmis olaylarla karsilastirilip
 
 ## Duzeltilen hatalar (olcumu veya veriyi etkileyenler)
 
+- **"Kutu omru en fazla 100 bar" kurali CALISMIYORDU.** Kullanici bunu acikca
+  istemisti ("Kutu uzunlugu 100 gecerse sinyal uretmesin") ve ayar ekranda
+  duruyordu, ama esik yalnizca `signal.js decide()` icinde okunuyor; o yol
+  kaldirilan R:R sistemine ait ve varsayilan kipte HIC calismiyor. Olculdu
+  (gercek 5m listesi, 20.913 sinyal): 1.660'inda (%7,9) kutu yasi 100'un
+  uzerindeydi, en yaslisi 598 bar. Kural artik tek yerde tanimli
+  (`signal.kutuYasiEngeli`) ve butun kipler onu cagiriyor. Dogrulandi: sinir
+  kapaliyken 100 ustu 1.660 sinyal, sinir 100 iken 0.
+- **Masaustu bildirimi HIC gelmiyordu.** "Yalnizca kanitli sinyal turlerinde
+  bildir" varsayilan acik ve `evidence.status === 'kanitli'` sarti koyuyor.
+  Kullanicinin gercek olcum dosyalarina bakildi: hicbir zaman diliminde hicbir
+  tur "kanitli" degil (hepsi kanitlanmadi ya da zayif), 5m'de olcum dosyasi
+  bile yok. Yani kapi hic acilmamis. Bu tur, kullanicinin karariyla bu turda
+  DOKUNULMADAN birakildi.
+- **Arayuzde hicbir sey yapmayan ayarlar ve bir sekme kaldirildi.** Kullanici
+  bildirdi: "ise yaramayanlar varsa gostermesek de olur, musterinin kafasi
+  karisiyor". Kaldirilanlar: Test sekmesi (kaldirilan TP/SL sistemini olcuyor,
+  gosterilen sinyalleri belirlemiyordu), "Sinyal karari" grubundaki sekiz olu
+  esik (en az basari orani, en az risk/odul, en az beklenen deger, dokunusta
+  en az isabet, kalibrasyon onseli, en az katma deger, veri penceresi, eslesme
+  yari omru), "Islem maliyeti ve olcum" grubunun tamami (yalnizca testi
+  etkiliyordu), "Risk ve pozisyon" grubunun tamami (lot bolumu varsayilan
+  kipte zaten cizilmiyor) ve "Hafizadan suz" sinyal kipi (listesi Test
+  sekmesinden geliyordu, esikleri de kaldirildi). Grubun eski notu da yanlis
+  bilgi veriyordu: "sinyal ancak yeterli tutma orani, risk/odul ve pozitif
+  beklenen degerle uretilir" diyordu, oysa bu ucu hic hesaplanmiyor.
+- **Grafik isaretlerinde sayi kalmamisti ama efsane sayidan bahsediyordu.**
+  Isaret metni "9/15 tuttu" bicimindeydi; o alanlar kaldirilinca isaretler
+  yalnizca "OL" / "DK" gosteriyor, efsane ise hala "yanindaki sayi: gecmiste
+  kac kayittan kaci tuttu" diyordu. Isarette artik GUVEN yuzdesi yaziyor
+  ("OL %82") ve efsane duzeltildi. Ayni sekilde alt seritteki ve bildirimdeki
+  sinyal ozeti BOS donuyordu; artik "1.247 benzer kurulum, guven %82" yaziyor.
+  DIKKAT: eski ve yeni kayitlarda `confidence` alani AYNI ADI tasiyor ama
+  olcegi farkli (eski 0..1 oran, yeni 0..100 yuzdelik dilim), bu yuzden ayrim
+  `similarCount` ile yapiliyor; confidence'a bakilsaydi eski bir kayit
+  "guven %1" gosterirdi.
+- **Yenile isaretini tuketen kimse kalmiyordu.** Isareti TEST tuketiyordu,
+  Test sekmesi kaldirildi. Isaret ortada kalsa zararsiz gorunur ama degil:
+  komsu onbellegi koruma kontrolu ona bakiyor, yani her tarama bastan
+  hesaplanirdi. Artik listeyi yazan taraf, yani TARAMA tuketiyor, listeyi
+  YAZDIKTAN sonra.
+
 - **Zaman dilimi degistirmek dakikalar suruyordu.** Kullanici bildirdi:
   "musteri guncelleme yukledigunde 1m 5m felan secince grafigin yuklenmesi
   uzun suruyor". Ilk taniya BAKMADAN once olculdu, cunku ilk aciklama

@@ -579,13 +579,20 @@ test('ayar izi AYNIYSA olcum dosyalarina dokunulmaz', async () => {
 // kumesinin olaylarina isaret eder. Veri paketi bu durumu bir isaret
 // dosyasiyla tarama katmanina tasir.
 //
-// KILITLENEN OLAY: isaret bir donem TARAMA biter bitmez siliniyordu. Oysa
-// olcumu yeniden kuran sey tarama degil, ardindan gelen TESTTIR ve test en
-// uzun adimdir. Kullanici test sirasinda uygulamayi kapatirsa isaret gitmis,
-// olcum dosyalari da yedege tasinmis oluyordu; sonraki acilista hafiza guncel
-// oldugu icin tarama hic calismiyor ve liste KALICI olarak bos kaliyordu.
+// KILITLENEN OLAY: isareti TUKETEN, listeyi YENIDEN KURAN taraf olmali.
+//
+// Kural iki kez degisti ve her ikisinde de ayni ilke gecerliydi. Bir donem
+// isaret tarama biter bitmez siliniyordu, ama o zaman listeyi kuran sey
+// taramadan SONRA gelen testti: kullanici test sirasinda uygulamayi kapatirsa
+// isaret gitmis, liste bos kalmis oluyordu. Sonra Test sekmesi kaldirildi ve
+// listeyi taramanin kendisi yazmaya basladi; artik isareti TARAMA tuketir ama
+// LISTEYI YAZDIKTAN SONRA.
+//
+// Isaretin ortada kalmasi zararsiz gorunur, degildir: komsu onbellegi koruma
+// kontrolu bu isarete bakiyor, yani isaret kalirsa her tarama her seyi bastan
+// hesaplar (olculdu: 1 dakikalikta 5,5 dakika).
 
-test('yenile isareti TARAMAYLA silinmez, olcum yeniden kurulana kadar durur', async () => {
+test('yenile isaretini TARAMA tuketir, cunku listeyi artik tarama yaziyor', async () => {
   await isciyle(async (cagir, dataDir) => {
     const kok = await olcumKur(dataDir, 'baska-bir-ayarin-izi')
     const isaret = pathsCore.memoryPath(TF, undefined, dataDir) + '.yenile'
@@ -596,10 +603,15 @@ test('yenile isareti TARAMAYLA silinmez, olcum yeniden kurulana kadar durur', as
     // Sebep DOGRU soylenmeli: kullanici hicbir ayara dokunmadi.
     assert.strictEqual(sonuc.invalidationReason, 'veri')
 
-    // BU TESTIN BUTUN KONUSU: test daha calismadi, isaret DURMALI.
-    assert.strictEqual(fs.existsSync(isaret), true,
-      'isareti tarama degil, olcumu yeniden kuran TEST tuketmeli')
-    assert.strictEqual(fs.existsSync(kok + '.signals.json.onceki'), true)
+    // Eski liste yedeklenmis, YENISI yazilmis ve isaret karsiligini bulmus
+    // olmali. Taze listenin varligi onemli: isaret ancak liste gercekten
+    // yeniden uretildigi icin tuketiliyor.
+    assert.strictEqual(fs.existsSync(kok + '.signals.json.onceki'), true,
+      'eski liste yedeklenmeliydi')
+    assert.strictEqual(fs.existsSync(kok + '.signals.json'), true,
+      'tarama yeni listeyi yazmaliydi')
+    assert.strictEqual(fs.existsSync(isaret), false,
+      'liste yazildiktan sonra isaret silinmeli, yoksa komsu onbellegi hic korunmaz')
   })
 })
 

@@ -530,7 +530,7 @@ function kanitRozeti(kanit) {
         : '') +
       (durum === 'kanitli' ? '. Aralık sıfırın üstünde.' : '. Aralık sıfırı içeriyor, sonuç şansla açıklanabilir.')
   } else {
-    e.title = 'Bu sinyal türü için henüz ölçüm yok. Test sekmesinden yürüyen ileri testi çalıştırın.'
+    e.title = 'Bu sinyal türü için ölçüm yok.'
   }
   return e
 }
@@ -697,12 +697,10 @@ export function renderSignals(el, signals, opts) {
   })
 
   if (liste.length === 0) {
-    // Gecmis sinyaller yalnizca geriye testte olusur. "Gecmisi Tara" hafizayi
-    // kurar ve eski sinyalleri SILER, cunku onlar artik gecersiz hafizaya
-    // dayanir. Bu yuzden bos liste mesaji kullaniciyi taramaya degil teste
-    // yollamali; aksi halde tarayip tarayip ayni bos ekrana bakiyor.
+    // Liste artik TARAMANIN ciktisi. Bir donem geriye testten geliyordu ve bu
+    // mesaj kullaniciyi Test sekmesine yolluyordu; o sekme kaldirildi.
     el.appendChild(bosKutu(hepsi.length === 0
-      ? 'Sinyal listesi geriye testten gelir. "Test" sekmesine geçip "Testi Çalıştır" deyin.'
+      ? 'Bu zaman dilimi için sinyal yok. "Geçmişi Tara" ile hafızayı kurun.'
       : 'Bu süzgeçle gösterilecek sinyal yok.'))
     return
   }
@@ -732,15 +730,13 @@ export function renderSignals(el, signals, opts) {
 
   // KIRPILMIS LISTE ACIKCA SOYLENIR (U8).
   //
-  // Arayuz isciden yalnizca son N sinyali istiyor. Bugun 15m'de 252 sinyal
-  // oldugu icin fark etmiyor, ama kirpma basladigi anda buradaki isabet
-  // orani Test sekmesindekinden sessizce ayrilir ve hangisinin dogru oldugu
-  // anlasilmaz. Kirpma varsa yaziyor.
+  // Arayuz isciden yalnizca son N sinyali istiyor. Kirpma varsa ACIKCA
+  // yaziyor, yoksa kullanici "toplam bu kadar sinyal var" saniyor.
   const toplam = sayi(o.total, 0)
   if (o.truncated === true && toplam > hepsi.length) {
     el.appendChild(h('div', 'small muted',
-      'Aşağıdaki oran yalnızca son ' + tam(hepsi.length) + ' sinyale ait, toplam ' +
-      tam(toplam) + ' sinyal var. Tamamı için Test sekmesindeki özete bakın.'))
+      'Listede en yeni ' + tam(hepsi.length) + ' sinyal gösteriliyor, toplam ' +
+      tam(toplam) + ' sinyal var.'))
   }
 
   const adet = Math.min(liste.length, AZAMI_SATIR)
@@ -1745,35 +1741,6 @@ function trendTfUyarisi(oku) {
     'EMA\'sını sorar, yani adı yanıltıcı olur. "auto" seçeneği grafiğin 4 katını kullanır.'
 }
 
-/**
- * Esik birlesimi hic sinyal uretemiyorsa uyarir.
- *
- * Kalibrasyon (onsel) gosterilen orani havuz tabanina dogru ceker: az
- * eslesmede oran tabanin cok uzagina cikamaz. Bu yuzden "en az eslesme 5,
- * onsel 20, en az tutma %60" gibi bir birlesim, kayitlarin TAMAMI tutmus
- * olsa bile hicbir zaman saglanamaz. Uygulama bir donem bunu sessizce
- * yapiyordu: kullanici sinyal beklerken ekran bos kaliyordu.
- *
- * @param {(yol:string)=>*} oku Yamayi da gozeten deger okuyucu
- * @returns {string} Bos dize uyari yoksa
- */
-function ulasilmazEsikUyarisi(oku) {
-  const sayi = (x, v) => (Number.isFinite(Number(x)) ? Number(x) : v)
-  const m = sayi(oku('signalCfg.minMatches'), 15)
-  const p = Math.max(0, sayi(oku('signalCfg.priorStrength'), 20))
-  const esik = sayi(oku('signalCfg.minWinRate'), 0.62)
-  if (!(m > 0) || p === 0) return ''
-  // Havuz tabani ancak testte bilinir; burada olculmus araligin ortasi
-  // (form %39-50, dokunus %23-28) temkinli bir varsayim olarak kullanilir.
-  const taban = 0.40
-  const enYuksek = (m + p * taban) / (m + p)
-  if (esik <= enYuksek) return ''
-  return 'Bu birleşim hiçbir sinyal üretemez: en az eşleşme ' + m + ' ve önsel ' + p +
-    ' ile, eşleşmelerin tamamı tutmuş olsa bile gösterilen oran en fazla %' +
-    Math.round(enYuksek * 100) + ' olur (havuz tabanı %40 varsayımıyla), eşiğiniz ise %' +
-    Math.round(esik * 100) + '. Eşleşme sayısını artırın, önseli düşürün ya da eşiği indirin.'
-}
-
 /** Ayar gruplari tanimi (sira arayuzdeki siradir). */
 function ayarGruplari(saglayiciSecenekleri) {
   return [
@@ -1796,7 +1763,6 @@ function ayarGruplari(saglayiciSecenekleri) {
           secenekler: [
             { deger: 'benzerlik', ad: 'Geçmişte aynı yapı varsa sinyal' },
             { deger: 'hepsi', ad: 'Her kurulum sinyal (benzerlik aranmaz)' },
-            { deger: 'hafiza', ad: 'Hafızadan süz (geçmiş tutma oranına göre)' },
           ],
           not: 'GEÇMİŞTE AYNI YAPI: kutu oluştuğunda o andaki grafiğin şekli ' +
             'alınır, geçmişte aynı yapı aranır ve yeterince benzer kurulum ' +
@@ -1805,10 +1771,7 @@ function ayarGruplari(saglayiciSecenekleri) {
             'gerektiğini "En az eşleşme", ne kadar benzer olacağını "En az ' +
             'benzerlik" belirler. ' +
             'HER KURULUM: benzerlik de aranmaz, her kutu oluşumu ve her dönüş ' +
-            'sinyaldir. ' +
-            'HAFIZADAN SÜZ: eski davranış; benzerlere ek olarak geçmiş tutma ' +
-            'oranı ve plan matematiği de hesaplanır, eşiği geçmeyen kurulum ' +
-            'sinyal olmaz.' },
+            'sinyaldir.' },
         { yol: 'featureCfg.shapeWindowBars', ad: 'Şekil penceresi (bar)',
           tip: 'sayi', adim: 8, min: 16, max: 512,
           not: 'Geçmişte benzer kurulum aranırken şeklin KAÇ BARA baktığı. ' +
@@ -1959,109 +1922,44 @@ function ayarGruplari(saglayiciSecenekleri) {
       ],
     },
     {
-      // SINYALI FIILEN BELIRLEYEN ESIKLER BURADADIR. Yukaridaki skor ayarlari
-      // yalnizca olayi etiketler; sinyal karari bu dort esik ve asagidaki
-      // beklenen deger kapisiyla verilir.
+      // BU GRUPTA YALNIZCA FIILEN CALISAN ESIKLER DURUR.
+      //
+      // Bir donem burada sekiz esik daha vardi: en az basari orani, en az
+      // risk/odul, en az beklenen deger, dokunusta en az isabet orani,
+      // kalibrasyon onseli, en az katma deger, veri penceresi ve eslesme yari
+      // omru. HICBIRI calismiyordu: hepsi yalnizca `signal.js decide()` icinde
+      // okunuyor, o yol da kaldirilan R:R sistemine ait ve varsayilan kipte
+      // hic cagrilmiyor. Grubun eski notu da yanlis bilgi veriyordu ("sinyal
+      // ancak yeterli tutma orani, risk/odul ve pozitif beklenen degerle
+      // uretilir"): bu ucu hic hesaplanmiyor.
+      //
+      // 'En fazla kutu yasi' KALDI ama artik gercekten calisiyor: kural
+      // core/learn/signal.js kutuYasiEngeli icinde tek yerde tanimli ve butun
+      // kipler onu cagiriyor. Olculdu, duzeltilmeden once gercek 5m
+      // listesindeki 20.913 sinyalin 1.660'inda (%7,9) kutu yasi 100'un
+      // uzerindeydi, en yaslisi 598 bar.
       baslik: 'Sinyal kararı (sinyalin üretilmesini bunlar belirler)',
       bozar: false,
-      not: 'Bir sinyal ancak şu dördü birden sağlanınca üretilir: yeterli sayıda ' +
-        'benzer kayıt, o kayıtlarda yeterli tutma oranı, yeterli risk/ödül ve ' +
-        'pozitif beklenen değer. Bu eşikleri değiştirmek yeniden tarama gerektirmez, ' +
-        'ama Test sekmesini yeniden çalıştırmadan etkisini bilemezsiniz.',
+      not: 'Bir sinyal, geçmişte yeterince benzer kurulum bulunduğunda üretilir. ' +
+        'Kaç tane gerektiğini "En az eşleşme", ne kadar benzer sayılacağını "En az ' +
+        'benzerlik" belirler. Tutma oranı, hedef ve zarar durdur hesaplanmaz.',
       alanlar: [
         { yol: 'signalCfg.k', ad: 'Komşu sayısı (k)', tip: 'sayi', adim: 1, min: 1, max: 200,
-          not: 'Hafızadan alınan en benzer kayıt sayısı.' },
+          not: 'Sinyal panelinde listelenen "en benzer örnek" sayısı. Geçmişte kaç ' +
+            'benzer kurulum olduğunu SINIRLAMAZ: o sayı, eşiği geçen tüm kayıtlardır.' },
         { yol: 'signalCfg.minSimilarity', ad: 'En az benzerlik', tip: 'sayi', adim: 0.01, min: 0, max: 0.999,
           not: 'Bu eşiğin altındaki eşleşmeler sayılmaz. Ölçüldü: 0,80 eşiği rastgele ' +
-            'çiftlerin yaklaşık %41\'ini geçiriyor, yani tek başına seçici değildir.' },
+            'çiftlerin yaklaşık %41\'ini geçiriyor, yani tek başına seçici değildir. ' +
+            'Bu değeri değiştirmek güven yüzdesini de değiştirir, çünkü güven "eşiği ' +
+            'geçen kaç kayıt var" sorusunun cevabıdır.' },
         { yol: 'signalCfg.minMatches', ad: 'En az eşleşme', tip: 'sayi', adim: 1, min: 1, max: 1000,
-          not: 'Sinyal üretmek için gereken eşik üstü kayıt sayısı. Küçük değerlerde ' +
-            'oran gürültüden ibaret olur (5 kayıtta %60, 3 kayıt demektir).' },
-        { yol: 'signalCfg.minWinRate', ad: 'En az başarı oranı', tip: 'sayi', adim: 0.01, min: 0, max: 1,
-          not: 'Benzer kayıtlarda aranan asgari tutma oranı. Türlerin taban oranları ' +
-            'çok farklıdır (ölçüldü: oluşum %39-50, dokunuş %23-28), bu yüzden mutlak ' +
-            'bir eşik bir türü tamamen kapatabilir.' },
-        { yol: 'signalCfg.minRr', ad: 'En az risk/ödül', tip: 'sayi', adim: 0.1, min: 0, max: 10,
-          not: 'Planın ödül/risk oranı bunun altındaysa sinyal üretilmez. 0 kapatır.' },
-        { yol: 'signalCfg.minExpectancy', ad: 'En az beklenen değer (R)', tip: 'sayi', adim: 0.05, min: -1, max: 5,
-          not: 'Beklenen değer = tutma oranı x R/R - kırılma oranı + zaman aşımı katkısı. ' +
-            'Yüksek isabet tek başına yetmez, matematiğin de olumlu olması gerekir.' },
-        { yol: 'signalCfg.touchMinWinRate', ad: 'Dokunuşta en az isabet oranı',
-          tip: 'sayi', adim: 0.01, min: 0, max: 1,
-          not: 'Fiyat kutuya geri döndüğünde üretilen sinyal için ayrı eşik. ' +
-            'Boş bırakılırsa üstteki genel eşik kullanılır. Neden ayrı: eşikler ' +
-            'mutlak sayıdır ama türlerin taban oranı çok farklıdır. Ölçüldü ' +
-            '(5m, 24.218 olay): oluşum geçmişte %46,6 tutmuş, dokunuş %18,1. Tek ' +
-            'bir eşik dokunuşu kurulum kötü olduğu için değil ölçü başka olduğu ' +
-            'için eliyordu. Başabaş noktaları da farklı: dokunuşta medyan R/R ' +
-            '2,45 olduğu için %28,9 isabet yeter, oluşumda R/R 1,00 ve %50 gerekir.' },
+          not: 'Sinyal üretmek için gereken eşik üstü kayıt sayısı. Ölçüldü (5m): ' +
+            'oluşumda medyan 1.236, dokunuşta 391 benzer kayıt bulunuyor.' },
         { yol: 'signalCfg.maxZoneAgeBars', ad: 'En fazla kutu yaşı (bar)',
           tip: 'sayi', adim: 10, min: 0, max: 2000,
           not: 'Olay anındaki kutu yaşı bunu aşarsa sinyal üretilmez. 0 kapatır. ' +
             'Kutunun çizim ömrü 100 bardır ama izlenmeye 600 bara kadar devam ' +
-            'eder, yani çok eski bir kutuya gelen dokunuş da olay üretebiliyordu. ' +
-            'Ölçüldü: dokunuşların %82,6\'sı zaten 100 bardan genç kutulara geliyor.' },
-        { yol: 'signalCfg.priorStrength', ad: 'Kalibrasyon önseli (sanal gözlem)', tip: 'sayi', adim: 1, min: 0, max: 200,
-          not: 'Gösterilen oran, havuzun taban oranına doğru bu ağırlıkta çekilir. ' +
-            '20 değeri "20 kayıtlık bir ön bilgi" demektir ve 5 eşleşmelik bir oranın ' +
-            'neredeyse tamamen tabana yakın kalmasını sağlar. 0 kapatır, ham oran gösterilir.' },
-        { yol: 'signalCfg.minLift', ad: 'En az katma değer', tip: 'sayi', adim: 0.01, min: 0, max: 0.5,
-          not: 'Gösterilen oran, aynı türün taban oranından en az bu kadar yüksek ' +
-            'olmalı. 0 kapatır. Ölçülmeden açılmamalı: bkz. scripts/search-params.mjs.' },
-        { yol: 'signalCfg.newsBlackoutMin', ad: 'Veri penceresi (dk)', tip: 'sayi', adim: 5, min: 0, max: 240,
-          not: 'Karar anı yüksek etkili bir veriye bu kadar yakınsa sinyal üretilmez. ' +
-            '0 kapatır. Ölçüldü: NFP penceresinde 15m dokunuş isabeti %15,3 (n=59), ' +
-            'diğer zamanlarda %28,1; ama örneklem küçük ve aralıklar örtüşüyor, yani ' +
-            'faydası kanıtlı değil. Takvim dosyası yoksa bu ayar etkisizdir: ' +
-            'veri klasöründe calendar/high_impact.csv gerekir.' },
-        { yol: 'signalCfg.halfLifeYears', ad: 'Eşleşme yarı ömrü (yıl)', tip: 'sayi', adim: 1, min: 0, max: 30,
-          not: 'Eski eşleşmeler bu yarı ömürle hafifler ve güven aralığı etkin örnekleme ' +
-            'göre hesaplanır. 0 kapatır. Ölçüldü: doğrulama diliminde kazanç 0,002 Brier, ' +
-            'yani ölçüm hatasının içinde. Kendi verinizde denemek için: ' +
-            'node scripts/search-params.mjs --ablation' },
-      ],
-      capraz: ulasilmazEsikUyarisi,
-    },
-    {
-      // Olcumun en belirleyici girdisi: maliyet. 1 dakikalikta brut edimin
-      // tamamini yiyor. Bir donem yalnizca kodda sabitti.
-      baslik: 'İşlem maliyeti ve ölçüm',
-      bozar: false,
-      not: 'Bu değerler hem Test sekmesinde hem de sinyalin beklenen değer ' +
-        'hesabında kullanılır. Kendi spreadinizi girin: ölçülen sonuç buna çok duyarlıdır.',
-      alanlar: [
-        { yol: 'backtestCfg.costPct', ad: 'Maliyet (fiyata oran)', tip: 'sayi', adim: 0.00001, min: 0, max: 0.01,
-          not: '0,000068 = 4400 dolarlık altında yaklaşık 0,30 dolar gidiş dönüş. ' +
-            '17 yıllık testte doğru ölçü budur, çünkü altın 900 dolardan 4400 dolara çıktı.' },
-        { yol: 'backtestCfg.costUsd', ad: 'Maliyet (sabit dolar)', tip: 'sayi', adim: 0.01, min: 0, max: 100,
-          not: 'Yalnızca oran 0 ise kullanılır.' },
-        { yol: 'backtestCfg.slippageAtr', ad: 'Kayma (ATR)', tip: 'sayi', adim: 0.01, min: 0, max: 2,
-          not: 'Limit emrin beklenenden kötü dolması payı. Girişin aleyhine eklenir.' },
-        { yol: 'backtestCfg.warmupPerBucket', ad: 'Isınma: tür ve yön başına asgari aday', tip: 'sayi', adim: 10, min: 0, max: 5000,
-          not: 'Bir olay ancak hafızada aynı türden ve aynı yönden bu kadar aday varsa ' +
-            'değerlendirilir. Sabit olay sayısı yüksek zaman dilimlerinde testi anlamsız kılıyordu.' },
-      ],
-    },
-    {
-      // Bu grup hafizayi ETKILEMEZ: yeniden tarama uyarisi cikmamali.
-      baslik: 'Risk ve pozisyon',
-      bozar: false,
-      not: 'Bakiye girilince sinyal kartında lot ve dolar riski görünür. Türler arasında ' +
-        'risk üç kat farklı (ölçüldü: oluşum 2,02-2,10 ATR, dokunuş 0,68-0,75 ATR), ' +
-        'bu yüzden sabit lotla işlem açmak oluşumda üç kat fazla risk demek.',
-      alanlar: [
-        { yol: 'risk.balance', ad: 'Hesap bakiyesi ($)', tip: 'sayi', adim: 100, min: 0,
-          not: '0 bırakılırsa pozisyon hesaplayıcı gizli kalır.' },
-        { yol: 'risk.riskPct', ad: 'İşlem başına risk (%)', tip: 'sayi', adim: 0.1, min: 0.01, max: 100,
-          not: 'Stop vurulursa kaybedilecek bakiye yüzdesi.' },
-        { yol: 'risk.contractSize', ad: 'Sözleşme büyüklüğü (ons)', tip: 'sayi', adim: 1, min: 1,
-          not: 'XAUUSD standart lotta 100 onstur.' },
-        { yol: 'risk.lotStep', ad: 'Lot adımı', tip: 'sayi', adim: 0.01, min: 0.001,
-          not: 'Brokerinizin izin verdiği en küçük artış.' },
-        { yol: 'risk.minLot', ad: 'En küçük lot', tip: 'sayi', adim: 0.01, min: 0.001,
-          not: 'Bunun altına düşen hesaplarda uyarı gösterilir.' },
-        { yol: 'risk.costUsd', ad: 'Gidiş dönüş maliyet ($)', tip: 'sayi', adim: 0.01, min: 0,
-          not: 'Boş bırakılırsa fiyatın %0,0068\'i kullanılır (ölçüm ile aynı).' },
+            'eder, yani çok eski bir kutuya gelen dokunuş da olay üretebiliyor.' },
       ],
     },
     {

@@ -42,6 +42,25 @@ function sinyalOzeti (signal, opts) {
   const hamOran = num(signal.winRateRaw, num(signal.winRate, NaN))
   const parcalar = []
 
+  // BENZERLIK KIPI: tutma orani HIC hesaplanmiyor, ozet de ona gore.
+  //
+  // Bu dal olmadan ozet BOS donuyordu: alt seritte ve masaustu bildiriminde
+  // sinyalin yaninda hicbir sey yazmiyordu, cunku asagidaki parcalarin hepsi
+  // kaldirilan R:R alanlarina bakiyor.
+  //
+  // AYRIM `similarCount` ILE YAPILIR, `confidence` ILE DEGIL. Iki bicimde de
+  // `confidence` alani var ama OLCEGI FARKLI: eski R:R kayitlarinda 0..1 bir
+  // oran, yeni kayitlarda 0..100 bir yuzdelik dilim. Confidence'a bakilsaydi
+  // eski bir kayit "güven %1" gosterirdi. `similarCount` yalnizca yeni
+  // bicimde var.
+  const benzer = num(signal.similarCount, NaN)
+  if (isFinite(benzer)) {
+    parcalar.push(Math.round(benzer) + ' benzer kurulum')
+    const guven = num(signal.confidence, NaN)
+    if (isFinite(guven)) parcalar.push('güven %' + Math.round(guven))
+    return parcalar.join(', ')
+  }
+
   if (n > 0 && isFinite(hamOran)) {
     parcalar.push(Math.round(hamOran * n) + '/' + n + ' tuttu')
   } else if (isFinite(num(signal.winRate, NaN))) {
@@ -87,6 +106,12 @@ function sinyalBasligi (signal, tf) {
 function isaretMetni (signal) {
   if (!signal) return ''
   const onek = signal.kind === 'form' ? 'OL' : 'DK'
+  // Yeni bicim: guven yuzdesi. Ayrim `similarCount` ile yapilir, cunku
+  // `confidence` iki bicimde de var ama olcegi farkli (eski 0..1, yeni 0..100).
+  if (isFinite(num(signal.similarCount, NaN))) {
+    const guven = num(signal.confidence, NaN)
+    return isFinite(guven) ? onek + ' %' + Math.round(guven) : onek
+  }
   const n = Math.round(num(signal.matchCount, 0))
   const hamOran = num(signal.winRateRaw, num(signal.winRate, NaN))
   if (n > 0 && isFinite(hamOran)) return onek + ' ' + Math.round(hamOran * n) + '/' + n

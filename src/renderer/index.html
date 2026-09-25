@@ -126,7 +126,7 @@
         <div id="chartMarkerKey" class="chart-key">
           <span><b>OL</b> kutu oluşumu</span>
           <span><b>DK</b> bölge dokunuşu</span>
-          <span class="muted">yanındaki sayı: geçmişte kaç kayıttan kaçı tuttu</span>
+          <span class="muted">yanındaki sayı: güven (geçmişte ne kadar çok benzeri var)</span>
         </div>
         <div id="chartEmpty" class="chart-empty">
           Veri yok. Önce <b>Veri Çek</b>, sonra <b>Geçmişi Tara</b> düğmesini kullanın.
@@ -154,7 +154,6 @@
         <button type="button" class="side-tab" id="sideTabZones" data-tab="zones" role="tab" aria-selected="false">Bölgeler</button>
         <button type="button" class="side-tab" id="sideTabMemory" data-tab="memory" role="tab" aria-selected="false">Hafıza</button>
         <button type="button" class="side-tab" id="sideTabSettings" data-tab="settings" role="tab" aria-selected="false">Ayarlar</button>
-        <button type="button" class="side-tab" id="sideTabTest" data-tab="test" role="tab" aria-selected="false">Test</button>
       </nav>
 
       <div id="sidePanelBody">
@@ -183,7 +182,7 @@
             </span>
           </div>
           <div id="signalList" class="list scroll"></div>
-          <div id="signalEmpty" class="empty">Sinyal listesi geriye testten gelir. &quot;Test&quot; sekmesinde &quot;Testi Çalıştır&quot; deyin.</div>
+          <div id="signalEmpty" class="empty">Sinyal listesi geçmiş taramasından gelir. Bu zaman dilimi için henüz sinyal yok.</div>
           <div id="signalDetail" class="detail scroll" hidden></div>
         </section>
 
@@ -240,21 +239,6 @@
           <form id="settingsForm" class="scroll panel-body" autocomplete="off"></form>
         </section>
 
-        <!-- ------------------------ TEST ------------------------ -->
-        <section id="panelTest" class="panel" data-panel="test" role="tabpanel">
-          <div class="panel-head">
-            <span class="panel-title">Yürüyen ileri test</span>
-            <span class="panel-actions">
-              <label class="field inline mini" for="testWarmup"><span>Isınma</span>
-                <input type="number" id="testWarmup" class="input mini" value="500" min="0" step="50">
-              </label>
-              <button type="button" class="btn mini" id="testExportBtn" title="Test işlemlerini CSV olarak kaydet" disabled>CSV</button>
-              <button type="button" class="btn mini btn-primary" id="testRunBtn">Çalıştır</button>
-            </span>
-          </div>
-          <!-- Özet, yıllara göre kırılım ve sermaye eğrisini panels.js çizer. -->
-          <div class="scroll panel-body"></div>
-        </section>
 
       </div>
     </aside>
@@ -329,7 +313,6 @@ ANA ALAN
   #legendSymbol #legendTf #legendO #legendH #legendL #legendC #legendChange
   #goLatestBtn          gecmis pencereden guncel mumlara donus
   #memoryExportBtn      hafiza olaylarini CSV olarak kaydet
-  #testExportBtn        test islemlerini CSV olarak kaydet
   #chartEmpty           veri yokken gosterilen kutu
   #chartLoading         yuklenirken gosterilen kutu
   #tvPanel              TradingView gorunumu (baslangicta hidden)
@@ -340,10 +323,10 @@ ANA ALAN
 SAG PANEL
   #sidePanel            sag panel (380px)
   #sideTabs             sekme serisi; dugmelerde
-                        data-tab="signals|zones|memory|settings|test"
-  #sideTabSignals #sideTabZones #sideTabMemory #sideTabSettings #sideTabTest
+                        data-tab="signals|zones|memory|settings"
+  #sideTabSignals #sideTabZones #sideTabMemory #sideTabSettings
   #sidePanelBody        panel govdesi
-  #panelSignals #panelZones #panelMemory #panelSettings #panelTest
+  #panelSignals #panelZones #panelMemory #panelSettings
                         her birinde data-panel="..."; etkin olana .active
                         (.panel gizli, .panel.active gorunur)
 
@@ -355,7 +338,6 @@ SAG PANEL
              ve panel govdesi: #panelMemory .panel-body
   Ayarlar  : #settingsSaveBtn #settingsResetBtn #settingsStatus
              ve alanlarin uretildigi kap: #settingsForm (.panel-body)
-  Test     : #testWarmup #testRunBtn ve govde: #panelTest .panel-body
 
 ALT SERIT
   #statusbar #statusData #statusRange #statusEngine #statusLive
