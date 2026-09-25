@@ -85,7 +85,6 @@ const durum = {
   // null ise kisitlama yok, her sey son durumuyla cizilir.
   asOf: null,
   hafizaOzeti: null,
-  prototipler: [],
   // Otomatik hazirlik (eksik mum indirme ve gerekirse tarama) suruyor mu.
   hazirlikCalisiyor: false,
   taramaCalisiyor: false,
@@ -1196,16 +1195,16 @@ async function sinyalleriYukle() {
   if (durum.seciliSinyalId === null && durum.aktifPanel === 'signals') sinyalPaneliniCiz()
 }
 
-/** Hafiza ozetini ve sekil kumelerini yukler. */
+/**
+ * Hafiza ozetini yukler.
+ *
+ * Sekil kumeleri (engine:prototypes) artik cekilmiyor: yalnizca kaldirilan
+ * "hafizadan suz" kipinde kullaniliyorlardi ve sekmede "tahmin gucu yok"
+ * notuyla duruyorlardi. Motor taramada yine uretiyor, arayuz gostermiyor.
+ */
 async function hafizayiYukle() {
   const ozet = await cagirGuvenli('engine:memory-summary', { tf: durum.tf }, 'Hafıza özeti alınamadı')
   if (ozet !== null) durum.hafizaOzeti = ozet && ozet.summary ? ozet.summary : ozet
-  const proto = await cagirGuvenli('engine:prototypes', { tf: durum.tf }, 'Şekil kümeleri alınamadı')
-  if (proto !== null) {
-    durum.prototipler = Array.isArray(proto)
-      ? proto
-      : (proto && Array.isArray(proto.prototypes) ? proto.prototypes : [])
-  }
   hafizaPaneliniCiz()
 }
 
@@ -1465,11 +1464,10 @@ async function tfDegistir(tf) {
   durum.zones = []
   // ONCEKI ZAMAN DILIMININ SAYILARI EKRANDA KALMASIN.
   //
-  // Hafiza ozeti ve sekil kumeleri tf degisince oldugu gibi duruyordu;
-  // basligta tf yazmadigi icin kullanici 1 dakikaligin sayilarini 15
-  // dakikaliga ait sanip karar verebiliyordu.
+  // Hafiza ozeti tf degisince oldugu gibi duruyordu; basligta tf yazmadigi
+  // icin kullanici 1 dakikaligin sayilarini 15 dakikaliga ait sanip karar
+  // verebiliyordu.
   durum.hafizaOzeti = null
-  durum.prototipler = []
   tfDugmeleriniIsaretle()
   planCizgileri(null)
   tvKaynagiGuncelle()
@@ -2519,7 +2517,9 @@ function bolgeAyrintisiniCiz(z, dokunuslar) {
 function hafizaPaneliniCiz() {
   const kap = panelGovdesi('memory')
   if (!kap) return
-  renderMemory(kap, durum.hafizaOzeti, durum.prototipler)
+  // Kurulus bilgisi (ne zaman, hangi bara kadar, ayarla uyumlu mu) veri
+  // durumu satirindan gelir.
+  renderMemory(kap, durum.hafizaOzeti, durum.veriDurumu)
 }
 
 /**
@@ -3104,7 +3104,6 @@ function dugmeleriBagla() {
       const sonuc = await cagirGuvenli('engine:memory-delete', { tf: durum.tf }, 'Hafıza silinemedi')
       if (sonuc === null) return
       durum.hafizaOzeti = null
-      durum.prototipler = []
       durum.signals = []
       durum.zones = []
       durum.seciliBolgeId = null

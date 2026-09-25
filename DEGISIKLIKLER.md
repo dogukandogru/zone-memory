@@ -123,6 +123,16 @@ olay geldiginde ayni turdeki en benzer gecmis olaylarla karsilastirilip
   sekmesinden geliyordu, esikleri de kaldirildi). Grubun eski notu da yanlis
   bilgi veriyordu: "sinyal ancak yeterli tutma orani, risk/odul ve pozitif
   beklenen degerle uretilir" diyordu, oysa bu ucu hic hesaplanmiyor.
+- **Hafiza sekmesi kaldirilan sistemin sayilariyla doluydu.** "Basari orani
+  %29", saygi/kirilim/zaman asimi, ortalama lehte/aleyhte hareket, yon, tur ve
+  seans bazinda tutma oranlari, skor bilesenlerinin "ayirt ediyor mu" tablosu
+  (TERS etiketleriyle) ve "tahmin gucu yok" notlu sekil kumeleri. Hicbiri
+  sinyal kararina girmiyor; kullanici tutma oranini ve kar oranlarini
+  kaldirmisti ve "%29 basari" sinyalin isabeti sanilabiliyordu. Sekme artik
+  yalnizca benzerlik aramasinin baktigi HAVUZU anlatiyor: toplam kurulum, tur
+  ve yon sayilari, kapsanan aralik, son taranan bar, kurulus zamani, yillara
+  gore kurulum sayisi; hafiza etkin ayarla kurulmamissa ustte uyari. Sekil
+  kumeleri arayuzden cekilmiyor (motor taramada yine uretiyor).
 - **Grafik isaretlerinde sayi kalmamisti ama efsane sayidan bahsediyordu.**
   Isaret metni "9/15 tuttu" bicimindeydi; o alanlar kaldirilinca isaretler
   yalnizca "OL" / "DK" gosteriyor, efsane ise hala "yanindaki sayi: gecmiste

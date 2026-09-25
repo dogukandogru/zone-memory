@@ -34,8 +34,6 @@ import {
 
 const TF_SECENEKLERI = ['1m', '5m', '15m', '30m', '1h', '4h', '1d']
 
-const SEANS_ADLARI = { Asia: 'Asya', London: 'Londra', 'New York': 'New York', Other: 'Diğer' }
-
 const RENK = { up: '#26a69a', down: '#ef5350', dim: '#787b86', accent: '#2962ff', warn: '#f2b40e' }
 
 /**
@@ -619,16 +617,6 @@ function pozisyonBolumu(el, signal, risk) {
   el.appendChild(h('div', 'small muted',
     'Maliyet dahil. Lot yalnızca riski sınırlar: başarı oranına göre büyütülmez, ' +
     'çünkü sistem henüz kanıtlanmış bir katma değer üretmiyor.'))
-}
-
-/** Skor bilesenlerinin okunabilir adlari. */
-const PARCA_ADLARI = {
-  flow: 'akış gücü',
-  trend: 'üst TF trendi',
-  session: 'seans',
-  rejection: 'fitil reddi',
-  volume: 'hacim',
-  qualified: 'eşiği geçti (bileşik)',
 }
 
 /** outcome etiketinin okunabilir hali. */
@@ -1447,126 +1435,74 @@ export function renderZones(el, zones, opts) {
 /* ------------------------------------------------------------------ */
 
 /**
- * Hafiza ozetini ve ortak yapilari cizer.
+ * Hafiza sekmesi: benzerlik aramasinin baktigi GECMIS KURULUM HAVUZUNU ozetler.
+ *
+ * BU SEKME BIR DONEM KALDIRILAN R:R SISTEMININ SAYILARIYLA DOLUYDU: basari
+ * orani, saygi/kirilim/zaman asimi, ortalama lehte/aleyhte hareket, yon, tur
+ * ve seans bazinda tutma oranlari, skor bilesenlerinin "ayirt ediyor mu"
+ * tablosu ve sekil kumeleri. Bunlarin hicbiri sinyal kararina girmiyor
+ * (kullanici tutma oranini ve kar oranlarini kaldirmisti) ve "%29 basari"
+ * gibi bir sayi musteri tarafindan sinyalin isabeti sanilabiliyordu. Sekil
+ * kumeleri yalnizca kaldirilan "hafizadan suz" kipinde kullaniliyordu.
+ *
+ * Simdi yalnizca havuzun KENDISI anlatilir: kac kurulum, hangi turden, hangi
+ * yonde, hangi tarih araliginda, kac yila yayilmis, ne zaman ve hangi ayarla
+ * kurulmus. Tutma orani hesaplanmaz, gosterilmez.
+ *
  * @param {HTMLElement} el Govde kabi (ornek: #panelMemory .panel-body)
  * @param {object} summary   memory.summarize ciktisi
- * @param {Array<object>} prototypes  cluster.buildPrototypes ciktisi
+ * @param {object|null} [durumSatiri]  data:status satiri (kurulus bilgisi)
  */
-export function renderMemory(el, summary, prototypes) {
+export function renderMemory(el, summary, durumSatiri) {
   if (!el) return
   bosalt(el)
 
   const s = summary || null
-  const protolar = Array.isArray(prototypes) ? prototypes : []
+  const d = durumSatiri && typeof durumSatiri === 'object' ? durumSatiri : null
 
   if (!s || sayi(s.total, 0) === 0) {
     el.appendChild(bosKutu('Hafıza boş. "Geçmişi Tara" ile geçmiş bölge olaylarını öğrenin.'))
     return
   }
 
-  el.appendChild(bolumBasligi('Özet' + (s.tf ? ' (' + String(s.tf) + ')' : '')))
+  // Hafiza etkin ayarla kurulmamissa sinyal uretilmiyor; bu, sekmenin en
+  // ustunde gorunmeli.
+  if (d && d.memoryCfgMatch === false) {
+    const uyari = uyariKutusu('Hafıza şu anki ayarlardan farklı bir ayarla kuruldu. ' +
+      '"Yeniden Kur" ile güncelleyin, yoksa yeni sinyal üretilmez.')
+    uyari.style.color = 'var(--down, ' + RENK.down + ')'
+    el.appendChild(uyari)
+  }
+
+  el.appendChild(bolumBasligi('Geçmiş kurulum havuzu' + (s.tf ? ' (' + String(s.tf) + ')' : '')))
+  const turler = s.byKind || {}
+  const yonlar = s.byDirection || {}
+  const adet = (grup, anahtar) => (grup[anahtar] ? tam(grup[anahtar].total) : '0')
   el.appendChild(statIzgara([
-    stat('Toplam olay', tam(s.total)),
-    stat('Etiketlenmiş', tam(s.labeled)),
-    stat('Başarı oranı', formatPercent(s.winRate, 1), sayi(s.winRate, 0) >= 0.5 ? 'up' : 'down'),
-    stat('Saygı', tam(s.success), 'up'),
-    stat('Kırılım', tam(s.fail), 'down'),
-    stat('Zaman aşımı', tam(s.timeout), 'muted'),
+    stat('Toplam kurulum', tam(s.total)),
+    stat('Kutu oluşumu', adet(turler, 'form')),
+    stat('Bölge dokunuşu', adet(turler, 'touch')),
+    stat('AL (destek)', adet(yonlar, 'BUY'), 'up'),
+    stat('SAT (direnç)', adet(yonlar, 'SELL'), 'down'),
   ]))
   el.appendChild(kv('Kapsanan aralık', formatDate(s.firstTime) + ' - ' + formatDate(s.lastTime)))
-  el.appendChild(kv('Ortalama lehte hareket', formatNumber(s.avgMfeAtr, 2) + ' ATR'))
-  el.appendChild(kv('Ortalama aleyhte hareket', formatNumber(s.avgMaeAtr, 2) + ' ATR'))
 
-  // Yon dagilimi
-  el.appendChild(bolumBasligi('Yön dağılımı'))
-  const yonlar = s.byDirection || {}
-  const yonAdlari = { BUY: 'AL (destek)', SELL: 'SAT (direnç)' }
-  const yonSatirlari = []
-  for (const anahtar of ['BUY', 'SELL']) {
-    const b = yonlar[anahtar]
-    if (!b) continue
-    yonSatirlari.push([yonAdlari[anahtar], tam(b.total), tam(b.success), tam(b.fail), formatPercent(b.winRate, 1)])
-  }
-  el.appendChild(yonSatirlari.length
-    ? tablo(['Yön', 'Toplam', 'Saygı', 'Kırılım', 'Oran'], yonSatirlari)
-    : h('div', 'small muted', 'Yön dağılımı yok.'))
-
-  // Olay turu dagilimi
-  el.appendChild(bolumBasligi('Olay türü dağılımı'))
-  const turler = s.byKind || {}
-  const turSatirlari = []
-  for (const anahtar of ['form', 'touch']) {
-    const b = turler[anahtar]
-    if (!b) continue
-    turSatirlari.push([turAdi(anahtar), tam(b.total), tam(b.success), tam(b.fail), formatPercent(b.winRate, 1)])
-  }
-  el.appendChild(turSatirlari.length
-    ? tablo(['Tür', 'Toplam', 'Saygı', 'Kırılım', 'Oran'], turSatirlari)
-    : h('div', 'small muted', 'Tür dağılımı yok.'))
-
-  // SKOR BILESENLERI: her bilesen gercekten ayirt ediyor mu.
-  //
-  // Skor "eşik geçti" etiketini uretiyor ama bilesenlerin ayirt edip etmedigi
-  // hic olculmemisti. Tablo her bilesen icin bilesenin DOGRU oldugu ve
-  // OLMADIGI olaylarin oranini yan yana koyar; son sutun iki %95 araliginin
-  // ortusup ortusmedigini soyler.
-  const parcalar = s.byPart || null
-  if (parcalar) {
-    el.appendChild(bolumBasligi('Skor bileşenleri (gerçekten ayırt ediyor mu)'))
-    // Tur basina AYRI tablo: her satira "Kutu olusumu - " onekini koymak yan
-    // paneldeki dar tabloyu tasiriyordu.
-    let parcaVar = false
-    for (const tur of ['form', 'touch']) {
-      const grup = parcalar[tur]
-      if (!grup) continue
-      const parcaSatirlari = []
-      for (const ad of Object.keys(grup)) {
-        const g = grup[ad]
-        if (!g || !g.evet || !g.hayir) continue
-        if (g.evet.total === 0 || g.hayir.total === 0) continue
-        const fark = Number.isFinite(g.diffPts)
-          ? (g.diffPts >= 0 ? '+' : '') + formatNumber(g.diffPts, 1)
-          : '-'
-        // Yan panel dar: sutunlar KISA tutulur, ornek sayisi bilesen adinin
-        // yanindadir ve hukum farkin yanina sigar.
-        parcaSatirlari.push([
-          (PARCA_ADLARI[ad] || ad) + ' (' + tam(g.evet.total) + ')',
-          formatPercent(g.evet.winRate, 1),
-          formatPercent(g.hayir.winRate, 1),
-          fark + (g.separates ? (g.diffPts >= 0 ? '*' : ' TERS') : ''),
-        ])
-      }
-      if (parcaSatirlari.length === 0) continue
-      parcaVar = true
-      el.appendChild(h('div', 'small muted', turAdi(tur)))
-      el.appendChild(tablo(['Bileşen', 'Var', 'Yok', 'Fark'], parcaSatirlari))
-    }
-    if (!parcaVar) {
-      el.appendChild(h('div', 'small muted', 'Bileşen kırılımı yok, hafızayı yeniden tarayın.'))
-    }
-    el.appendChild(h('div', 'small muted',
-      'Bileşen adının yanındaki sayı, bileşenin doğru olduğu olay sayısıdır. Son sütun iki ' +
-      '%95 Wilson aralığının örtüşüp örtüşmediğine bakar: işaretsiz fark, aralıklar örtüştüğü ' +
-      'için "bir şey söylemiyor" demektir; * ayırt ettiğini, TERS ise bileşen doğru olduğunda ' +
-      'sonucun daha KÖTÜ olduğunu gösterir. Skor sinyal kararına girmez, bilgi amaçlıdır.'))
+  // KURULUS BILGISI: hafiza ne zaman ve hangi bara kadar kuruldu. Depo bunun
+  // otesine gectiyse tarama kendiliginden istenir; kullanici burada gorur.
+  if (d) {
+    const kuruldugu = sayi(d.memoryBuiltToTime, 0)
+    if (kuruldugu > 0) el.appendChild(kv('Son taranan bar', formatDateTime(kuruldugu)))
+    const kurulus = d.memoryBuiltAt ? Date.parse(String(d.memoryBuiltAt)) : NaN
+    if (Number.isFinite(kurulus)) el.appendChild(kv('Kuruluş', formatDateTime(kurulus / 1000)))
   }
 
-  // Seans dagilimi
-  el.appendChild(bolumBasligi('Seans dağılımı'))
-  const seanslar = s.bySession || {}
-  const seansSatirlari = []
-  const seansAnahtarlari = Object.keys(seanslar)
-  for (let i = 0; i < seansAnahtarlari.length; i++) {
-    const ad = seansAnahtarlari[i]
-    const b = seanslar[ad]
-    if (!b || sayi(b.total, 0) === 0) continue
-    seansSatirlari.push([SEANS_ADLARI[ad] || ad, tam(b.total), tam(b.success), tam(b.fail), formatPercent(b.winRate, 1)])
-  }
-  el.appendChild(seansSatirlari.length
-    ? tablo(['Seans', 'Toplam', 'Saygı', 'Kırılım', 'Oran'], seansSatirlari)
-    : h('div', 'small muted', 'Seans dağılımı yok.'))
+  el.appendChild(h('div', 'small muted',
+    'Bir sinyal, o anki kurulumun şekli bu havuzdaki aynı tür ve yöndeki geçmiş ' +
+    'kurulumlarla karşılaştırılarak üretilir. Havuz büyüdükçe karşılaştırma ' +
+    'derinleşir. Tutma oranı hesaplanmaz; hedef ve zarar durdur sizin kararınız.'))
 
-  // Yillara gore
+  // YILLARA GORE: havuzun derinligi. Yalnizca kurulum sayisi; tutma orani,
+  // MFE ve MAE sutunlari kaldirildi.
   el.appendChild(bolumBasligi('Yıllara göre'))
   const yillar = Array.isArray(s.byYear) ? s.byYear : []
   if (yillar.length === 0) {
@@ -1575,105 +1511,10 @@ export function renderMemory(el, summary, prototypes) {
     const satirlar = []
     for (let i = 0; i < yillar.length; i++) {
       const y = yillar[i]
-      satirlar.push([
-        yil(y.year), tam(y.total), tam(y.success), tam(y.fail),
-        formatPercent(y.winRate, 1), formatNumber(y.avgMfeAtr, 2), formatNumber(y.avgMaeAtr, 2),
-      ])
+      satirlar.push([yil(y.year), tam(y.total)])
     }
-    el.appendChild(tablo(['Yıl', 'Toplam', 'Saygı', 'Kırılım', 'Oran', 'Ort. MFE', 'Ort. MAE'], satirlar))
+    el.appendChild(tablo(['Yıl', 'Kurulum'], satirlar))
   }
-
-  // SEKIL KUMELERI: BILGI AMACLI, SINYALE KATILMAZ.
-  //
-  // Olculdu: kumelerin basari orani hafiza tabanindan ayirt edilemiyor
-  // (15m'de sekiz kumenin orani %31,2 - %35,5, taban %33,4). Once bu satirlar
-  // "gercekten ise yaramis kalip" diye sunuluyordu; simdi her kumenin yaninda
-  // tabana gore fark yaziyor ve renk yalnizca fark guven araliginin disinda
-  // kalirsa kullaniliyor.
-  el.appendChild(bolumBasligi('Şekil kümeleri (' + tam(protolar.length) + ', tahmin gücü yok)'))
-  if (protolar.length === 0) {
-    el.appendChild(h('div', 'small muted', 'Şekil kümesi çıkarılmadı, tarama sonrası oluşur.'))
-    return
-  }
-  const hafizaTabani = sayi(s.winRate, NaN)
-  el.appendChild(h('div', 'small muted',
-    'Kümeler sinyal kararına katılmaz. Karşılaştırma tabanı, hafızanın tamamının ' +
-    'tutma oranı: ' + (Number.isFinite(hafizaTabani) ? formatPercent(hafizaTabani, 1) : '-') + '.'))
-
-  const cizimler = []
-  for (let i = 0; i < protolar.length; i++) {
-    const p = protolar[i]
-    const kutu = h('div', 'stat')
-    kutu.style.marginBottom = '5px'
-
-    // Fark anlamli mi: kumenin Wilson araligi hafiza tabanini ICERIYORSA
-    // "fark yok" demektir ve renk kullanilmaz.
-    const etiketli = sayi(p.labeled, 0)
-    const kazanan = sayi(p.wins, 0)
-    const aralik = etiketli > 0 ? wilsonAralik(kazanan, etiketli) : null
-    const ayirdedici = !!(aralik && Number.isFinite(hafizaTabani) &&
-      (aralik.lo > hafizaTabani || aralik.hi < hafizaTabani))
-    const fark = Number.isFinite(hafizaTabani) ? (sayi(p.winRate, 0) - hafizaTabani) * 100 : NaN
-
-    const bas = h('div', 'kv')
-    bas.appendChild(h('span', null, p.label ? String(p.label) : ('Küme #' + tam(p.id))))
-    const sinif = ayirdedici ? (fark >= 0 ? 'up' : 'down') : 'muted'
-    bas.appendChild(h('span', sinif, formatPercent(p.winRate, 0) +
-      (Number.isFinite(fark) ? '  (' + (fark >= 0 ? '+' : '') + formatNumber(fark, 1) + ' puan)' : '')))
-    kutu.appendChild(bas)
-
-    const cnv = document.createElement('canvas')
-    cnv.className = 'spark'
-    kutu.appendChild(cnv)
-
-    kutu.appendChild(h('div', 'row-sub',
-      tam(p.size) + ' üye, lehte ' + formatNumber(p.avgMfeAtr, 2) +
-      ' ATR, aleyhte ' + formatNumber(p.avgMaeAtr, 2) + ' ATR' +
-      (aralik ? ', %95 aralık ' + formatPercent(aralik.lo, 1) + ' - ' + formatPercent(aralik.hi, 1) : '') +
-      (ayirdedici ? '' : ', taban ile fark yok')))
-    el.appendChild(kutu)
-
-    const merkez = p.centroid
-    const degerler = []
-    if (merkez && merkez.length) {
-      for (let j = 0; j < merkez.length; j++) degerler.push(sayi(merkez[j], NaN))
-    }
-    cizimler.push({ cnv, degerler, ayirdedici: ayirdedici, iyi: fark >= 0 })
-  }
-  for (let i = 0; i < cizimler.length; i++) {
-    const c = cizimler[i]
-    drawSparkline(c.cnv, c.degerler, {
-      color: c.ayirdedici ? (c.iyi ? RENK.up : RENK.down) : RENK.dim,
-      fill: c.ayirdedici
-        ? (c.iyi ? 'rgba(38,166,154,0.14)' : 'rgba(239,83,80,0.14)')
-        : 'rgba(128,128,128,0.10)',
-      lineWidth: 1.5,
-    })
-  }
-}
-
-/**
- * Wilson %95 araligi (arayuz kopyasi).
- *
- * Cekirdekteki learn/stats.js CommonJS'tir ve renderer ESM oldugu icin
- * dogrudan yuklenemez; formul tek satirlik oldugu icin burada tekrarlaniyor.
- * Degistirirken iki dosya birlikte degismeli.
- *
- * @param {number} k Kazanan sayisi
- * @param {number} n Toplam
- * @returns {{lo:number, hi:number}|null}
- */
-function wilsonAralik(k, n) {
-  if (!(n > 0)) return null
-  const z = 1.959963984540054
-  const p = k / n
-  const z2 = z * z
-  const merkez = p + z2 / (2 * n)
-  const yayilim = z * Math.sqrt((p * (1 - p) + z2 / (4 * n)) / n)
-  const bolen = 1 + z2 / n
-  const lo = (merkez - yayilim) / bolen
-  const hi = (merkez + yayilim) / bolen
-  return { lo: lo < 0 ? 0 : lo, hi: hi > 1 ? 1 : hi }
 }
 
 /* ------------------------------------------------------------------ */
