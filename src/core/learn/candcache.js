@@ -43,9 +43,22 @@
  *   20+A   D          dolgu: bas kisim 4'un katina tamamlanir (0..3 bayt)
  *   H      n*k*4      aday indeksleri (int32), bos yuva -1
  *   H+n*k*4  n*k*4    benzerlikler (float32)
+ *   H+n*k*8  n*4      baseN (int32)
+ *   +n*4              baseWins (int32)
+ *   +n*4              benzerSayi (int32)   surum 3
+ *   +n*4              havuzSayi (int32)    surum 3
  *
  * Indeksler, `prepareEvents` ile uretilen ZAMAN SIRALI ve ozellik vektoru olan
  * olay dizisine gore verilir; ham `memory.events` sirasina gore DEGIL.
+ *
+ * SATIRLAR GECMISE BAGLIDIR, GELECEGE DEGIL (bkz. `reuse`)
+ * ---------------------------------------------------------------------------
+ * Bir olayin aday havuzu yalnizca KENDISINDEN ONCE COZULMUS olaylardan kurulur
+ * (yukaridaki aday havuzu kurali). Olaylar zaman sirali oldugu icin sonradan
+ * EKLENEN olaylar daha eski bir olayin satirini DEGISTIREMEZ: yeni olayin
+ * cozum zamani kendi zamanindan sonradir, eski sorgunun esiginden buyuktur.
+ * Bu yuzden depoya bar eklendiginde eski satirlar aynen gecerli kalir ve
+ * yeniden hesaplanmalari gerekmez (bkz. `buildCandidates` `reuse` secenegi).
  *
  * DIKKAT: benzerlikler float32 tutulur (dosya boyu icin). Karar esikleriyle
  * karsilastirma bu yuzden ~1e-7 mertebesinde yuvarlanmis deger uzerinden
@@ -60,7 +73,10 @@ const { agirlikCoz } = require('./similarity')
 // Sinyalin gosterdigi oran havuz tabanina dogru kuculutuldugu icin
 // (kalibrasyon), onbellekli yol bu sayilari tasimazsa referans yoldan
 // sapardi.
-const CANDCACHE_VERSION = 2
+// Surum 3: BENZER KAYIT SAYACLARI da saklanir (benzerSayi, havuzSayi). Bu iki
+// sayi surum 2'de hesaplaniyor ama diske YAZILMIYORDU; dosyadan okunan
+// onbellekle sinyal guveni sifir cikardi.
+const CANDCACHE_VERSION = 3
 
 /** Sihirli sayi: 'ZMCC' (Zone Memory Candidate Cache). */
 const MAGIC = 0x5a4d4343
@@ -175,6 +191,52 @@ function adayOlabilir (ev) {
 }
 
 /**
+ * Eski onbellekten KAC satirin aynen kullanilabilecegi.
+ *
+ * Kosullar (hepsi saglanmazsa 0 doner, yani tam kurulum yapilir):
+ *   - `reuse.cache` surum ve `k` bakimindan uyusuyor
+ *   - `untilTime` sonlu ve pozitif
+ *   - satir sayisi yetiyor
+ * Sinir olaylar zaman sirali oldugu icin bastan sayilir: `untilTime`den KUCUK
+ * zamanli kac olay varsa o kadar satir korunur.
+ *
+ * @param {Array<Object>} events `prepareEvents` ciktisi (zaman sirali)
+ * @param {{cache?:Object, untilTime?:number}} [reuse]
+ * @param {number} k
+ * @returns {number}
+ */
+function korunacakSayi (events, reuse, k) {
+  if (!reuse || !reuse.cache) return 0
+  const eski = reuse.cache
+  if (!eski.idx || !eski.sim) return 0
+  if (sayi(eski.k, 0) !== k) return 0
+  if (sayi(eski.version, 0) !== CANDCACHE_VERSION) return 0
+  const sinir = Number(reuse.untilTime)
+  if (!Number.isFinite(sinir) || sinir <= 0) return 0
+  let m = 0
+  while (m < events.length && Number(events[m].time) < sinir) m++
+  // ESKI ONBELLEKTE O KADAR SATIR YOKSA HIC KORUNMAZ.
+  //
+  // Var olani kullanip kalanini hesaplamak YANLIS olurdu. Eski onbellek
+  // sinirdan SONRAYA da uzanir (hafiza `untilTime`den ilerisine kadar
+  // kurulmustu), yani satir sayisi her zaman yeterli olmali. Yetmiyorsa
+  // onekin AYNI onek olmadigi anlasilir: olaylar araya girmis, dolayisiyla
+  // satirlar baska olaylara ait. O durumda tam kurulum yapilir.
+  //
+  // Ayrica eski onbellegin SON satirlari sinirin otesindedir ve o olaylarin
+  // kendi sonucu eski kurulumda henuz kesinlesmemis olabilir; onlari korumak
+  // tam kurulumdan sapmaya yol acardi. Sinir zaten bu yuzden geri cekiliyor.
+  const varOlan = Math.max(0, Math.round(sayi(eski.n, 0)))
+  return m <= varOlan ? m : 0
+}
+
+/** Int32 sayac dizisinin ilk `m` degerini kopyalar (kaynak yoksa dokunmaz). */
+function kopyalaSayac (hedef, kaynak, m) {
+  if (!(kaynak instanceof Int32Array) || kaynak.length < m) return
+  hedef.set(kaynak.subarray(0, m), 0)
+}
+
+/**
  * Komsu onbellegini kurar: her olay icin kNN BIR KEZ kosar.
  *
  * Aday havuzu kurali backtest.js ile aynidir (bkz. dosya basi). Isinma
@@ -185,10 +247,26 @@ function adayOlabilir (ev) {
  * `outcome === 'nofill'` olaylari icin aday hesaplanmaz (satir bos kalir),
  * cunku test o olaylari hic degerlendirmez.
  *
+ * ESKI SATIRLARI KORUMA (`cfg.reuse`)
+ * ---------------------------------------------------------------------------
+ * Depoya yeni bar eklendiginde hafiza yeniden kurulur ama ESKI olaylarin
+ * satirlari degismez (bkz. dosya basi). `reuse` verilirse zamani
+ * `reuse.untilTime`den kucuk olan olaylarin satirlari eski onbellekten
+ * KOPYALANIR ve kNN yalnizca kalanlar icin kosar. Olculdu (5m, 24.216 olay):
+ * tam kurulum 33,2 sn, gunluk bir ekle 0,2 sn.
+ *
+ * CAGIRANIN GARANTI ETMESI GEREKEN: eski onbellek, su anki olay dizisinin
+ * `untilTime`den once gelen KISMIYLA AYNI olay dizisinden uretilmis olmali.
+ * Ayar izi (cfgHash) ve `cacheKey` esitligi bunu saglar; motor bu iki kontrolu
+ * yapmadan `reuse` gecmez. Burada yalnizca olculebilir olanlar dogrulanir
+ * (k esitligi, satir sayisi); uyusmazsa `reuse` sessizce yok sayilmaz, satir
+ * sayisi kadar kismi kullanilir ya da hic kullanilmaz ve `korunan` 0 doner.
+ *
  * @param {{events:Array<Object>, tf?:string, ctxNames?:string[]}} memory
- * @param {{embargoSec?:number, signalCfg?:Object}} [cfg] Testin ayarlari
+ * @param {{embargoSec?:number, signalCfg?:Object,
+ *          reuse?:{cache:Object, untilTime:number}}} [cfg] Testin ayarlari
  * @param {(pct:number, msg:string)=>void} [onProgress]
- * @returns {{version:number, key:string, n:number, k:number,
+ * @returns {{version:number, key:string, n:number, k:number, korunan:number,
  *            idx:Int32Array, sim:Float32Array}}
  */
 function buildCandidates (memory, cfg, onProgress) {
@@ -222,8 +300,22 @@ function buildCandidates (memory, cfg, onProgress) {
     baseWins: baseWins,
     benzerSayi: benzerSayi,
     havuzSayi: havuzSayi,
+    korunan: 0,
   }
   if (n === 0) return cache
+
+  // KORUNAN SATIRLAR: eski onbellekten kopyalanacak olaylarin sayisi.
+  const korunan = korunacakSayi(events, conf.reuse, k)
+  if (korunan > 0) {
+    const eski = conf.reuse.cache
+    idx.set(eski.idx.subarray(0, korunan * k), 0)
+    sim.set(eski.sim.subarray(0, korunan * k), 0)
+    kopyalaSayac(baseN, eski.baseN, korunan)
+    kopyalaSayac(baseWins, eski.baseWins, korunan)
+    kopyalaSayac(benzerSayi, eski.benzerSayi, korunan)
+    kopyalaSayac(havuzSayi, eski.havuzSayi, korunan)
+    cache.korunan = korunan
+  }
 
   const cozumZamani = cozumZamaniFabrikasi(memory, signalCfg)
 
@@ -251,12 +343,22 @@ function buildCandidates (memory, cfg, onProgress) {
   // Tek imlec: ambargo siniri olaylar zaman sirali oldugu icin monoton artar,
   // bu yuzden her olay bir kez okunup KENDI kovasina yazilir.
   let imlec = 0
-  const step = Math.max(1, Math.floor(n / 100))
-  if (typeof onProgress === 'function') onProgress(0, 'Komşu önbelleği kuruluyor')
+  // Ilerleme YALNIZCA hesaplanacak satirlara gore olculur: korunan satirlar
+  // icin dongu yine dolasilir (havuzlarin dolmasi gerekiyor) ama is yapilmaz,
+  // onlari ilerlemeye katmak yuzdeyi bir anda %90'a firlatirdi.
+  const hesaplanacak = n - korunan
+  const step = Math.max(1, Math.floor(hesaplanacak / 100))
+  if (typeof onProgress === 'function') {
+    onProgress(0, korunan > 0
+      ? 'Komşu önbelleği: ' + korunan + ' satır korundu, ' + hesaplanacak + ' hesaplanacak'
+      : 'Komşu önbelleği kuruluyor')
+  }
 
   for (let i = 0; i < n; i++) {
     const ev = events[i]
     const beforeTime = ev.time - embargoSec
+    // HAVUZ DOLDURMA KORUNAN SATIRLARDA DA CALISIR. Atlanirsa ilk hesaplanan
+    // satir bos havuzla karsilasir ve hicbir komsu bulamaz.
     while (imlec < n && cozumZamani(events[imlec]) < beforeTime) {
       const aday = events[imlec]
       if (adayOlabilir(aday)) {
@@ -265,6 +367,9 @@ function buildCandidates (memory, cfg, onProgress) {
       }
       imlec++
     }
+
+    // Satir eski onbellekten geldi: kNN kosturulmaz.
+    if (i < korunan) continue
 
     // Dolmamis emirler test tarafinda hic degerlendirilmez.
     if (ev.outcome !== 'nofill') {
@@ -293,12 +398,17 @@ function buildCandidates (memory, cfg, onProgress) {
       }
     }
 
-    if (typeof onProgress === 'function' && i % step === 0) {
-      onProgress(Math.round(((i + 1) / n) * 100), 'Komşu önbelleği: ' + (i + 1) + '/' + n)
+    const yapilan = i - korunan
+    if (typeof onProgress === 'function' && yapilan % step === 0) {
+      onProgress(Math.round(((yapilan + 1) / hesaplanacak) * 100),
+        'Komşu önbelleği: ' + (yapilan + 1) + '/' + hesaplanacak)
     }
   }
 
-  if (typeof onProgress === 'function') onProgress(100, 'Komşu önbelleği hazır: ' + n + ' olay')
+  if (typeof onProgress === 'function') {
+    onProgress(100, 'Komşu önbelleği hazır: ' + n + ' olay' +
+      (korunan > 0 ? ' (' + korunan + ' satır korundu)' : ''))
+  }
   return cache
 }
 
@@ -309,14 +419,17 @@ function buildCandidates (memory, cfg, onProgress) {
  * vektoru uzunlugu, k, benzerlik agirliklari, komsu dislama penceresi ve bicim
  * surumu.
  *
- * SINIR: ambargo (embargoSec) ve sonuc ufku (horizonBars) anahtara GIRMEZ,
- * cunku sozlesmede sayilan alanlar bunlar degil. Ikisi de aday havuzunu
- * etkiledigi icin, bu iki ayardan biri degistirilirse onbellek ELLE
- * gecersizlenmelidir.
+ * Icerige AYRICA benzerlik esigi (minSimilarity) girer: onbellek surum 3'ten
+ * beri "esigi gecen kac kayit var" sayisini da tasiyor.
+ *
+ * `cfg.coreHash`: HESABI YAPAN KODUN imzasi. Ayarlar hic degismese bile bir
+ * uygulama guncellemesi indikatoru ya da benzerligi degistirmis olabilir ve
+ * anahtarin geri kalani bunu YAKALAYAMAZ. Verilirse anahtara eklenir;
+ * verilmezse anahtar eskisi gibi kalir (betikler ve testler imza gecmez).
  *
  * @param {{events?:Array, ctxNames?:string[], builtToTime?:number,
  *          meta?:{builtToTime?:number}}} memory
- * @param {{signalCfg?:Object}} [cfg]
+ * @param {{signalCfg?:Object, coreHash?:string}} [cfg]
  * @returns {string}
  */
 function cacheKey (memory, cfg) {
@@ -337,6 +450,14 @@ function cacheKey (memory, cfg) {
   const dis = Math.max(0, Math.round(sayi(signalCfg.excludeWithinSec, 0)))
   const agirlik = sayi(w.shape, 0).toFixed(4) + ',' + sayi(w.ctx, 0).toFixed(4) +
     ',' + sayi(w.dtw, 0).toFixed(4)
+  // BENZERLIK ESIGI ANAHTARA GIRER (surum 3'ten beri).
+  //
+  // Bu esik bir DONEM anahtara girmiyordu ve dogruydu: esik yalnizca karari
+  // etkiliyor, komsu SECIMINI etkilemiyordu. Surum 3'te onbellek `benzerSayi`
+  // de tasiyor, yani "esigi gecen kac kayit var" sayisini; o sayi dogrudan bu
+  // esige bagli. Anahtarda olmazsa kullanici esigi degistirdiginde eski
+  // sayilar kullanilir ve sinyalde gosterilen guven SESSIZCE yanlis olur.
+  const esik = sayi(signalCfg.minSimilarity, 0.8).toFixed(4)
   // Ambargo ve ufuk da ADAY HAVUZUNU belirler (bir olayin komsu olabilmesi
   // icin sonucunun cozulmus olmasi gerekir). Anahtarda olmazlarsa bu ayarlar
   // degistiginde eski onbellek sessizce kullanilir ve olcum yanlis cikar.
@@ -346,8 +467,10 @@ function cacheKey (memory, cfg) {
     sayi(signalCfg.outcomeCfg && signalCfg.outcomeCfg.horizonBars, 48)
   )))
 
+  const kod = typeof conf.coreHash === 'string' && conf.coreHash ? '|s' + conf.coreHash : ''
   return 'v' + CANDCACHE_VERSION + '|n' + adet + '|t' + builtTo + '|c' + ctxLen +
-    '|k' + k + '|w' + agirlik + '|x' + dis + '|e' + ambargo + '|h' + ufuk
+    '|k' + k + '|w' + agirlik + '|x' + dis + '|e' + ambargo + '|h' + ufuk +
+    '|m' + esik + kod
 }
 
 /** Float32/Int32 dizisinin bayt gorunumu (BE makinede takasli kopya). */
@@ -377,7 +500,8 @@ function serialize (cache) {
   const anahtar = Buffer.from(String(cache.key === undefined || cache.key === null ? '' : cache.key), 'utf8')
   const dolgu = (4 - ((HEADER_FIXED + anahtar.length) % 4)) % 4
   const basBoyut = HEADER_FIXED + anahtar.length + dolgu
-  const buf = Buffer.alloc(basBoyut + hucre * 8 + n * 8)
+  // Olay basina DORT Int32 sayac: baseN, baseWins, benzerSayi, havuzSayi.
+  const buf = Buffer.alloc(basBoyut + hucre * 8 + n * 16)
 
   buf.writeUInt32LE(MAGIC, 0)
   buf.writeUInt16LE(Math.round(sayi(cache.version, CANDCACHE_VERSION)), 4)
@@ -392,12 +516,14 @@ function serialize (cache) {
     baytGorunumu(cache.idx).copy(buf, basBoyut)
     baytGorunumu(cache.sim).copy(buf, basBoyut + hucre * 4)
   }
-  // Havuz sayaclari (surum 2): olay basina iki Int32.
+  // Sayaclar: olay basina dort Int32, yazildigi sira bicimde belgelenmistir.
   if (n > 0) {
-    const bn = cache.baseN instanceof Int32Array ? cache.baseN : new Int32Array(n)
-    const bw = cache.baseWins instanceof Int32Array ? cache.baseWins : new Int32Array(n)
-    baytGorunumu(bn).copy(buf, basBoyut + hucre * 8)
-    baytGorunumu(bw).copy(buf, basBoyut + hucre * 8 + n * 4)
+    const sayaclar = ['baseN', 'baseWins', 'benzerSayi', 'havuzSayi']
+    for (let c = 0; c < sayaclar.length; c++) {
+      const a = cache[sayaclar[c]]
+      const dizi = a instanceof Int32Array && a.length >= n ? a.subarray(0, n) : new Int32Array(n)
+      baytGorunumu(dizi).copy(buf, basBoyut + hucre * 8 + n * 4 * c)
+    }
   }
   return buf
 }
@@ -430,7 +556,7 @@ function deserialize (buf) {
   // Bolum baslangiclari: once hucre dizileri (idx, sim), sonra havuz sayaclari.
   const simBas = basBoyut + hucre * 4
   const havuzBas = basBoyut + hucre * 8
-  const beklenen = havuzBas + n * 8
+  const beklenen = havuzBas + n * 16
   if (b.length < beklenen) {
     throw new Error('candcache: dosya beklenenden kisa (' + b.length + ' < ' + beklenen + ')')
   }
@@ -451,22 +577,25 @@ function deserialize (buf) {
     }
   }
 
-  const baseN = new Int32Array(n)
-  const baseWins = new Int32Array(n)
+  const sayaclar = {}
+  for (const ad of ['baseN', 'baseWins', 'benzerSayi', 'havuzSayi']) {
+    sayaclar[ad] = new Int32Array(n)
+  }
   if (n > 0) {
-    const bnBayt = Buffer.from(baseN.buffer, baseN.byteOffset, n * 4)
-    bnBayt.set(b.subarray(havuzBas, havuzBas + n * 4))
-    const bwBayt = Buffer.from(baseWins.buffer, baseWins.byteOffset, n * 4)
-    bwBayt.set(b.subarray(havuzBas + n * 4, beklenen))
-    if (!LITTLE_ENDIAN) {
-      bnBayt.swap32()
-      bwBayt.swap32()
+    const adlar = ['baseN', 'baseWins', 'benzerSayi', 'havuzSayi']
+    for (let c = 0; c < adlar.length; c++) {
+      const dizi = sayaclar[adlar[c]]
+      const bayt = Buffer.from(dizi.buffer, dizi.byteOffset, n * 4)
+      const bas = havuzBas + n * 4 * c
+      bayt.set(b.subarray(bas, bas + n * 4))
+      if (!LITTLE_ENDIAN) bayt.swap32()
     }
   }
 
   return {
     version: version, key: key, n: n, k: k, idx: idx, sim: sim,
-    baseN: baseN, baseWins: baseWins,
+    baseN: sayaclar.baseN, baseWins: sayaclar.baseWins,
+    benzerSayi: sayaclar.benzerSayi, havuzSayi: sayaclar.havuzSayi,
   }
 }
 
@@ -474,6 +603,7 @@ module.exports = {
   CANDCACHE_VERSION,
   DEFAULT_EMBARGO_SEC,
   buildCandidates,
+  korunacakSayi,
   cacheKey,
   serialize,
   deserialize,

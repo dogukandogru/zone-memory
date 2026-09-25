@@ -96,6 +96,67 @@ olay geldiginde ayni turdeki en benzer gecmis olaylarla karsilastirilip
 
 ## Duzeltilen hatalar (olcumu veya veriyi etkileyenler)
 
+- **Zaman dilimi degistirmek dakikalar suruyordu.** Kullanici bildirdi:
+  "musteri guncelleme yukledigunde 1m 5m felan secince grafigin yuklenmesi
+  uzun suruyor". Ilk taniya BAKMADAN once olculdu, cunku ilk aciklama
+  ("mumlar her seferinde yeniden mi indiriliyor") dogru degildi: mumlar zaten
+  diskte duruyor ve grafige gelmesi 0,01 saniye suruyor (326 MB'lik 1m
+  dosyasindan yalnizca gereken 3000 bar okunuyor). Sure tamamen HAFIZA
+  KURMADA, onun da %98'i KOMSU ARAMASINDA:
+
+  | tf | tarama | komsu aramasi | payi |
+  | --- | --- | --- | --- |
+  | 15m |   8,1 sn |   7,4 sn | %91 |
+  | 5m  |  34,5 sn |  33,2 sn | %96 |
+  | 1m  | 339,9 sn | 333,8 sn | %98 |
+
+  Musteri uygulamayi her actiginda depoya yeni bar geliyor, hafiza geride
+  kaliyor ve tarama BASTAN kosuyordu: 1 dakikalikta bes bucuk dakika bos
+  ekran. Oysa bir olayin komsu satiri yalnizca KENDISINDEN ONCE COZULMUS
+  olaylara dayanir (aday havuzu kurali), dolayisiyla sona bar eklenmesi eski
+  satirlari degistiremez. Artik onbellek diske yaziliyor ve eski satirlar
+  KORUNUYOR:
+
+  | tf | eskiden | simdi | korunan satir |
+  | --- | --- | --- | --- |
+  | 15m |   6,7 sn | 0,7 sn |  9.397 / 9.442 |
+  | 5m  |  29,8 sn | 1,5 sn | 24.114 / 24.216 |
+  | 1m  | 301,7 sn | 9,9 sn | 80.372 / 80.581 |
+
+  ESDEGERLIK OLCULDU, varsayilmadi: korumali tarama ile her seyi bastan
+  hesaplayan taramanin sinyal listeleri alan alan karsilastirildi ve BIREBIR
+  ayni cikti (15m 7.819 sinyal, 5m 20.906 sinyal, 1m'de en yeni 20.000).
+  Onbellegin kendisi de hucre hucre ayni (idx, sim, baseN, baseWins,
+  benzerSayi, havuzSayi).
+
+  Koruma su durumlarda YAPILMAZ: ayar izi degistiyse, hesabi yapan kod
+  degistiyse (bkz. asagidaki hesap imzasi), veri kaynagi degistiyse
+  (`.yenile` isareti), ya da kullanici "Geçmişi Tara" dediyse. Sebep gunluge
+  yazilir; sessizce calismamasi gelistirme sirasinda iki kez oldu.
+- **Guncelleme, hesaba dokunmasa bile her seyi yeniden hesaplatiyordu.**
+  Koruma ilk halinde tum kaynagin damgasina (`buildSrcHash`) bagliydi: arayuzde
+  bir yazim duzeltmesi bile damgayi degistiriyor ve musteriyi hesabi hic
+  etkilemeyen bir guncelleme yuzunden dakikalarca bekletiyordu. Kullanicinin
+  bildirdigi sorun tam olarak buydu. Artik HESAP IMZASI kullaniliyor
+  (`core/util/codesig.js`): indikator, ozellik, etiket, benzerlik ve onbellek
+  modullerinden baslanip `require` zincirinin tamami dolasilir ve icerikleri
+  ozetlenir (su an 13 dosya). Elle dosya listesi tutulmuyor, cunku liste gunun
+  birinde eksik kalir ve imza SESSIZCE yanlis olurdu.
+- **Benzer kayit sayilari diske hic yazilmiyordu.** Onbellek surum 2'de
+  `benzerSayi` ve `havuzSayi` hesaplaniyor ama dosyaya yazilmiyordu; dosyadan
+  okunan onbellekle sinyal guveni sifir cikardi. Surum 3 bunlari da tasiyor.
+- **Onbellek anahtari hafizayi ayirt etmiyordu.** Tarama anahtari her zaman
+  `t0` ile yaziyordu (hafizanin son bari hic gecilmiyordu), yani hangi hafizaya
+  ait oldugu anlasilmiyordu. Ayrica tarama ile test anahtarlarini AYRI AYRI
+  kuruyordu: ikisi ayni dosyayi sirayla birbirinin isine yaramaz hale
+  getiriyordu. Artik anahtar tek bir yerden uretilir
+  (`komsuOnbellekAyari`) ve test de taramanin onbellegini kullanir (olculdu:
+  15m testi 0,2 sn).
+- **Benzerlik esigi onbellek anahtarinda yoktu.** Esikler komsu SECIMINI
+  etkilemedigi icin bu dogruydu, ama surum 3'te onbellek "esigi gecen kac kayit
+  var" sayisini da tasiyor ve o sayi dogrudan esige bagli. Kullanici esigi
+  degistirdiginde ekrandaki guven yuzdesi sessizce eski esige ait olurdu.
+
 - **Ayarlar kaydedilmiyordu.** Arayuz ciplak yama gonderiyor, IPC yalnizca
   `{patch}` taniyordu; sonucta `save({})` calisiyor ve ekranda "kaydedildi"
   yaziyordu. Artik uc yuk bicimi de tek yerde cozuluyor ve kayit dogrulaniyor.

@@ -764,8 +764,13 @@ test('bozuk veya yanlis onbellek SESSIZCE yok sayilmaz, hata firlatir', () => {
 test('onbellek anahtari yalnizca komsulari etkileyen ayarlarla degisir', () => {
   const mem = onbellekHafizasi()
   const taban = candcache.cacheKey(mem, { signalCfg: {} })
-  // Esikler komsulari degistirmez, anahtar ayni kalmalidir.
-  assert.equal(candcache.cacheKey(mem, { signalCfg: { minSimilarity: 0.1, minMatches: 1 } }), taban)
+  // KARAR esikleri komsulari degistirmez, anahtar ayni kalmalidir.
+  assert.equal(candcache.cacheKey(mem, { signalCfg: { minMatches: 1, minWinRate: 0.9 } }), taban)
+  // BENZERLIK ESIGI ISTISNADIR ve bilerek anahtara girer. Surum 3'te onbellek
+  // "esigi gecen kac kayit var" sayisini (benzerSayi) da tasiyor; o sayi
+  // dogrudan bu esige bagli. Anahtarda olmasaydi kullanici esigi
+  // degistirdiginde sinyalde gosterilen guven SESSIZCE eski esige ait olurdu.
+  assert.notEqual(candcache.cacheKey(mem, { signalCfg: { minSimilarity: 0.1 } }), taban)
   // k, agirliklar ve komsu dislama komsulari degistirir.
   assert.notEqual(candcache.cacheKey(mem, { signalCfg: { k: 10 } }), taban)
   // AGIRLIK ON AYARI anahtari degistirir.
@@ -822,4 +827,165 @@ test('yonu yalnizca isSupport ile belli olan olaylarda da onbellek ayni sonucu v
     assert.equal(onbellekli.trades[i].matchCount, referans.trades[i].matchCount)
     assert.equal(onbellekli.trades[i].pnlAtr, referans.trades[i].pnlAtr)
   }
+})
+
+// A2b - SATIR KORUMA (candcache `reuse`)
+// ---------------------------------------------------------------------------
+// Tarama, depoya her bar eklendiginde hafizayi yeniden kuruyor ve komsulari
+// BASTAN hesapliyordu. Olculdu (gercek depo, bu makine): taramanin %98'i bu
+// hesap, 1 dakikalikta 333,8 saniyenin 339,9'u. Oysa bir olayin komsu satiri
+// yalnizca KENDISINDEN ONCE COZULMUS olaylara dayanir, dolayisiyla sona bar
+// eklenmesi eski satirlari degistiremez.
+//
+// Bu bolumun tek iddiasi: KORUNAN SATIRLAR TAM KURULUMLA BIREBIR AYNIDIR.
+// Hiz iddiasi degil, esdegerlik iddiasi. Asagidaki testler onu olcer.
+
+/** Onbellegin butun dizilerini alan alan karsilastirir. */
+function onbellekEsitMi (a, b) {
+  const farklar = []
+  if (a.n !== b.n) farklar.push('n: ' + a.n + ' != ' + b.n)
+  if (a.k !== b.k) farklar.push('k: ' + a.k + ' != ' + b.k)
+  for (const ad of ['idx', 'sim']) {
+    for (let i = 0; i < Math.min(a[ad].length, b[ad].length); i++) {
+      if (a[ad][i] !== b[ad][i]) { farklar.push(ad + '[' + i + ']: ' + a[ad][i] + ' != ' + b[ad][i]); break }
+    }
+  }
+  for (const ad of ['baseN', 'baseWins', 'benzerSayi', 'havuzSayi']) {
+    for (let i = 0; i < Math.min(a.n, b.n); i++) {
+      if (a[ad][i] !== b[ad][i]) { farklar.push(ad + '[' + i + ']: ' + a[ad][i] + ' != ' + b[ad][i]); break }
+    }
+  }
+  return farklar
+}
+
+/** `adet` olayli hafiza, ilk `kesik` olayi ayri bir "eski hafiza" olarak. */
+function bolunmusHafiza (adet, kesik, tohum) {
+  const rnd = fixtures.prng(tohum === undefined ? 7 : tohum)
+  const tam = fixtures.hafizaKur({
+    adet: adet,
+    basarili: Math.round(adet * 0.6),
+    tf: '15m',
+    aralik: 5 * GUN,
+    kind: (i) => (i % 3 === 0 ? 'form' : 'touch'),
+    yon: (i) => (i % 2 === 0 ? 'BUY' : 'SELL'),
+    ozellik: () => fixtures.rastgeleOzellik(rnd),
+  })
+  const eski = { tf: tam.tf, ctxNames: tam.ctxNames, events: tam.events.slice(0, kesik) }
+  return { tam: tam, eski: eski }
+}
+
+test('KORUMA: eski satirlar korunarak kurulan onbellek, tam kurulumla BIREBIR aynidir', () => {
+  const { tam, eski } = bolunmusHafiza(200, 170)
+  const ayar = Object.assign({}, ONBELLEK_CFG, { signalCfg: {} })
+  // Eski onbellek diske yazilip geri okunmus gibi: bicim gercekten tasiyor mu.
+  const eskiOnbellek = candcache.deserialize(
+    candcache.serialize(candcache.buildCandidates(eski, ayar)))
+
+  // Sinir: eski hafizanin son olayindan SONRASI yeniden hesaplanir.
+  const sinir = eski.events[eski.events.length - 1].time + 1
+  const korumali = candcache.buildCandidates(tam,
+    Object.assign({ reuse: { cache: eskiOnbellek, untilTime: sinir } }, ayar))
+  const tamKurulum = candcache.buildCandidates(tam, ayar)
+
+  assert.equal(korumali.korunan, 170, 'butun eski satirlar korunmaliydi')
+  assert.deepEqual(onbellekEsitMi(korumali, tamKurulum), [],
+    'korunan onbellek tam kurulumdan farkli')
+})
+
+test('KORUMA: sinir eski olaylarin ORTASINA duserse kalan satirlar yeniden hesaplanir', () => {
+  // Gercek veride bu durum nadir (hafiza, deponun son gunlerinde zaten olay
+  // uretmiyor) ama kodun dogru olmasi bu tesadufe BAGLI OLMAMALI.
+  const { tam, eski } = bolunmusHafiza(200, 170, 11)
+  const ayar = Object.assign({}, ONBELLEK_CFG, { signalCfg: {} })
+  const eskiOnbellek = candcache.buildCandidates(eski, ayar)
+
+  // Sinir 150. olaya: 150 satir korunur, 50'si yeniden hesaplanir.
+  const sinir = tam.events[150].time
+  const korumali = candcache.buildCandidates(tam,
+    Object.assign({ reuse: { cache: eskiOnbellek, untilTime: sinir } }, ayar))
+  const tamKurulum = candcache.buildCandidates(tam, ayar)
+
+  assert.equal(korumali.korunan, 150)
+  assert.deepEqual(onbellekEsitMi(korumali, tamKurulum), [],
+    'sinirdan sonrasi yeniden hesaplanmadi veya havuz eksik kaldi')
+})
+
+test('KORUMA: eski onbellekte yeterli satir yoksa HIC korunmaz', () => {
+  // Satir sayisi yetmiyorsa onek AYNI onek degildir: araya olay girmis
+  // demektir ve satirlar baska olaylara aittir. Var olani kullanip kalanini
+  // hesaplamak sessiz bir kayma uretirdi.
+  const { tam, eski } = bolunmusHafiza(200, 100, 23)
+  const ayar = Object.assign({}, ONBELLEK_CFG, { signalCfg: {} })
+  const eskiOnbellek = candcache.buildCandidates(eski, ayar)
+  // Sinir 150. olaya, ama eski onbellekte yalnizca 100 satir var.
+  const sinir = tam.events[150].time
+  assert.equal(candcache.korunacakSayi(
+    candcache.prepareEvents(tam).events, { cache: eskiOnbellek, untilTime: sinir }, eskiOnbellek.k), 0)
+
+  const korumali = candcache.buildCandidates(tam,
+    Object.assign({ reuse: { cache: eskiOnbellek, untilTime: sinir } }, ayar))
+  assert.equal(korumali.korunan, 0)
+  assert.deepEqual(onbellekEsitMi(korumali, candcache.buildCandidates(tam, ayar)), [])
+})
+
+test('KORUMA: k, bicim surumu veya sinir uymazsa koruma yapilmaz', () => {
+  const { tam, eski } = bolunmusHafiza(120, 100, 31)
+  const ayar = Object.assign({}, ONBELLEK_CFG, { signalCfg: {} })
+  const eskiOnbellek = candcache.buildCandidates(eski, ayar)
+  const olaylar = candcache.prepareEvents(tam).events
+  const sinir = eski.events[eski.events.length - 1].time + 1
+  const k = eskiOnbellek.k
+
+  assert.ok(candcache.korunacakSayi(olaylar, { cache: eskiOnbellek, untilTime: sinir }, k) > 0,
+    'taban durumda koruma olmaliydi')
+  // BASKA k: satirlar farkli uzunlukta, kullanilamaz.
+  assert.equal(candcache.korunacakSayi(olaylar, { cache: eskiOnbellek, untilTime: sinir }, k + 1), 0)
+  // BASKA BICIM SURUMU: eski dosya.
+  const eskiSurum = Object.assign({}, eskiOnbellek, { version: candcache.CANDCACHE_VERSION - 1 })
+  assert.equal(candcache.korunacakSayi(olaylar, { cache: eskiSurum, untilTime: sinir }, k), 0)
+  // GECERSIZ SINIR.
+  assert.equal(candcache.korunacakSayi(olaylar, { cache: eskiOnbellek, untilTime: 0 }, k), 0)
+  assert.equal(candcache.korunacakSayi(olaylar, { cache: eskiOnbellek, untilTime: NaN }, k), 0)
+  // ONBELLEK YOK.
+  assert.equal(candcache.korunacakSayi(olaylar, null, k), 0)
+  assert.equal(candcache.korunacakSayi(olaylar, { cache: null, untilTime: sinir }, k), 0)
+})
+
+test('KORUMA: benzer kayit sayaclari diske YAZILIR (surum 3)', () => {
+  // Surum 2'de benzerSayi/havuzSayi hesaplaniyor ama dosyaya yazilmiyordu.
+  // Dosyadan okunan onbellekle sinyal guveni sifir cikardi; koruma da bu iki
+  // sayiyi tasiyamadigi icin ise yaramazdi.
+  const { tam } = bolunmusHafiza(150, 100, 41)
+  const ayar = Object.assign({}, ONBELLEK_CFG, { signalCfg: {} })
+  const cache = candcache.buildCandidates(tam, ayar)
+  const geri = candcache.deserialize(candcache.serialize(cache))
+
+  let sifirdanBuyuk = 0
+  for (let i = 0; i < cache.n; i++) if (cache.benzerSayi[i] > 0) sifirdanBuyuk++
+  assert.ok(sifirdanBuyuk > 0, 'test bosluga bakmamali: hic benzer kayit sayilmamis')
+
+  assert.deepEqual(Array.from(geri.benzerSayi), Array.from(cache.benzerSayi))
+  assert.deepEqual(Array.from(geri.havuzSayi), Array.from(cache.havuzSayi))
+  assert.deepEqual(Array.from(geri.baseN), Array.from(cache.baseN))
+  assert.deepEqual(Array.from(geri.baseWins), Array.from(cache.baseWins))
+})
+
+test('KORUMA: benzerlik esigi degisince eski sayilar KULLANILAMAZ', () => {
+  // TUZAK: `benzerSayi` "esigi gecen kac kayit var" demek, yani esige BAGLI.
+  // Esik degisip anahtar ayni kalsaydi, eski sayilar yeni esikmis gibi
+  // kullanilir ve ekrandaki guven yuzdesi sessizce yanlis olurdu.
+  const { tam } = bolunmusHafiza(150, 100, 53)
+  const dusuk = Object.assign({}, ONBELLEK_CFG, { signalCfg: { minSimilarity: 0.1 } })
+  const yuksek = Object.assign({}, ONBELLEK_CFG, { signalCfg: { minSimilarity: 0.95 } })
+
+  const a = candcache.buildCandidates(tam, dusuk)
+  const b = candcache.buildCandidates(tam, yuksek)
+  assert.notEqual(a.key, b.key, 'iki esik ayni anahtari uretmemeli')
+
+  // Sayilar gercekten farkli olmali, yoksa test bosluga bakiyor.
+  let toplamA = 0
+  let toplamB = 0
+  for (let i = 0; i < a.n; i++) { toplamA += a.benzerSayi[i]; toplamB += b.benzerSayi[i] }
+  assert.ok(toplamA > toplamB,
+    'dusuk esik daha cok benzer kayit saymaliydi: ' + toplamA + ' vs ' + toplamB)
 })

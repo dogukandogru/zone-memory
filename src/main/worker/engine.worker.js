@@ -111,6 +111,13 @@ async function writeJsonAtomic(file, obj) {
   await fsp.rename(tmp, file)
 }
 
+/** Ikili dosyayi atomik yazar (once .tmp, sonra rename). */
+async function writeFileAtomic(file, buf) {
+  const tmp = file + '.tmp'
+  await fsp.writeFile(tmp, buf)
+  await fsp.rename(tmp, file)
+}
+
 /** JSON dosyasini okur, yoksa veya bozuksa null doner. */
 async function readJson(file) {
   let raw
@@ -976,6 +983,132 @@ handlers['data:import'] = async function (payload, ctx) {
 }
 
 /** Gecmisi tarar, hafizayi, bolgeleri ve prototipleri diske yazar. */
+/**
+ * HESAP IMZASI (bkz. core/util/codesig.js): olaylari ve komsu satirlarini
+ * ureten kodun parmak izi. Surec boyunca bir kez hesaplanir.
+ * @type {string|null}
+ */
+let hesapImzaOnbellek = null
+
+function hesapImzasi() {
+  if (hesapImzaOnbellek !== null) return hesapImzaOnbellek
+  try {
+    hesapImzaOnbellek = core('util/codesig').codeSignature().hash
+  } catch (err) {
+    hesapImzaOnbellek = ''
+  }
+  return hesapImzaOnbellek
+}
+
+/**
+ * Komsu onbellegi ayari: TARAMA, TEST ve KORUMA KONTROLU ayni nesneyi kurmali.
+ *
+ * `candcache.cacheKey` bu nesneden uretilir. Uc yerde ayri ayri kurulunca biri
+ * bir alan fazla ya da eksik gecer, anahtar tutmaz ve onbellek sessizce hic
+ * kullanilmaz. Gelistirme sirasinda tam bu oldu: tarama anahtari `t0` ile
+ * yaziyordu (hafizanin son bari hic gecilmiyordu), dolayisiyla ne tarama ne
+ * test birbirinin onbellegini bulabiliyordu.
+ *
+ * `outcomeCfg` YALNIZCA anahtari etkiler, satirlari etkilemez: havuz kurali
+ * olaylarin kendi `resolvedTime` alanini kullanir (bkz. candcache.js
+ * cozumZamaniFabrikasi). Testin gectigi degerle ayni tutuyoruz ki iki yol tek
+ * dosyayi paylassin.
+ */
+function komsuOnbellekAyari(uygulanan) {
+  return {
+    signalCfg: uygulanan.signalCfg,
+    outcomeCfg: uygulanan.planOutcomeCfg,
+    coreHash: hesapImzasi(),
+  }
+}
+
+/**
+ * ONCEKI KOMSU ONBELLEGI YENIDEN KULLANILABILIR MI.
+ *
+ * Neden gerekiyor: taramanin %98'i komsu aramasi. Olculdu (bu makine, gercek
+ * depo) 5m 34,5 sn'nin 33,2'si, 1m 339,9 sn'nin 333,8'i. Musteri uygulamayi
+ * her actiginda depoya yeni bar geliyor, hafiza geride kaliyor ve tarama
+ * BASTAN kosuyordu: 1 dakikalikta bes bucuk dakika bos ekran.
+ *
+ * Bir olayin komsu satiri yalnizca KENDISINDEN ONCE COZULMUS olaylara
+ * dayanir (bkz. candcache.js aday havuzu kurali), dolayisiyla sona bar
+ * eklenmesi eski satirlari DEGISTIRMEZ. Eski satirlar aynen kullanilabilir.
+ *
+ * "Aynen" olmasi icin eski hafizanin su anki olay dizisinin ONEKI olmasi
+ * gerekir. Bunu garanti eden kontroller:
+ *   - ayar izi (cfgHash) ayni: ayni indikator ayari, ayni etiket tanimi
+ *   - HESAP IMZASI ayni: guncelleme indikatoru ya da benzerligi degistirmis
+ *     olabilir ve ayar izi bunu YAKALAMAZ. Imza onbellek ANAHTARININ icinde,
+ *     yani asagidaki anahtar karsilastirmasi bunu da kapsar (bkz. hesapImzasi)
+ *   - `.yenile` isareti yok: depo baska bir kaynaktan yeniden kurulmamis
+ *   - onbellek dosyasinin anahtari eski hafizanin anahtariyla birebir ayni
+ *
+ * Sinir zamani (`untilTime`) hafizanin kuruldugu bardan SONUC UFKU ve AMBARGO
+ * kadar geri cekilir: boylece korunan her olayin hem kendi sonucu hem de tum
+ * havuzu eski kurulumda ZATEN kesinlesmisti.
+ *
+ * @returns {Promise<{cache:object, untilTime:number}|null>}
+ */
+async function oncekiKomsuOnbellegi(tf, yeniIz, ctxLen, uygulanan) {
+  // RET SEBEBI GUNLUGE YAZILIR. Koruma sessizce hic calismazsa tarama eskisi
+  // gibi dakikalar surer ve bunun NEDEN oldugu hicbir yerde gorunmez; gelistirme
+  // sirasinda tam bu yasandi (ayar nesnesi bir alan fazlaydi, anahtar tutmadi).
+  const red = (sebep) => {
+    log('Komşu önbelleği korunmadı (' + sebep + '), baştan hesaplanacak.')
+    return null
+  }
+  if (!hesapImzasi()) return red('hesap imzası üretilemedi')
+  try {
+    if (await fileExists(paths.olcumYenilePath(tf))) return red('veri kaynağı değişti')
+
+    const memstore = core('store/memstore')
+    const mem = await memstore.statMemory(paths.memoryPath(tf))
+    if (!mem || !(mem.count > 0)) return red('önceki hafıza yok')
+    if (!mem.cfgHash || mem.cfgHash !== yeniIz) return red('ayar izi değişti')
+    if (num(mem.ctxLen, 0) !== ctxLen) return red('bağlam vektörü değişti')
+    const kuruldugu = num(mem.builtToTime, 0)
+    if (!(kuruldugu > 0)) return red('önceki hafızanın son barı bilinmiyor')
+
+    let ham
+    try {
+      ham = await fsp.readFile(paths.candCachePath(tf))
+    } catch (err) {
+      return red('önceki önbellek dosyası yok')
+    }
+    const cc = core('learn/candcache')
+    const cache = cc.deserialize(ham)
+    // Anahtar ESKI hafizaya gore uretilir: eslesmiyorsa onbellek o hafizadan
+    // degil, baska bir ayardan ya da baska bir olay kumesinden kalmis.
+    // ONBELLEK AYARI TARAMANIN GECTIGIYLE BIREBIR AYNI OLMALI: anahtar bu
+    // nesneden uretiliyor, bir alan fazla gecilirse anahtar tutmaz ve koruma
+    // sessizce hic calismaz.
+    const eskiAnahtar = cc.cacheKey(
+      { events: new Array(mem.count), ctxNames: new Array(ctxLen), builtToTime: kuruldugu },
+      komsuOnbellekAyari(uygulanan)
+    )
+    if (cache.key !== eskiAnahtar) {
+      return red('önbellek anahtarı tutmuyor: ' + cache.key + ' != ' + eskiAnahtar)
+    }
+
+    const tfSec = core('tf').tfSeconds(tf)
+    // UFUK ICIN EN BUYUK DEGER: sinir zamani ne kadar geri cekilirse koruma o
+    // kadar guvenli. Iki ayri yerde ufuk tanimi var (signalCfg.outcomeCfg ve
+    // outcomeCfg), hangisi kullanilirsa kullanilsin buyugunu aliriz.
+    const ufukBar = Math.max(
+      48,
+      Math.floor(num(uygulanan.outcomeCfg && uygulanan.outcomeCfg.horizonBars, 0)),
+      Math.floor(num(uygulanan.signalCfg && uygulanan.signalCfg.outcomeCfg &&
+        uygulanan.signalCfg.outcomeCfg.horizonBars, 0))
+    )
+    const untilTime = kuruldugu - ufukBar * tfSec - cc.DEFAULT_EMBARGO_SEC
+    if (!(untilTime > 0)) return red('koruma sınırı hesaplanamadı')
+    return { cache: cache, untilTime: untilTime }
+  } catch (err) {
+    // Onbellek bozuk ya da baska bicimden: tam kurulum yapilir.
+    return red(err && err.message ? err.message : String(err))
+  }
+}
+
 handlers['engine:scan'] = async function (payload, ctx) {
   const tf = requireTf(payload.tf)
   const force = !!payload.force
@@ -1010,6 +1143,13 @@ handlers['engine:scan'] = async function (payload, ctx) {
   // Ayar izi: hem hafiza meta'sina yazilir hem eski olcumlerin gecerli olup
   // olmadigini belirler (tek yerde hesaplanir).
   const yeniIz = ayarIzi(params, uygulanan.outcomeCfg, built.ctxNames, ozellikAyari)
+
+  // KOMSU ONBELLEGI HAFIZA USTUNE YAZILMADAN ONCE okunur: karar eski hafizanin
+  // meta bilgisine dayaniyor, birazdan o dosya degisecek. `force` verildiginde
+  // (kullanici "Geçmişi Tara" dedi) koruma yapilmaz, her sey bastan hesaplanir.
+  const korumaliOnbellek = force
+    ? null
+    : await oncekiKomsuOnbellegi(tf, yeniIz, (built.ctxNames || []).length, uygulanan)
 
   ctx.progress(82, 'Hafıza diske yazılıyor')
   await memstore.saveMemory(paths.memoryPath(tf), {
@@ -1068,7 +1208,9 @@ handlers['engine:scan'] = async function (payload, ctx) {
   }
   zonesCache = { tf: tf, zones: zones }
   protoCache = { tf: tf, protos: protos }
-  // Hafiza degisti: aday onbellegi artik gecersiz.
+  // Hafiza degisti: diskteki aday onbellegi artik bu hafizaya ait degil.
+  // Okunacak olan ZATEN yukarida alindi (korumaliOnbellek); dosya siliniyor ki
+  // yeni onbellek yazilamazsa geride eskisi kalmasin.
   try {
     await fsp.unlink(paths.candCachePath(tf))
   } catch (err) {
@@ -1148,11 +1290,33 @@ handlers['engine:scan'] = async function (payload, ctx) {
     // kurulum var mi. Tutma orani, plan ve R/R HIC hesaplanmaz.
     ctx.progress(93, 'Benzer geçmiş kurulumlar aranıyor')
     const cc = core('learn/candcache')
+    // `builtToTime` ANAHTARA GIRER: gecilmezse anahtar her taramada ayni kalir
+    // (`t0`) ve hangi hafizaya ait oldugu anlasilmaz.
+    const hafizaNesnesi = {
+      tf: tf,
+      ctxNames: built.ctxNames,
+      events: events,
+      builtToTime: s.length > 0 ? s.time[s.length - 1] : 0,
+    }
+    const onbellekAyari = komsuOnbellekAyari(uygulanan)
     const cache = cc.buildCandidates(
-      { tf: tf, ctxNames: built.ctxNames, events: events },
-      { signalCfg: uygulanan.signalCfg },
+      hafizaNesnesi,
+      korumaliOnbellek
+        ? Object.assign({ reuse: korumaliOnbellek }, onbellekAyari)
+        : onbellekAyari,
       (pct, msg) => ctx.progress(93 + num(pct, 0) * 0.04, msg)
     )
+    if (cache.korunan > 0) {
+      log('Komşu önbelleğinin ' + cache.korunan + ' satırı korundu, yalnızca ' +
+        (cache.n - cache.korunan) + ' yeni olay hesaplandı.')
+    }
+    // ONBELLEK DISKE YAZILIR. Yazilmazsa bir sonraki tarama her seyi bastan
+    // hesaplamak zorunda kalir; olculdu, 1 dakikalikta 333,8 saniye.
+    try {
+      await writeFileAtomic(paths.candCachePath(tf), cc.serialize(cache))
+    } catch (err) {
+      log('Komşu önbelleği diske yazılamadı: ' + (err && err.message ? err.message : String(err)))
+    }
     const hazir = cc.prepareEvents({ events: events })
     const sirali = hazir.events
     const k = cache.k
@@ -1554,10 +1718,11 @@ handlers['engine:backtest'] = async function (payload, ctx) {
   // Maliyet ve isinma ayari kullanicinin backtestCfg yamasindan gelir; tek
   // kaynak budur (Ayarlar > Islem maliyeti ve olcum).
   const bcfg = (gelen.cfgPatch && gelen.cfgPatch.backtestCfg) || {}
-  const cfg = Object.assign({}, gelen, {
-    signalCfg: uygulanan.signalCfg,
-    outcomeCfg: uygulanan.planOutcomeCfg,
-  })
+  // ONBELLEK AYARI TARAMAYLA AYNI YERDEN GELIR (komsuOnbellekAyari): iki yol
+  // ayni dosyayi paylasiyor. Test kendi anahtarini ayri kursa tarama yazdigi
+  // onbellegi bulamaz, testten sonra dosyayi kendi anahtariyla ezer ve sonraki
+  // tarama da bulamaz; iki taraf sirayla birbirinin isini bozardi.
+  const cfg = Object.assign({}, gelen, komsuOnbellekAyari(uygulanan))
   if (Number.isFinite(bcfg.costPct)) cfg.costPct = bcfg.costPct
   if (Number.isFinite(bcfg.costUsd)) cfg.costUsd = bcfg.costUsd
   if (Number.isFinite(bcfg.slippageAtr)) cfg.slippageAtr = bcfg.slippageAtr
