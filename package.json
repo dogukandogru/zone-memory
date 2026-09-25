@@ -1,7 +1,7 @@
 {
   "name": "zone-memory",
   "productName": "Zone Memory",
-  "version": "0.2.14",
+  "version": "0.2.15",
   "description": "XAUUSD destek/direnc bolge hafizasi ve canli patern eslestirme masaustu uygulamasi",
   "author": "Dogukan Dogru",
   "license": "UNLICENSED",
