@@ -775,18 +775,21 @@ export function renderSignals(el, signals, opts) {
     satir.appendChild(yonEtiketi(s.direction))
 
     const orta = h('span', 'row-main')
-    // PLAN SATIRI EN USTTE (kullanici istedi: "her satirin ustunde"): TP ve
-    // SL seviyeleri ile sonuc. Plan hesaplanamadiysa (kapanis kutunun
-    // otesinde) satir yazilmaz.
+    orta.appendChild(document.createTextNode(formatDateTime(s.time) + '  ' + formatPrice(s.price)))
+    // IKINCI SATIR: tur rozeti SOLDA, TP/SL ve sonuc SAGDA. Plan satiri bir
+    // donem en ustte ayri bir satirdi ve tur rozetiyle ust uste geliyordu;
+    // kullanici "sagli sollu dursa daha iyi olur" dedi. Plan hesaplanamadiysa
+    // (kapanis kutunun otesinde) sag taraf bos kalir.
+    const ikinci = h('span', 'row-line')
+    ikinci.appendChild(turRozeti(s.kind, s.sniper))
     if (s.plan) {
-      const planSatiri = h('span', 'row-sub plan-line',
+      const planSatiri = h('span', 'plan-line',
         'TP ' + formatPrice(s.plan.tp) + ' \u00b7 SL ' + formatPrice(s.plan.sl) + ' ')
       const rozetP = planRozeti(s.plan)
       if (rozetP) planSatiri.appendChild(rozetP)
-      orta.appendChild(planSatiri)
+      ikinci.appendChild(planSatiri)
     }
-    orta.appendChild(document.createTextNode(formatDateTime(s.time) + '  ' + formatPrice(s.price)))
-    orta.appendChild(turRozeti(s.kind, s.sniper))
+    orta.appendChild(ikinci)
     if (s.evidence) orta.appendChild(kanitRozeti(s.evidence))
     // 'hepsi' KIPI: gecmis sonuc, isabet orani ve R/R HIC hesaplanmaz.
     // Ekranda kurulumun KENDI bilgisi gosterilir.

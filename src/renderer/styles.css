@@ -774,8 +774,9 @@ table.tbl tr:hover td { background: var(--bg-hover); }
   border-color: rgba(156, 99, 224, 0.55);
   color: #c4a0f0;
 }
-/* Plan sonucu rozetleri (sinyal satirinin ustundeki TP/SL satiri). */
-.plan-line { display: block; margin-bottom: 1px; }
+/* Sinyal satirinin ikinci satiri: tur rozeti solda, TP/SL sagda. */
+.row-line { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-top: 1px; }
+.plan-line { display: inline-flex; align-items: center; gap: 4px; color: var(--text-dim); font-size: 10px; white-space: nowrap; }
 .badge.badge-tp { background: rgba(38, 166, 154, 0.18); border-color: rgba(38, 166, 154, 0.6); color: var(--up); font-weight: 700; }
 .badge.badge-sl { background: rgba(239, 83, 80, 0.18); border-color: rgba(239, 83, 80, 0.6); color: var(--down); font-weight: 700; }
 .badge.badge-open { background: rgba(242, 180, 14, 0.16); border-color: rgba(242, 180, 14, 0.6); color: var(--warn); font-weight: 700; }
