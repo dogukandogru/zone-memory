@@ -78,7 +78,10 @@ function codeSignature (opts) {
 
   while (sira.length > 0) {
     const dosya = sira.pop()
-    const ad = path.relative(kok, dosya)
+    // DOSYA ADI HER PLATFORMDA AYNI YAZILIR: Windows'ta path.relative ters
+    // bolu uretir (indicator\\proZones.js). Imza ve zincir listesi
+    // platformdan bagimsiz olmali; CI'da Windows testleri bunu yakaladi.
+    const ad = path.relative(kok, dosya).split(/[\\/]+/).join('/')
     if (gorulen.has(ad)) continue
     gorulen.add(ad)
     let icerik
