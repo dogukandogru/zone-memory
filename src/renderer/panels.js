@@ -798,8 +798,12 @@ export function renderSignals(el, signals, opts) {
     // 'hepsi' KIPI: gecmis sonuc, isabet orani ve R/R HIC hesaplanmaz.
     // Ekranda kurulumun KENDI bilgisi gosterilir.
     const sade = sadeSinyalMi(s)
+    // KUTU YASI YALNIZCA DOKUNUSTA. Olusum sinyalinde yas her zaman pivot
+    // hassasiyetine esittir (kutu, pivottan tam pivotLen bar sonra onaylanir;
+    // olculdu: 5m'de 11.071 olusumun hepsi 5 bar). Sabit sayi bilgi degil,
+    // kullanici "hepsi 5 bar, dogru mu" diye sordu.
     const altMetin = sade
-      ? (kutuYuksekligi(s) + (sayi(s.zoneAgeBars, 0) > 0
+      ? (kutuYuksekligi(s) + (s.kind !== 'form' && sayi(s.zoneAgeBars, 0) > 0
         ? ', kutu yaşı ' + tam(s.zoneAgeBars) + ' bar'
         : ''))
       : (s.fired
