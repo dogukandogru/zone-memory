@@ -18,6 +18,8 @@ olay geldiginde ayni turdeki en benzer gecmis olaylarla karsilastirilip
 
 | Ne | Ne ise yarar |
 | --- | --- |
+| Sinyal plani: TP / SL ve sonuc (`core/learn/plan.js`) | Her sinyal satirinin ustunde TP ve SL seviyesi ile sonuc rozeti (TP, SL, ACIK, SURE DOLDU). Giris = sinyal barinin kapanisi; SL = kutunun uzak kenari + "Gecersizlik payi" kadar ATR; TP = giris +/- "Hedef orani" x risk (varsayilan 1'e 1); ayni barda ikisi de vurulursa SL sayilir. Oran ya da "Sonuc suresi" degisince `engine:plan-refresh` tarama olmadan tum sonuclari yeniden hesaplar. Canlida yeni sinyal ACIK dogar, sonraki barlarla cozulur ve artik dosyaya da yazilir. Plan alani olmayan eski liste acilista bir kez hesaplatilir. |
+| Aktif sinyal isiklari (ust serit) | Zaman dilimi basina nokta: o dilimde sonucu ACIK (TP/SL henuz vurulmamis) sinyal varsa yanip soner ve sayi yazar; tiklayinca o dilime gecer. `engine:active-signals` dosyalari mtime'a gore onbellekler, 30 saniyede bir ve her canli sinyalde yoklanir. |
 | Hacim cubuklari ac/kapa (`chart.showVolume`) | Grafigin altindaki hacim varsayilan GIZLI; efsane kutusundaki "Hacim" kutucugu acar, secim ayarlarda kalicidir. Gizliyken mum olcegi alttaki payi geri alir. |
 | Secili sinyal grafikte belirgin | Secili sinyalin oku daha buyuk ve beyaz, o bar mumlarin arkasinda dikey bir seritle vurgulanir (overlay `setVurguZamani`). Listede secili satir ic cerceve ve koyu zeminle ayrilir; yon rengi sol kenarda kalir. |
 | Sinyal ayrintisi kapali durur | Sinyale tiklamak ayrintiyi ACMAZ: altta ince bir serit secili sinyali soyler, "Ayrintiyi goster" acar, "x" secimi kaldirir. Liste her secimde en uste ziplamiyor: kaydirma konumu korunur, secili satir gorunur alanda degilse getirilir. |

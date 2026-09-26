@@ -98,6 +98,9 @@ const durum = {
   bolgeSinyalleri: null,
   // Yuklu listede kutu yasi sinirini asan sinyal var miydi (dosya eski).
   sinyalYasAsimi: false,
+  // Eski liste dosyasi icin plan-refresh bir kez calisti mi (tf basina degil,
+  // oturum basina; tf degisince sifirlanir).
+  planTazelendi: false,
   canli: false,
   // Isciden gelen sinyal listesi kirpildi mi (U8).
   sinyalToplam: 0,
@@ -562,6 +565,43 @@ function kutuYasiSiniri() {
   const c = durum.ayarlar && durum.ayarlar.signalCfg
   const v = c && typeof c.maxZoneAgeBars === 'number' ? c.maxZoneAgeBars : 100
   return Number.isFinite(v) && v > 0 ? v : 0
+}
+
+/** Plan ayarinin imzasi: degisti mi anlamak icin. */
+function planAyari() {
+  const c = durum.ayarlar && durum.ayarlar.signalCfg ? durum.ayarlar.signalCfg : {}
+  return String(c.tpRr) + ':' + String(c.planHorizonBars)
+}
+
+/** Ust seritteki zaman dilimi isiklari: hangi dilimde acik (aktif) sinyal var. */
+const AKTIF_TF = ['1m', '5m', '15m', '30m', '1h', '4h']
+let aktifYoklamaSuruyor = false
+async function aktifSinyalleriTazele() {
+  const kap = el('activeSignals')
+  if (!kap || aktifYoklamaSuruyor) return
+  aktifYoklamaSuruyor = true
+  try {
+    const d = await cagirGuvenli('engine:active-signals', {}, null)
+    const byTf = d && d.byTf ? d.byTf : {}
+    let toplam = 0
+    for (let i = 0; i < AKTIF_TF.length; i++) {
+      const tf = AKTIF_TF[i]
+      const nokta = kap.querySelector('[data-tf="' + tf + '"]')
+      if (!nokta) continue
+      const acik = byTf[tf] ? sayi(byTf[tf].open, 0) : 0
+      toplam += acik
+      nokta.classList.toggle('on', acik > 0)
+      nokta.title = acik > 0
+        ? tf + ': ' + acik + ' aktif sinyal (TP/SL henüz vurulmadı). Tıklayınca o dilime geçer.'
+        : tf + ': aktif sinyal yok'
+      const sayac = nokta.querySelector('.as-count')
+      if (sayac) sayac.textContent = acik > 0 ? String(acik) : ''
+    }
+    const etiket = kap.querySelector('.as-label')
+    if (etiket) etiket.textContent = toplam > 0 ? 'Aktif sinyal' : 'Aktif sinyal yok'
+  } finally {
+    aktifYoklamaSuruyor = false
+  }
 }
 
 /** Grafigi ve bolge katmanini kurar. */
@@ -1231,12 +1271,23 @@ async function sinyalleriYukle() {
   // calismamis). Sonuc taramayla BIREBIR ayni: guven kirilim noktalari
   // sinirdan bagimsiz hesaplaniyor, sinir yalnizca sinyali listeden dusuruyor.
   // Asim varsa dosya da kendiliginden yenilenir (bkz. sinyalKipiDegistiyseTara).
-  const tumu = sinyalleriNormalle(ham)
+  let tumu = sinyalleriNormalle(ham)
+  // PLAN ALANI OLMAYAN ESKI LISTE: TP/SL ozelligi eklenmeden once yazilmis.
+  // Bir kez plan-refresh ile hesaplatilir (tarama gerekmez), sonra yeniden
+  // okunur. Bayrak tekrar dongusunu onler.
+  if (!durum.planTazelendi && tumu.some((x) => x && x.plan === undefined)) {
+    durum.planTazelendi = true
+    await cagirGuvenli('engine:plan-refresh',
+      { tf: durum.tf, cfgPatch: durum.ayarYamasiKayitli || null }, null)
+    const yeniden = await cagirGuvenli('engine:signals', { tf: durum.tf, limit: 1000 }, null)
+    if (yeniden !== null) tumu = sinyalleriNormalle(yeniden)
+  }
   const sinir = kutuYasiSiniri()
   const uygun = sinir > 0 ? tumu.filter((x) => !(sayi(x.zoneAgeBars, 0) > sinir)) : tumu
   durum.sinyalYasAsimi = uygun.length !== tumu.length
   durum.signals = uygun
   isaretleriCiz()
+  aktifSinyalleriTazele()
   if (durum.seciliSinyalId === null && durum.aktifPanel === 'signals') sinyalPaneliniCiz()
 }
 
@@ -1514,6 +1565,7 @@ async function tfDegistir(tf) {
   // icin kullanici 1 dakikaligin sayilarini 15 dakikaliga ait sanip karar
   // verebiliyordu.
   durum.hafizaOzeti = null
+  durum.planTazelendi = false
   tfDugmeleriniIsaretle()
   planCizgileri(null)
   tvKaynagiGuncelle()
@@ -2646,6 +2698,7 @@ async function ayarlariKaydet(yama) {
     ? durum.ayarlar.signalCfg.weightPreset
     : undefined
   const oncekiYas = kutuYasiSiniri()
+  const oncekiPlan = planAyari()
   const yeni = await cagirGuvenli('settings:set', { patch: gonderilecek }, 'Ayarlar kaydedilemedi')
   if (yeni === null) return
   if (yeni && typeof yeni === 'object') durum.ayarlar = yeni
@@ -2671,6 +2724,15 @@ async function ayarlariKaydet(yama) {
   if (kutuYasiSiniri() !== oncekiYas) {
     await sinyalleriYukle()
     await sinyalKipiDegistiyseTara()
+    if (durum.aktifPanel === 'signals') sinyalPaneliniCiz()
+  }
+  // HEDEF ORANI / SONUC SURESI DEGISTI: TP/SL sonuclari tarama olmadan
+  // yeniden hesaplanir (kullanici: "ayarlardan degistirdigimizde guncellensin").
+  if (planAyari() !== oncekiPlan) {
+    bildir('Hedef oranı değişti, TP/SL sonuçları yeniden hesaplanıyor.')
+    await cagirGuvenli('engine:plan-refresh',
+      { tf: durum.tf, cfgPatch: durum.ayarYamasiKayitli || null }, 'Planlar yeniden hesaplanamadı')
+    await sinyalleriYukle()
     if (durum.aktifPanel === 'signals') sinyalPaneliniCiz()
   }
 }
@@ -2739,6 +2801,7 @@ function olaylariBagla() {
     const s = veri.signal || veri
     if (!s || s.time === undefined) return
     canliSinyalEkle(s)
+    aktifSinyalleriTazele()
   })
 
   // Canli akista bosluk olustu ya da vekil duzeltmesi hesaplanamadi: bar
@@ -3133,6 +3196,20 @@ function dugmeleriBagla() {
   if (bolgeSuzgec) bolgeSuzgec.addEventListener('change', () => bolgePaneliniCiz())
 
   // U7: kip acilip kapandiginda secili sinyal icin hemen uygulanir.
+  // AKTIF SINYAL ISIKLARI: 30 saniyede bir yoklanir (dosya degismediyse isci
+  // yeniden okumaz); isiga tiklamak o zaman dilimine gecer.
+  const isiklar = el('activeSignals')
+  if (isiklar) {
+    isiklar.addEventListener('click', (olay) => {
+      const nokta = olay.target && olay.target.closest ? olay.target.closest('[data-tf]') : null
+      if (!nokta) return
+      const tf = nokta.getAttribute('data-tf')
+      if (tf && tf !== durum.tf) tfDegistir(tf)
+    })
+    setInterval(() => { aktifSinyalleriTazele() }, 30000)
+    aktifSinyalleriTazele()
+  }
+
   // Hacim ac/kapa: secim ayarlara yazilir, sonraki acilista da ayni kalir.
   const hacimKutusu = el('volumeToggle')
   if (hacimKutusu) {

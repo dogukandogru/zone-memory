@@ -487,6 +487,24 @@ function turAdi(kind, sniper) {
  * @param {string} kind
  * @param {boolean} [sniper]
  */
+/**
+ * Plan sonucu rozeti: TP / SL / ACIK / SURE DOLDU. Plan yoksa null.
+ * @param {object|null} plan signal.plan (bkz. core/learn/plan.js)
+ */
+function planRozeti(plan) {
+  if (!plan) return null
+  const r = plan.result
+  const e = r === 'tp' ? h('span', 'badge tiny badge-tp', 'TP')
+    : r === 'sl' ? h('span', 'badge tiny badge-sl', 'SL')
+      : r === 'timeout' ? h('span', 'badge tiny badge-timeout', 'SÜRE DOLDU')
+        : h('span', 'badge tiny badge-open', 'AÇIK')
+  e.title = r === 'tp' ? 'Hedef önce vuruldu'
+    : r === 'sl' ? 'Zarar durdur önce vuruldu'
+      : r === 'timeout' ? 'Süre içinde ikisi de vurulmadı'
+        : 'Henüz ikisi de vurulmadı, işlem açık'
+  return e
+}
+
 function turRozeti(kind, sniper) {
   if (sniper) {
     const s = h('span', 'badge tiny badge-sniper', 'SNIPER')
@@ -757,6 +775,16 @@ export function renderSignals(el, signals, opts) {
     satir.appendChild(yonEtiketi(s.direction))
 
     const orta = h('span', 'row-main')
+    // PLAN SATIRI EN USTTE (kullanici istedi: "her satirin ustunde"): TP ve
+    // SL seviyeleri ile sonuc. Plan hesaplanamadiysa (kapanis kutunun
+    // otesinde) satir yazilmaz.
+    if (s.plan) {
+      const planSatiri = h('span', 'row-sub plan-line',
+        'TP ' + formatPrice(s.plan.tp) + ' \u00b7 SL ' + formatPrice(s.plan.sl) + ' ')
+      const rozetP = planRozeti(s.plan)
+      if (rozetP) planSatiri.appendChild(rozetP)
+      orta.appendChild(planSatiri)
+    }
     orta.appendChild(document.createTextNode(formatDateTime(s.time) + '  ' + formatPrice(s.price)))
     orta.appendChild(turRozeti(s.kind, s.sniper))
     if (s.evidence) orta.appendChild(kanitRozeti(s.evidence))
@@ -1836,6 +1864,16 @@ function ayarGruplari(saglayiciSecenekleri) {
           not: 'Olay anındaki kutu yaşı bunu aşarsa sinyal üretilmez. 0 kapatır. ' +
             'Kutunun çizim ömrü 100 bardır ama izlenmeye 600 bara kadar devam ' +
             'eder, yani çok eski bir kutuya gelen dokunuş da olay üretebiliyor.' },
+        { yol: 'signalCfg.tpRr', ad: 'Hedef oranı (TP = risk × bu)',
+          tip: 'sayi', adim: 0.1, min: 0.1, max: 10,
+          not: 'Sinyal satırındaki TP/SL için. Giriş = sinyal barının kapanışı; ' +
+            'SL = kutunun uzak kenarı, üzerine "Geçersizlik payı" kadar ATR; ' +
+            'TP = giriş ± bu oran × risk. 1 = birebir. Değiştirince tüm ' +
+            'sinyallerin TP/SL sonucu yeniden hesaplanır, tarama gerekmez.' },
+        { yol: 'signalCfg.planHorizonBars', ad: 'Sonuç süresi (bar)',
+          tip: 'sayi', adim: 10, min: 10, max: 5000,
+          not: 'Bu kadar bar içinde ne TP ne SL vurulursa sonuç "süre doldu" olur ' +
+            've sinyal artık aktif sayılmaz.' },
       ],
     },
     {

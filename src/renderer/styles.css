@@ -89,6 +89,29 @@ b { font-weight: 600; }
 .tb-group { display: flex; align-items: center; gap: 4px; }
 .tb-sep { width: 1px; height: 20px; background: var(--border); flex: 0 0 auto; }
 .tb-spacer { flex: 1 1 auto; }
+
+/* Aktif sinyal isiklari (ust serit). */
+.active-signals { gap: 3px; margin-right: 8px; }
+.active-signals .as-label { font-size: 10px; margin-right: 4px; }
+.as-dot {
+  display: inline-flex; align-items: center; gap: 3px;
+  height: 20px; padding: 0 6px;
+  background: transparent; border: 1px solid var(--border); border-radius: 10px;
+  color: var(--text-dim); font: inherit; font-size: 10px; cursor: pointer;
+}
+.as-dot::before {
+  content: ''; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--border); flex: 0 0 auto;
+}
+.as-dot:hover { color: var(--text); background: var(--bg-hover); }
+.as-dot.on { color: var(--text); border-color: var(--warn); }
+.as-dot.on::before { background: var(--warn); animation: as-blink 1s ease-in-out infinite; }
+.as-dot .as-count { font-weight: 700; color: var(--warn); }
+@keyframes as-blink {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(242, 180, 14, 0.6); }
+  50% { opacity: 0.25; box-shadow: 0 0 0 4px rgba(242, 180, 14, 0); }
+}
+@media (prefers-reduced-motion: reduce) { .as-dot.on::before { animation: none; } }
 .tb-label { color: var(--text-dim); font-size: 11px; }
 
 .tb-symbol { gap: 6px; }
@@ -748,6 +771,12 @@ table.tbl tr:hover td { background: var(--bg-hover); }
   border-color: rgba(156, 99, 224, 0.55);
   color: #c4a0f0;
 }
+/* Plan sonucu rozetleri (sinyal satirinin ustundeki TP/SL satiri). */
+.plan-line { display: block; margin-bottom: 1px; }
+.badge.badge-tp { background: rgba(38, 166, 154, 0.18); border-color: rgba(38, 166, 154, 0.6); color: var(--up); font-weight: 700; }
+.badge.badge-sl { background: rgba(239, 83, 80, 0.18); border-color: rgba(239, 83, 80, 0.6); color: var(--down); font-weight: 700; }
+.badge.badge-open { background: rgba(242, 180, 14, 0.16); border-color: rgba(242, 180, 14, 0.6); color: var(--warn); font-weight: 700; }
+.badge.badge-timeout { color: var(--text-dim); }
 .badge.badge-sniper {
   background: rgba(242, 180, 14, 0.18);
   border-color: rgba(242, 180, 14, 0.65);

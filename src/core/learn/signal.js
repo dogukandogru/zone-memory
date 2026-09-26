@@ -144,6 +144,14 @@ const DEFAULT_SIGNAL_CFG = {
    */
   maxZoneAgeBars: 100,
   /**
+   * SINYAL PLANI (bkz. learn/plan.js). TP = giris +/- tpRr * risk; risk,
+   * girisle kutunun uzak kenari (+ gecersizlik payi) arasindaki mesafedir.
+   * Kullanici "1'e 1 ile baslayalim, ayarlardan degissin" dedi.
+   */
+  tpRr: 1.0,
+  /** Plan sonucu icin en fazla kac bar beklenir; dolarsa 'timeout'. */
+  planHorizonBars: 200,
+  /**
    * DOKUNUSUN KENDI ISABET ESIGI. null ise `minWinRate` kullanilir.
    *
    * NEDEN AYRI BIR ALAN: esikler MUTLAK sayilardir ama turlerin taban orani

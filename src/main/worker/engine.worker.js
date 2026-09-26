@@ -1001,6 +1001,76 @@ function hesapImzasi() {
 }
 
 /**
+ * SINYAL PLANI (TP / SL / sonuc), bkz. core/learn/plan.js.
+ *
+ * Tarama, canli ve "plan-refresh" komutu AYNI yardimciyi kullanir; yoksa
+ * ekrandaki TP/SL ile listedeki tutmaz.
+ * @param {Array<object>} liste sinyaller (yerinde degistirilir)
+ * @param {object|null} s seri (tam ya da kuyruk penceresi)
+ * @param {object} uygulanan presets.resolveCfg ciktisi
+ */
+function planlariUygula(liste, s, uygulanan) {
+  const planMod = core('learn/plan')
+  const sc = uygulanan && uygulanan.signalCfg ? uygulanan.signalCfg : {}
+  const oc = uygulanan && uygulanan.outcomeCfg ? uygulanan.outcomeCfg : {}
+  const cfg = {
+    tpRr: num(sc.tpRr, planMod.DEFAULT_PLAN_CFG.tpRr),
+    planHorizonBars: num(sc.planHorizonBars, planMod.DEFAULT_PLAN_CFG.planHorizonBars),
+    breakBufferAtr: num(oc.breakBufferAtr, planMod.DEFAULT_PLAN_CFG.breakBufferAtr),
+  }
+  let acik = 0
+  for (let i = 0; i < liste.length; i++) {
+    if (!liste[i]) continue
+    const plan = planMod.sinyaliPlanla(s, liste[i], cfg)
+    if (plan && plan.result === 'open') acik++
+  }
+  return acik
+}
+
+/**
+ * Canlida: yeni sinyaller dosyaya EKLENIR ve acik planlar yeni barlarla
+ * yeniden cozulur. Sinyaller onceden dosyaya yazilmiyordu (sonraki tarama
+ * zaten uretiyordu); "aktif sinyaller" isigi dosyayi okudugu icin canli
+ * sinyalin de orada olmasi gerekiyor.
+ * @param {string} tf
+ * @param {object} s kuyruk serisi (canliAnalizSerisi)
+ * @param {object} uygulanan
+ * @param {Array<object>} yeniler bu tikte uretilen sinyaller
+ */
+async function planlariCanlidaGuncelle(tf, s, uygulanan, yeniler) {
+  const mevcut = (await getSignals(tf, false)).slice()
+  const kimlikler = new Set()
+  for (let i = 0; i < mevcut.length; i++) if (mevcut[i]) kimlikler.add(String(mevcut[i].id))
+  let degisti = false
+  for (let i = 0; i < yeniler.length; i++) {
+    const sig = yeniler[i]
+    if (!sig || sig.fired === false || kimlikler.has(String(sig.id))) continue
+    mevcut.push(sig)
+    kimlikler.add(String(sig.id))
+    degisti = true
+  }
+  // Acik planlar: kuyruk penceresi (>= 4000 bar) plan ufkundan (200) genis,
+  // yani cozulebilir her sey bu pencerede. Pencereden eski bir acik plan ufku
+  // coktan doldurmustur; sinyaliPlanla onu 'timeout' yapar.
+  const acikOlanlar = []
+  for (let i = 0; i < mevcut.length; i++) {
+    const sg = mevcut[i]
+    if (sg && sg.plan && sg.plan.result === 'open') acikOlanlar.push(sg)
+  }
+  if (acikOlanlar.length > 0) {
+    const onceki = acikOlanlar.map((sg) => sg.plan.result)
+    planlariUygula(acikOlanlar, s, uygulanan)
+    for (let i = 0; i < acikOlanlar.length; i++) {
+      if (acikOlanlar[i].plan && acikOlanlar[i].plan.result !== onceki[i]) degisti = true
+    }
+  }
+  if (!degisti) return
+  mevcut.sort((a, b) => num(a.time, 0) - num(b.time, 0))
+  await writeJsonAtomic(paths.signalsPath(tf), mevcut)
+  signalCache = { tf: tf, signals: mevcut }
+}
+
+/**
  * Komsu onbellegi ayari: TARAMA, TEST ve KORUMA KONTROLU ayni nesneyi kurmali.
  *
  * `candcache.cacheKey` bu nesneden uretilir. Uc yerde ayri ayri kurulunca biri
@@ -1280,6 +1350,7 @@ handlers['engine:scan'] = async function (payload, ctx) {
     for (let i = 0; i < events.length; i++) {
       if (events[i] && !yasEngelli(events[i])) liste.push(olaydanSinyal(events[i], tf))
     }
+    planlariUygula(liste, s, uygulanan)
     await writeJsonAtomic(paths.signalsPath(tf), liste)
     signalCache = { tf: tf, signals: liste }
     log(liste.length + ' sinyal yazıldı (her kutu oluşumu ve her dokunuş).')
@@ -1387,6 +1458,7 @@ handlers['engine:scan'] = async function (payload, ctx) {
       sig.topMatches = komsular.slice(0, 6)
       liste.push(sig)
     }
+    planlariUygula(liste, s, uygulanan)
     await writeJsonAtomic(paths.signalsPath(tf), liste)
     signalCache = { tf: tf, signals: liste }
     log(liste.length + ' sinyal yazıldı (geçmişte en az ' + enAzBenzer +
@@ -1713,6 +1785,58 @@ handlers['engine:signals'] = async function (payload) {
   const total = picked.length
   const slice = total > limit ? picked.slice(total - limit) : picked
   return { tf: tf, signals: slice, total: total, truncated: total > slice.length }
+}
+
+/**
+ * PLANLARI YENIDEN HESAPLA: hedef orani ya da sonuc suresi degisti.
+ * Tarama gerektirmez; tam seriyle her sinyalin TP/SL/sonucu yeniden yazilir.
+ * Yuk: {tf, cfgPatch}
+ */
+handlers['engine:plan-refresh'] = async function (payload, ctx) {
+  const tf = requireTf(payload.tf)
+  ctx.progress(0, 'Planlar yeniden hesaplanıyor')
+  const s = await getSeries(tf, false)
+  const liste = (await getSignals(tf, true)).slice()
+  const uygulanan = core('learn/presets').resolveCfg(tf, payload.cfgPatch || cfgPatchGeriUyum(payload), null)
+  const acik = planlariUygula(liste, s, uygulanan)
+  await writeJsonAtomic(paths.signalsPath(tf), liste)
+  signalCache = { tf: tf, signals: liste }
+  ctx.progress(100, 'Planlar hazır')
+  return { tf: tf, signals: liste.length, open: acik }
+}
+
+/**
+ * AKTIF SINYALLER: her zaman diliminde plani 'open' olan sinyal sayisi.
+ * Ust seritteki isiklar bunu yoklar. Dosyalar mtime'a gore onbelleklenir;
+ * degismeyen dosya yeniden okunmaz.
+ */
+const aktifOnbellek = new Map()
+handlers['engine:active-signals'] = async function () {
+  const { TF_LIST } = core('tf')
+  const byTf = {}
+  for (const tf of TF_LIST) {
+    const dosya = paths.signalsPath(tf)
+    let st = null
+    try { st = await fsp.stat(dosya) } catch (err) { st = null }
+    if (!st) { byTf[tf] = { open: 0, latestTime: null }; continue }
+    const damga = st.mtimeMs + ':' + st.size
+    const eski = aktifOnbellek.get(tf)
+    if (eski && eski.damga === damga) { byTf[tf] = eski.sonuc; continue }
+    const veri = await readJson(dosya)
+    const liste = Array.isArray(veri) ? veri : (veri && Array.isArray(veri.signals) ? veri.signals : [])
+    let open = 0
+    let latestTime = null
+    for (let i = 0; i < liste.length; i++) {
+      const sg = liste[i]
+      if (!sg || !sg.plan || sg.plan.result !== 'open') continue
+      open++
+      if (latestTime === null || num(sg.time, 0) > latestTime) latestTime = num(sg.time, 0)
+    }
+    const sonuc = { open: open, latestTime: latestTime }
+    aktifOnbellek.set(tf, { damga: damga, sonuc: sonuc })
+    byTf[tf] = sonuc
+  }
+  return { byTf: byTf }
 }
 
 /** Yuruyen ileri test. Uretilen sinyalleri diske yazar. */
@@ -2675,6 +2799,9 @@ handlers['engine:live-tick'] = async function (payload) {
               : 'Bu sinyal türünün katma değeri kanıtlanmadı (son ölçüme göre).')
           }
         }
+        // PLAN: TP/SL seviyeleri; sonuc henuz belli degil ('open'), ama
+        // gecikmeli degerlendirmede sonraki barlar gelmis olabilir.
+        if (sig) planlariUygula([sig], s, canliCfg)
         events.push({
           key: liveEvents.eventKey(cand),
           touch: hafif,
@@ -2713,6 +2840,13 @@ handlers['engine:live-tick'] = async function (payload) {
       // yapilacak is yoktur.
       labeled = await liveLogEtiketle(tf, s, tfSec, canliCfg.planOutcomeCfg, logs,
         (payload.cfgPatch && payload.cfgPatch.backtestCfg) || null)
+
+      // Yeni sinyaller dosyaya, acik planlar yeni barlarla yeniden cozulur.
+      try {
+        await planlariCanlidaGuncelle(tf, s, canliCfg, events.map((e) => e.signal))
+      } catch (err) {
+        logs.push('Plan sonuçları güncellenemedi: ' + (err && err.message ? err.message : String(err)))
+      }
     } catch (err) {
       // Gunluk satiri 12-20 saniyede kayboluyordu; hata artik durum
       // nesnesiyle de donuyor ve gostergede kalici olarak gorunuyor.

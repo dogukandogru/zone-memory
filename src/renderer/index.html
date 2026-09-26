@@ -94,6 +94,20 @@
 
     <div class="tb-spacer"></div>
 
+    <!-- AKTIF SINYALLER: her zaman diliminde TP/SL'i henuz vurulmamis sinyal
+         var mi. Varsa nokta yanip soner, sayi yazar; tiklayinca o dilime gecer.
+         Kullanici istedi: "hangi zaman diliminde aktif sinyal varsa gozuksun,
+         bir isik yanip sonsun". -->
+    <div class="tb-group active-signals" id="activeSignals" title="Aktif sinyaller: TP/SL henüz vurulmamış">
+      <span class="as-label muted">Aktif sinyal yok</span>
+      <button type="button" class="as-dot" data-tf="1m"><span class="as-tf">1m</span><span class="as-count"></span></button>
+      <button type="button" class="as-dot" data-tf="5m"><span class="as-tf">5m</span><span class="as-count"></span></button>
+      <button type="button" class="as-dot" data-tf="15m"><span class="as-tf">15m</span><span class="as-count"></span></button>
+      <button type="button" class="as-dot" data-tf="30m"><span class="as-tf">30m</span><span class="as-count"></span></button>
+      <button type="button" class="as-dot" data-tf="1h"><span class="as-tf">1h</span><span class="as-count"></span></button>
+      <button type="button" class="as-dot" data-tf="4h"><span class="as-tf">4h</span><span class="as-count"></span></button>
+    </div>
+
     <div class="tb-group" id="mainTabs" role="tablist" aria-label="Görünüm">
       <button type="button" class="main-tab active" id="tabAnaliz" data-view="analysis" role="tab" aria-selected="true">Analiz</button>
       <button type="button" class="main-tab" id="tabTradingView" data-view="tradingview" role="tab" aria-selected="false">TradingView</button>
@@ -321,6 +335,7 @@ ANA ALAN
   #chart                createChartView(#chart) kutusu
   #chartLegend          sol ust efsane kutusu
   #volumeToggle         hacim cubuklarini ac/kapa (chart.showVolume)
+  #activeSignals        aktif sinyal isiklari; .as-dot[data-tf] .on yanip soner
   #legendSymbol #legendTf #legendO #legendH #legendL #legendC #legendChange
   #goLatestBtn          gecmis pencereden guncel mumlara donus
   #memoryExportBtn      hafiza olaylarini CSV olarak kaydet
