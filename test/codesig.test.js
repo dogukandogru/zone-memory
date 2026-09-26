@@ -28,7 +28,9 @@ function sahteImza (dosyalar, girisler) {
     root: '/kok',
     entries: girisler || ['a.js'],
     readFile: (yol) => {
-      const ad = path.relative('/kok', yol)
+      // Windows'ta path.relative ters bolu verir (alt\\c.js); sahte dosya
+      // sistemi / ile anahtarlanmis. CI'da Windows bunu yakaladi.
+      const ad = path.relative(path.resolve('/kok'), yol).split(/[\\/]+/).join('/')
       if (!Object.prototype.hasOwnProperty.call(dosyalar, ad)) {
         throw new Error('yok: ' + ad)
       }
