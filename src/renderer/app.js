@@ -805,7 +805,6 @@ function isaretleriCiz() {
   if (durum.asOf !== null && son !== null && son > durum.asOf) son = durum.asOf
 
   const isaretler = []
-  let seciliZaman = null
   for (let i = 0; i < durum.signals.length; i++) {
     const s = durum.signals[i]
     if (!s || s.fired === false) continue
@@ -813,10 +812,10 @@ function isaretleriCiz() {
     if (ilk === null || t < ilk || t > son) continue
     const alis = s.direction !== 'SELL'
     // SECILI SINYAL BELIRGIN: daha buyuk ve beyaz ok. Kullanici "grafikte
-    // nereyi kastettigini anlamiyorum" dedi; ayrica o bar bir dikey seritle
-    // vurgulanir (asagida overlay).
+    // nereyi kastettigini anlamiyorum" dedi. Bir donem mumun arkasina dikey
+    // bir serit de ciziliyordu; kullanici "cok buyuk olmus, sadece ok daha
+    // belirgin olsa yeterdi" dedi, serit kaldirildi.
     const secili = durum.seciliSinyalId !== null && String(s.id) === String(durum.seciliSinyalId)
-    if (secili) seciliZaman = t
     isaretler.push({
       id: String(s.id),
       time: t,
@@ -826,9 +825,6 @@ function isaretleriCiz() {
       size: secili ? 3 : 1,
       text: isaretMetni(s),
     })
-  }
-  if (overlay && typeof overlay.setVurguZamani === 'function') {
-    try { overlay.setVurguZamani(seciliZaman) } catch (err) { /* onemsiz */ }
   }
   // Benzer gecmis ornek isareti. Sinyal oklarindan ayrilsin diye daire ve
   // altin rengi; yalnizca yuklu mum araliginda gosterilir.
