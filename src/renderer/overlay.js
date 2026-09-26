@@ -343,10 +343,12 @@ export function createZoneOverlay(chartView, container) {
           try { aralik = chartView.chart.timeScale().options().barSpacing; } catch (_e) { /* varsayilan */ }
           const genislik = Math.max(6, (isNum(aralik) ? aralik : 8) * 0.9);
           const yukseklik = scope.mediaSize && isNum(scope.mediaSize.height) ? scope.mediaSize.height : 4000;
-          ctx.fillStyle = 'rgba(255, 255, 255, 0.10)';
+          // Belirgin olsun: kehribar serit ve 2 piksel kenar. Solgun beyaz
+          // (%10) karanlik zeminde fark edilmiyordu.
+          ctx.fillStyle = 'rgba(242, 180, 14, 0.22)';
           ctx.fillRect(x - genislik / 2, 0, genislik, yukseklik);
-          ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
-          ctx.lineWidth = 1;
+          ctx.strokeStyle = 'rgba(242, 180, 14, 0.9)';
+          ctx.lineWidth = 2;
           ctx.beginPath();
           ctx.moveTo(x - genislik / 2, 0); ctx.lineTo(x - genislik / 2, yukseklik);
           ctx.moveTo(x + genislik / 2, 0); ctx.lineTo(x + genislik / 2, yukseklik);

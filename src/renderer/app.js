@@ -823,7 +823,7 @@ function isaretleriCiz() {
       position: alis ? 'belowBar' : 'aboveBar',
       shape: alis ? 'arrowUp' : 'arrowDown',
       color: secili ? '#ffffff' : (alis ? RENK.up : RENK.down),
-      size: secili ? 2.2 : 1,
+      size: secili ? 3 : 1,
       text: isaretMetni(s),
     })
   }
@@ -917,11 +917,26 @@ function planCizgileri(s) {
   // 'hepsi' kipinde plan YOKTUR: hedef ve zarar durdur kullanicinin karari.
   // Cizgileri temizleyip cikariz, yoksa onceki sinyalin cizgileri asili kalir.
   if (!s || sadeSinyalMi(s)) {
-    if (typeof view.clearPlanLines === 'function') {
-      try { view.clearPlanLines() } catch (err) { /* onemsiz */ }
-    }
     if (typeof view.clearPriceLines === 'function') {
       try { view.clearPriceLines() } catch (err) { /* onemsiz */ }
+    }
+    // YENI BICIMDE PLAN VAR (core/learn/plan.js): giris, TP ve SL cizgileri
+    // sinyal barindan itibaren cizilir. Secili sinyal boylece grafikte hem
+    // ok, hem serit, hem seviyelerle gorunur. Plan yoksa cizgi de yok.
+    const pl = s && s.plan ? s.plan : null
+    if (pl && typeof view.setPlanLines === 'function') {
+      try {
+        view.setPlanLines({
+          time: sayi(s.time, 0),
+          levels: [
+            { price: sayi(pl.entry, NaN), color: '#d1d4dc', title: 'Giriş', width: 1, dashed: false },
+            { price: sayi(pl.tp, NaN), color: RENK.up, title: 'TP', width: 1, dashed: true },
+            { price: sayi(pl.sl, NaN), color: RENK.down, title: 'SL', width: 1, dashed: true },
+          ].filter((c) => Number.isFinite(c.price)),
+        })
+      } catch (err) { /* onemsiz */ }
+    } else if (typeof view.clearPlanLines === 'function') {
+      try { view.clearPlanLines() } catch (err) { /* onemsiz */ }
     }
     return
   }
@@ -2445,8 +2460,12 @@ async function sinyalSec(s) {
   }
   if (!yenidenYuklendi && onceki !== anaKadar) {
     barlariGrafigeBas(durum.bars)
-    isaretleriCiz()
   }
+  // ISARETLER HER SECIMDE YENIDEN CIZILIR. Onceden yalnizca pencere yeniden
+  // yuklendiginde ya da "o ana kadar" kipi degistiginde ciziliyordu; gorunur
+  // bir sinyale tiklayinca secili ok ve mum seridi HIC uygulanmiyordu
+  // (kullanici: "hala grafikte daha belirgin olmuyor").
+  isaretleriCiz()
 
   planCizgileri(s)
   if (view && typeof view.scrollToTime === 'function') {
