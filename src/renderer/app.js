@@ -27,7 +27,6 @@ import {
   renderMemory,
   renderSettings,
   formatNumber,
-  formatPercent,
   formatPrice,
   formatDate,
   formatDateTime,
@@ -91,6 +90,14 @@ const durum = {
   // Sinyaller panelindeki acik TUR SEKMESI: 'form' (kutu olusumu) veya
   // 'touch' (bolgeye donus). Ikisi ayri kurulumdur ve ayri listelenir.
   sinyalTuru: 'form',
+  // Sinyal ayrintisi ACIK MI. Kullanici istedi: her tiklamada ayrinti
+  // acilmasin, asagida kapali dursun, istenince acilsin.
+  ayrintiAcik: false,
+  // Secili kutunun sinyalleri ({zoneId, liste}); Bolgeler panelinin ustunde
+  // Sinyaller listesiyle AYNI satir bicimiyle gosterilir.
+  bolgeSinyalleri: null,
+  // Yuklu listede kutu yasi sinirini asan sinyal var miydi (dosya eski).
+  sinyalYasAsimi: false,
   canli: false,
   // Isciden gelen sinyal listesi kirpildi mi (U8).
   sinyalToplam: 0,
@@ -515,13 +522,6 @@ function sinyalleriNormalle(ham) {
   return liste
 }
 
-/** Dokunus yanitini diziye cevirir. */
-function dokunuslariNormalle(ham) {
-  if (Array.isArray(ham)) return ham
-  if (ham && Array.isArray(ham.touches)) return ham.touches
-  return []
-}
-
 /** Veri durumu yanitindan secili zaman dilimine ait kaydi cikarir. */
 function veriDurumuKaydi(ham, tf) {
   if (!ham || typeof ham !== 'object') return null
@@ -539,6 +539,31 @@ function veriDurumuKaydi(ham, tf) {
 /* Grafik ve bolge katmani                                             */
 /* ------------------------------------------------------------------ */
 
+/** Ayarlara gore hacim cubuklari gorunur mu (varsayilan gizli). */
+function hacimGorunurMu() {
+  const a = durum.ayarlar && durum.ayarlar.chart
+  return !!(a && a.showVolume === true)
+}
+
+/** Hacim gorunurlugunu grafige ve kutucuga uygular. */
+function hacimGorunurlugunuUygula() {
+  const acik = hacimGorunurMu()
+  if (view && typeof view.setVolumeVisible === 'function') view.setVolumeVisible(acik)
+  const kutu = el('volumeToggle')
+  if (kutu && kutu.checked !== acik) kutu.checked = acik
+}
+
+/**
+ * Kutu yasi siniri (bar). Ayarlardaki `signalCfg.maxZoneAgeBars`; 0 kapatir.
+ * Ayar yuklenmemisse cekirdek varsayilani (100) kullanilir ki ekran, taramanin
+ * uyguladigi kuralla ayni olsun.
+ */
+function kutuYasiSiniri() {
+  const c = durum.ayarlar && durum.ayarlar.signalCfg
+  const v = c && typeof c.maxZoneAgeBars === 'number' ? c.maxZoneAgeBars : 100
+  return Number.isFinite(v) && v > 0 ? v : 0
+}
+
 /** Grafigi ve bolge katmanini kurar. */
 function grafigiKur() {
   const kap = el('chart') || el('chartWrap')
@@ -552,6 +577,9 @@ function grafigiKur() {
     hataGoster('Grafik kurulamadı: ' + hataMetni(err))
     return
   }
+
+  // Hacim cubuklari: ayar yuklenmemis olabilir, o zaman varsayilan (gizli).
+  hacimGorunurlugunuUygula()
 
   // Hata ayiklama tutamagi: gelistirici konsolundan grafik ve durum incelenebilir.
   // contextIsolation acik oldugu icin bu yalnizca renderer icinde gorunur,
@@ -737,23 +765,30 @@ function isaretleriCiz() {
   if (durum.asOf !== null && son !== null && son > durum.asOf) son = durum.asOf
 
   const isaretler = []
+  let seciliZaman = null
   for (let i = 0; i < durum.signals.length; i++) {
     const s = durum.signals[i]
     if (!s || s.fired === false) continue
     const t = sayi(s.time, 0)
     if (ilk === null || t < ilk || t > son) continue
     const alis = s.direction !== 'SELL'
-    // Isaret metni "kac kayittan kaci" gosterir: onceden "O %53" yaziyordu ve
-    // 3 kayittan 3'u ile 30 kayittan 16'si AYNI gorunuyordu. Onek OL = kutu
-    // olusumu, DK = bolgeye donus (tek harf yeterince acik degildi).
+    // SECILI SINYAL BELIRGIN: daha buyuk ve beyaz ok. Kullanici "grafikte
+    // nereyi kastettigini anlamiyorum" dedi; ayrica o bar bir dikey seritle
+    // vurgulanir (asagida overlay).
+    const secili = durum.seciliSinyalId !== null && String(s.id) === String(durum.seciliSinyalId)
+    if (secili) seciliZaman = t
     isaretler.push({
       id: String(s.id),
       time: t,
       position: alis ? 'belowBar' : 'aboveBar',
       shape: alis ? 'arrowUp' : 'arrowDown',
-      color: alis ? RENK.up : RENK.down,
+      color: secili ? '#ffffff' : (alis ? RENK.up : RENK.down),
+      size: secili ? 2.2 : 1,
       text: isaretMetni(s),
     })
+  }
+  if (overlay && typeof overlay.setVurguZamani === 'function') {
+    try { overlay.setVurguZamani(seciliZaman) } catch (err) { /* onemsiz */ }
   }
   // Benzer gecmis ornek isareti. Sinyal oklarindan ayrilsin diye daire ve
   // altin rengi; yalnizca yuklu mum araliginda gosterilir.
@@ -1190,7 +1225,17 @@ async function sinyalleriYukle() {
   // satir kaliyordu; panel zaten en fazla 500 satir ciziyor.
   const ham = await cagirGuvenli('engine:signals', { tf: durum.tf, limit: 1000 }, 'Sinyaller alınamadı')
   if (ham === null) return
-  durum.signals = sinyalleriNormalle(ham)
+  // KUTU YASI SINIRI EKRANDA DA UYGULANIR. Tarama listeyi yazarken uyguluyor,
+  // ama liste dosyasi eski olabilir (kural eklenmeden once yazilmis, ya da
+  // kullanici siniri az once degistirmis ve yeni bar gelmedigi icin tarama
+  // calismamis). Sonuc taramayla BIREBIR ayni: guven kirilim noktalari
+  // sinirdan bagimsiz hesaplaniyor, sinir yalnizca sinyali listeden dusuruyor.
+  // Asim varsa dosya da kendiliginden yenilenir (bkz. sinyalKipiDegistiyseTara).
+  const tumu = sinyalleriNormalle(ham)
+  const sinir = kutuYasiSiniri()
+  const uygun = sinir > 0 ? tumu.filter((x) => !(sayi(x.zoneAgeBars, 0) > sinir)) : tumu
+  durum.sinyalYasAsimi = uygun.length !== tumu.length
+  durum.signals = uygun
   isaretleriCiz()
   if (durum.seciliSinyalId === null && durum.aktifPanel === 'signals') sinyalPaneliniCiz()
 }
@@ -1459,6 +1504,7 @@ async function tfDegistir(tf) {
   durum.tf = tf
   durum.seciliSinyalId = null
   durum.seciliBolgeId = null
+  durum.bolgeSinyalleri = null
   anaKadarAyarla(null)
   durum.signals = []
   durum.zones = []
@@ -1972,7 +2018,7 @@ function sinyalPaneliniCiz() {
 
   const s = seciliSinyal()
   if (n.ayrinti) {
-    if (s) {
+    if (s && durum.ayrintiAcik) {
       // Once gorunur yapilir: mini grafiklerin genisligi yerlesimden okunur.
       goster(n.ayrinti, true)
       renderSignalDetail(n.ayrinti, s, {
@@ -1980,7 +2026,41 @@ function sinyalPaneliniCiz() {
         onMatchCompare: ornekKarsilastir,
         risk: durum.ayarlar ? durum.ayarlar.risk : null,
       })
-      geriDugmesiEkle(n.ayrinti, 'Ayrıntıyı kapat', () => {
+      // Gizle SECIMI KALDIRMAZ: satir ve grafik vurgusu durur, yalnizca
+      // ayrinti kapanir.
+      geriDugmesiEkle(n.ayrinti, 'Ayrıntıyı gizle', () => {
+        durum.ayrintiAcik = false
+        sinyalPaneliniCiz()
+      })
+    } else if (s) {
+      // AYRINTI KAPALI DURUR (kullanici istedi: her tiklamada acilmasin).
+      // Ince bir serit: hangi sinyal secili, bir dugmeyle ayrinti acilir,
+      // bir dugmeyle secim kaldirilir.
+      goster(n.ayrinti, true)
+      n.ayrinti.innerHTML = ''
+      const serit = document.createElement('div')
+      serit.className = 'detail-bar'
+      const metin = document.createElement('span')
+      metin.className = 'muted small grow'
+      metin.textContent = 'Seçili: ' + formatDateTime(s.time) + ', ' +
+        (s.direction === 'SELL' ? 'SAT' : 'AL') + ' ' +
+        (s.kind === 'form' ? 'oluşum' : 'dokunuş')
+      serit.appendChild(metin)
+      const ac = document.createElement('button')
+      ac.type = 'button'
+      ac.className = 'btn mini'
+      ac.textContent = 'Ayrıntıyı göster'
+      ac.addEventListener('click', () => {
+        durum.ayrintiAcik = true
+        sinyalPaneliniCiz()
+      })
+      serit.appendChild(ac)
+      const kaldir = document.createElement('button')
+      kaldir.type = 'button'
+      kaldir.className = 'btn mini btn-ghost'
+      kaldir.title = 'Seçimi kaldır'
+      kaldir.textContent = '×'
+      kaldir.addEventListener('click', () => {
         durum.seciliSinyalId = null
         durum.vurguluOrnek = null
         karsilastirmayiTemizle()
@@ -1989,6 +2069,8 @@ function sinyalPaneliniCiz() {
         isaretleriCiz()
         sinyalPaneliniCiz()
       })
+      serit.appendChild(kaldir)
+      n.ayrinti.appendChild(serit)
     } else {
       goster(n.ayrinti, false)
     }
@@ -2075,6 +2157,12 @@ async function sinyalKipiDegistiyseTara() {
   // yazilabilir). O kipte listeyi tarama YAZMAZ, dolayisiyla burada yeniden
   // uretmeye kalkmak her acilista sonucsuz bir tarama baslatirdi.
   if (etkin === 'hafiza') return
+  // LISTE DOSYASI KUTU YASI SINIRINA UYMUYOR: yeniden uretilir. Ekran zaten
+  // suzuyor, ama dosyadaki toplam ve isci tarafindaki liste de kurala uymali.
+  if (durum.sinyalYasAsimi) {
+    durum.sinyalYasAsimi = false
+    return listeyiYenidenUret('Kutu yaşı sınırı uygulanıyor, sinyal listesi yeniden üretiliyor.')
+  }
   const liste = Array.isArray(durum.signals) ? durum.signals : []
   if (liste.length === 0) return
   // Listedeki kayitlar hangi kiple yazilmis. Kip alani olmayan kayitlar ESKI
@@ -2333,12 +2421,38 @@ function bolgePaneliniCiz() {
     ? durum.asOf
     : (durum.bars.length ? sayi(durum.bars[durum.bars.length - 1].time, 0) : 0)
 
-  renderZones(liste, durum.zones, {
-    onSelect: (z) => bolgeSec(z),
-    selectedId: durum.seciliBolgeId,
-    filter: suzgec && suzgec.value ? suzgec.value : 'all',
-    now: son > 0 ? son : null,
-  })
+  // KUTU SECILIYSE USTTE KUTUNUN SINYALLERI. Kullanici istedi: kutuya
+  // tiklayinca olusum ve dokunus bilgileri ust sirada, Sinyaller listesiyle
+  // ayni ve guncel bicimde (guven yuzdesi, benzer sayisi) gorunsun; kutu
+  // bilgisi altta sade kalsin.
+  const bs = durum.bolgeSinyalleri
+  if (durum.seciliBolgeId !== null && bs && String(bs.zoneId) === String(durum.seciliBolgeId)) {
+    renderSignals(liste, bs.liste, {
+      onSelect: (sg) => sinyalSec(sg),
+      selectedId: durum.seciliSinyalId,
+      filter: 'all',
+    })
+    const baslik = document.createElement('h4')
+    baslik.className = 'sec-title'
+    baslik.textContent = 'Kutu #' + formatNumber(durum.seciliBolgeId, 0) +
+      ' sinyalleri (' + formatNumber(bs.liste.length, 0) + ')'
+    liste.insertBefore(baslik, liste.firstChild)
+    geriDugmesiEkle(liste, 'Bölge listesine dön', () => {
+      durum.seciliBolgeId = null
+      durum.bolgeSinyalleri = null
+      if (overlay && typeof overlay.setHighlight === 'function') {
+        try { overlay.setHighlight(null) } catch (err) { /* onemsiz */ }
+      }
+      bolgePaneliniCiz()
+    })
+  } else {
+    renderZones(liste, durum.zones, {
+      onSelect: (z) => bolgeSec(z),
+      selectedId: durum.seciliBolgeId,
+      filter: suzgec && suzgec.value ? suzgec.value : 'all',
+      now: son > 0 ? son : null,
+    })
+  }
   goster(el('zoneEmpty'), false)
 
   const rozet = el('zoneCount')
@@ -2386,19 +2500,37 @@ async function bolgeSec(z) {
     try { overlay.setHighlight(z.id) } catch (err) { /* onemsiz */ }
   }
 
-  // YEDEK LISTE KALDIRILDI. Isci artik yalnizca bu bolgenin olaylarini
-  // donduruyor; eslesme yoksa dogru cevap BOS LISTEDIR. Onceki hal, eslesme
-  // bulamayinca son 5000 olayin tamamini o bolgeninmis gibi gosteriyordu
-  // (olculdu: 15m'de bolgelerin %42'si, 1m'de %92,4'u yanlis liste goruyordu).
-  const ham = await cagirGuvenli('engine:touches', { tf: durum.tf, zoneId: z.id }, 'Bölge dokunuşları alınamadı')
-  const hepsi = dokunuslariNormalle(ham)
-  const dokunuslar = hepsi.filter((t) => t && sayi(t.zoneId, -1) === sayi(z.id, -2))
-  bolgeAyrintisiniCiz(z, dokunuslar)
+  // KUTUNUN SINYALLERI, ham olay listesi degil. Onceden `engine:touches`
+  // ile ham olaylar geliyor ve "1/4 esik alti" gibi eski bicimde ciziliyordu;
+  // kullanici Sinyaller listesindeki guncel bicimi istedi. Sinyal listesi
+  // kutunun omru boyunca cekilir (kutu yasi siniri 100 bar, kutu cizim omru
+  // 100 bar; 150 barlik pay yeterli) ve yalnizca bu kutunun kayitlari alinir.
+  const adim = tfSaniye(durum.tf)
+  const ham = await cagirGuvenli('engine:signals', {
+    tf: durum.tf,
+    from: Math.max(0, sayi(z.createdTime, 0) - adim),
+    to: sayi(z.endTime, sayi(z.createdTime, 0)) + adim * 150,
+    limit: 20000,
+  }, 'Kutunun sinyalleri alınamadı')
+  const sinir = kutuYasiSiniri()
+  const liste = sinyalleriNormalle(ham).filter((sg) => sg &&
+    sayi(sg.zoneId, -1) === sayi(z.id, -2) &&
+    !(sinir > 0 && sayi(sg.zoneAgeBars, 0) > sinir))
+  durum.bolgeSinyalleri = { zoneId: z.id, liste: liste }
+  bolgePaneliniCiz()
+  bolgeAyrintisiniCiz(z)
 }
 
-/** Bolge ayrintisini (dokunus gecmisi) cizer. */
-function bolgeAyrintisiniCiz(z, dokunuslar) {
-  const kap = el('zoneDetail') || panelGovdesi('zones')
+/**
+ * Bolge ayrintisi: YALNIZCA kutunun kendi bilgisi, sade.
+ *
+ * Olay listesi buradan kalkti; kutunun sinyalleri artik panelin USTUNDE,
+ * Sinyaller listesiyle ayni bicimde gosteriliyor (bkz. bolgePaneliniCiz).
+ * Kullanici "ne kadar sade olursa o kadar kullanisli" dedi: pivot zamani,
+ * dogustaki akis, bant disina tasma ve birlesme sayisi da cikarildi.
+ */
+function bolgeAyrintisiniCiz(z) {
+  const kap = el('zoneDetail')
   if (!kap) return
   goster(kap, true)
   while (kap.firstChild) kap.removeChild(kap.firstChild)
@@ -2408,7 +2540,7 @@ function bolgeAyrintisiniCiz(z, dokunuslar) {
   // "Aktif" yalnizca kirilmamis DEGIL, omru de dolmamis kutu demektir.
   const sonBar = durum.bars.length ? sayi(durum.bars[durum.bars.length - 1].time, 0) : 0
   const omruBitti = !z.broken && sonBar > 0 && sayi(z.endTime, 0) < sonBar
-  baslik.textContent = (z.isSupport ? 'Destek bölgesi' : 'Direnç bölgesi') +
+  baslik.textContent = (z.isSupport ? 'Destek kutusu' : 'Direnç kutusu') +
     ' #' + formatNumber(z.id, 0) +
     (z.broken ? ' (kırıldı)' : (omruBitti ? ' (süresi doldu)' : ' (aktif)'))
   kap.appendChild(baslik)
@@ -2416,12 +2548,8 @@ function bolgeAyrintisiniCiz(z, dokunuslar) {
   const ciftler = [
     ['Aralık', formatPrice(z.bottom) + ' - ' + formatPrice(z.top)],
     ['Oluşum', formatDateTime(z.createdTime)],
-    ['Pivot', formatDateTime(z.pivotTime)],
     [z.broken ? 'Kırılma' : 'Bitiş', formatDateTime(z.endTime)],
     ['Akış gücü', formatNumber(z.flow, 2) + ' / 10'],
-    ['Doğuştaki akış', formatNumber(z.flowAtBirth, 2) + ' / 10'],
-    ['Bant dışına taşma', formatNumber(z.bbDistAtr, 2) + ' ATR'],
-    ['Birleşme sayısı', formatNumber(z.mergeCount, 0)],
     ['Dokunuş sayısı', formatNumber(z.touchCount, 0)],
   ]
   for (let i = 0; i < ciftler.length; i++) {
@@ -2435,78 +2563,6 @@ function bolgeAyrintisiniCiz(z, dokunuslar) {
     satir.appendChild(b)
     kap.appendChild(satir)
   }
-
-  const dBaslik = document.createElement('h4')
-  dBaslik.className = 'sec-title'
-  dBaslik.textContent = 'Bölge olayları (' + formatNumber(dokunuslar.length, 0) + ')'
-  kap.appendChild(dBaslik)
-
-  if (dokunuslar.length === 0) {
-    const bos = document.createElement('div')
-    bos.className = 'small muted'
-    bos.textContent = 'Bu bölgeye kayıtlı olay yok.'
-    kap.appendChild(bos)
-  } else {
-    for (let i = 0; i < dokunuslar.length; i++) {
-      const t = dokunuslar[i]
-      const satir = document.createElement('div')
-      satir.className = 'row ' + (t.direction === 'SELL' ? 'sell' : 'buy')
-      satir.style.cursor = 'default'
-
-      const etiket = document.createElement('span')
-      etiket.className = 'tag ' + (t.direction === 'SELL' ? 'sell' : 'buy')
-      etiket.textContent = t.direction === 'SELL' ? 'SAT' : 'AL'
-      satir.appendChild(etiket)
-
-      const orta = document.createElement('span')
-      orta.className = 'row-main'
-      orta.appendChild(document.createTextNode(formatDateTime(t.time)))
-      const rozet = document.createElement('span')
-      rozet.className = 'badge tiny'
-      rozet.textContent = t.sniper ? 'SNIPER' : (t.kind === 'form' ? 'OLUŞUM' : 'DOKUNUŞ')
-      rozet.title = t.sniper
-        ? 'İndikatörün kendi sinyali: bölge süpürüldü, fitil reddetti, yapı kırıldı'
-        : (t.kind === 'form'
-          ? 'Kutunun doğduğu an, giriş onay barının kapanışı'
-          : 'Fiyatın bölgeye geri dönüşü, giriş bölge kenarı')
-      orta.appendChild(rozet)
-      const alt = document.createElement('span')
-      alt.className = 'row-sub'
-      alt.textContent = t.kind === 'form'
-        ? ('Fiyat ' + formatPrice(t.price) + ', kutuya uzaklık ' +
-           formatNumber(t.entryDistAtr, 2) + ' ATR')
-        : ('Fiyat ' + formatPrice(t.price) + ', giriş derinliği ' +
-           formatPercent(t.penetration, 0))
-      orta.appendChild(alt)
-      satir.appendChild(orta)
-
-      const sag = document.createElement('span')
-      sag.className = 'row-side'
-      const skor = document.createElement('span')
-      skor.textContent = formatNumber(t.score, 0) + '/' + formatNumber(t.maxScore, 0)
-      sag.appendChild(skor)
-      // "Sinyal" / "Kayit" YAZMIYOR: olculdu, indikator esigini gecen olaylar
-      // gecmeyenlerden DAHA IYI degil, hatta daha kotu (15m dokunusta %15,9'a
-      // karsi %20,8). Etiket artik yalnizca esigin gecildigini soyluyor,
-      // kalite iddiasi tasimiyor; sinyal karari kNN esikleriyle verilir.
-      const nitelik = document.createElement('span')
-      nitelik.className = 'row-sub muted'
-      nitelik.textContent = t.qualified ? 'eşik geçti' : 'eşik altı'
-      sag.appendChild(nitelik)
-      satir.appendChild(sag)
-
-      kap.appendChild(satir)
-    }
-  }
-
-  geriDugmesiEkle(kap, 'Bölge listesine dön', () => {
-    durum.seciliBolgeId = null
-    if (overlay && typeof overlay.setHighlight === 'function') {
-      try { overlay.setHighlight(null) } catch (err) { /* onemsiz */ }
-    }
-    goster(el('zoneDetail'), false)
-    bolgePaneliniCiz()
-  })
 }
 
 /* ------------------------------------------------------------------ */
@@ -2589,6 +2645,7 @@ async function ayarlariKaydet(yama) {
   const oncekiOnAyar = durum.ayarlar && durum.ayarlar.signalCfg
     ? durum.ayarlar.signalCfg.weightPreset
     : undefined
+  const oncekiYas = kutuYasiSiniri()
   const yeni = await cagirGuvenli('settings:set', { patch: gonderilecek }, 'Ayarlar kaydedilemedi')
   if (yeni === null) return
   if (yeni && typeof yeni === 'object') durum.ayarlar = yeni
@@ -2608,6 +2665,13 @@ async function ayarlariKaydet(yama) {
     // TARAMA gerekir, test degil: agirlik komsu secimini belirler, dolayisiyla
     // hem hafizadaki eslesmeler hem komsu onbellegi anahtari degisir.
     await listeyiYenidenUret('Benzerlik ayarı değişti, sinyal listesi yeniden üretiliyor.')
+  }
+  // KUTU YASI SINIRI DEGISTI: ayar izine girmez, tarama tetiklenmez; liste
+  // burada tazelenir (ekranda hemen, dosyada bir sonraki adimla).
+  if (kutuYasiSiniri() !== oncekiYas) {
+    await sinyalleriYukle()
+    await sinyalKipiDegistiyseTara()
+    if (durum.aktifPanel === 'signals') sinyalPaneliniCiz()
   }
 }
 
@@ -2943,6 +3007,7 @@ function kisayol(ev) {
     if (durum.seciliSinyalId !== null || durum.seciliBolgeId !== null) {
       durum.seciliSinyalId = null
       durum.seciliBolgeId = null
+      durum.bolgeSinyalleri = null
       durum.vurguluOrnek = null
       anaKadarUygula(null)
       planCizgileri(null)
@@ -3068,6 +3133,18 @@ function dugmeleriBagla() {
   if (bolgeSuzgec) bolgeSuzgec.addEventListener('change', () => bolgePaneliniCiz())
 
   // U7: kip acilip kapandiginda secili sinyal icin hemen uygulanir.
+  // Hacim ac/kapa: secim ayarlara yazilir, sonraki acilista da ayni kalir.
+  const hacimKutusu = el('volumeToggle')
+  if (hacimKutusu) {
+    hacimKutusu.addEventListener('change', async () => {
+      const acik = !!hacimKutusu.checked
+      if (view && typeof view.setVolumeVisible === 'function') view.setVolumeVisible(acik)
+      const yeni = await cagirGuvenli('settings:set',
+        { patch: { chart: { showVolume: acik } } }, 'Hacim ayarı kaydedilemedi')
+      if (yeni && typeof yeni === 'object') durum.ayarlar = yeni
+    })
+  }
+
   const anaKadarKutu = el('asOfToggle')
   if (anaKadarKutu) {
     anaKadarKutu.addEventListener('change', () => {
@@ -3107,6 +3184,7 @@ function dugmeleriBagla() {
       durum.signals = []
       durum.zones = []
       durum.seciliBolgeId = null
+      durum.bolgeSinyalleri = null
       durum.seciliSinyalId = null
       anaKadarAyarla(null)
       isaretleriCiz()
@@ -3147,6 +3225,7 @@ async function baslat() {
   const ayarlar = await cagirGuvenli('settings:get', {}, 'Ayarlar okunamadı')
   if (ayarlar && typeof ayarlar === 'object') {
     durum.ayarlar = ayarlar
+    hacimGorunurlugunuUygula()
     if (ayarlar.timeframe && TF_SANIYE[ayarlar.timeframe]) durum.tf = ayarlar.timeframe
   }
   // Kullanicinin ACIKCA degistirdigi alanlar. Motor bunu zaman dilimine ait

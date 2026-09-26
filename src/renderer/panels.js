@@ -668,6 +668,12 @@ export function sonucEtiketi(m) {
 export function renderSignals(el, signals, opts) {
   if (!el) return
   const o = opts || {}
+  // KAYDIRMA KORUNUR. Liste her secimde bastan kuruluyor ve kap en uste
+  // ziplıyordu: kullanici asagi kaydirip bir sinyale tiklayinca listeyi
+  // kaybediyordu. Konum kurulmadan once alinir, kurulunca geri verilir;
+  // secili satir gorunur alanin disindaysa (grafik isaretinden secim)
+  // en yakin konuma getirilir.
+  const kaydirma = el.scrollTop
   bosalt(el)
 
   const hepsi = Array.isArray(signals) ? signals.slice() : []
@@ -740,11 +746,13 @@ export function renderSignals(el, signals, opts) {
   }
 
   const adet = Math.min(liste.length, AZAMI_SATIR)
+  let seciliSatir = null
   for (let i = 0; i < adet; i++) {
     const s = liste[i]
     const alis = s.direction !== 'SELL'
     const satir = h('div', 'row ' + (alis ? 'buy' : 'sell') + (s.fired ? '' : ' dim') +
       (o.selectedId !== undefined && o.selectedId !== null && String(s.id) === String(o.selectedId) ? ' selected' : ''))
+    if (satir.classList.contains('selected')) seciliSatir = satir
 
     satir.appendChild(yonEtiketi(s.direction))
 
@@ -780,6 +788,16 @@ export function renderSignals(el, signals, opts) {
           '. Yüzde, bu sayının kendi türü içindeki sıralamasıdır: ' +
           'kurulumların %' + g + "'inden daha çok geçmiş örneği var."
         sag.appendChild(kutu)
+        // INDIKATOR SKORU yuzdenin yanina (kullanici istedi): olayin oldugu
+        // barda kac kosulun tuttugu. Bilgi amacli, sinyal kararina girmez.
+        const enCokSkor = sayi(s.maxScore, 0)
+        if (enCokSkor > 0) {
+          const skor = h('span', 'muted', ' ' + tam(sayi(s.score, 0)) + '/' + tam(enCokSkor))
+          skor.title = 'İndikatör skoru: olayın olduğu barda ' + tam(enCokSkor) +
+            ' koşuldan kaçı tuttu (akış gücü, üst zaman dilimi trendi, fitil reddi, hacim). ' +
+            'Bilgi amaçlıdır, sinyal kararına girmez.'
+          sag.appendChild(skor)
+        }
         sag.appendChild(h('span', 'row-sub', tam(s.similarCount) + ' benzer'))
       } else {
         const enCok = sayi(s.maxScore, 0)
@@ -825,6 +843,11 @@ export function renderSignals(el, signals, opts) {
   if (liste.length > adet) {
     el.appendChild(h('div', 'empty small',
       tam(liste.length - adet) + ' kayıt daha var, süzgeci daraltın.'))
+  }
+  // Kaydirma geri verilir; secili satir gorunur alanin disindaysa getirilir.
+  el.scrollTop = kaydirma
+  if (seciliSatir && typeof seciliSatir.scrollIntoView === 'function') {
+    try { seciliSatir.scrollIntoView({ block: 'nearest' }) } catch (_e) { /* eski motor */ }
   }
 }
 

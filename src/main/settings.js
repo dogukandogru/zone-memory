@@ -108,6 +108,10 @@ const DEFAULTS = {
   // gerekiyorsa hafizayi yeniden kurar. Geriye test buna DAHIL DEGILDIR;
   // o, kullanicinin Test sekmesinden baslattigi ayri ve uzun bir istir.
   autoPrepareOnTfChange: true,
+  // GRAFIK GORUNUMU. Hacim cubuklari varsayilan KAPALI: kullanici "grafikte
+  // volume gozukmesine gerek yok" dedi; grafigin ustundeki kutucuktan acilir
+  // ve secim burada kalicidir.
+  chart: { showVolume: false },
   theme: 'dark',
 }
 

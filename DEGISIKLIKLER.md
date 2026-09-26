@@ -18,6 +18,12 @@ olay geldiginde ayni turdeki en benzer gecmis olaylarla karsilastirilip
 
 | Ne | Ne ise yarar |
 | --- | --- |
+| Hacim cubuklari ac/kapa (`chart.showVolume`) | Grafigin altindaki hacim varsayilan GIZLI; efsane kutusundaki "Hacim" kutucugu acar, secim ayarlarda kalicidir. Gizliyken mum olcegi alttaki payi geri alir. |
+| Secili sinyal grafikte belirgin | Secili sinyalin oku daha buyuk ve beyaz, o bar mumlarin arkasinda dikey bir seritle vurgulanir (overlay `setVurguZamani`). Listede secili satir ic cerceve ve koyu zeminle ayrilir; yon rengi sol kenarda kalir. |
+| Sinyal ayrintisi kapali durur | Sinyale tiklamak ayrintiyi ACMAZ: altta ince bir serit secili sinyali soyler, "Ayrintiyi goster" acar, "x" secimi kaldirir. Liste her secimde en uste ziplamiyor: kaydirma konumu korunur, secili satir gorunur alanda degilse getirilir. |
+| Listede indikator skoru | Sinyal satirinda guven yuzdesinin yanina "2/4" skoru eklendi (ipucu: hangi dort kosul). |
+| Kutu yasi siniri ekranda da uygulanir | Liste dosyasi eskiyse (kural eklenmeden once yazilmis ya da sinir az once degistirilmis) sinyaller yine ekranda suzulur ve dosya kendiliginden yeniden uretilir. Ayarlar > Sinyal karari > "En fazla kutu yasi" degisince liste hemen tazelenir. |
+| Kutuya tiklayinca kutunun sinyalleri ustte | Bolgeler panelinde secili kutunun olusum ve dokunus sinyalleri, Sinyaller listesiyle AYNI guncel bicimde (guven, benzer sayisi, skor) panelin ustunde listelenir; altta yalnizca kutunun kendi bilgisi kalir (aralik, olusum, bitis, akis gucu, dokunus sayisi). Eski "Bolge olaylari" listesi ("1/4 esik alti") kalkti. |
 | Sinyaller panelinde iki sekme: Olusum ve Dokunus | Kutu olusumu ve bolgeye donus ayri kurulumlardir ve hafizada ayri havuzlarda aranir; tek listede karisik durunca hangi turu inceledigi kaybolabiliyordu. Her sekme kendi sayisini gosterir, grafik isaretine tiklaninca o turun sekmesine gecilir, sekme degisince baska turdeki secim birakilir. Suzgecteki olu secenekler ("yayinlananlar", "tutanlar", "tutmayanlar": bu kipte sonuc yok, uretilmeyen sinyal listede yok) kaldirildi. Cekilen kayit siniri 500'den 1000'e cikti, cunku kayitlar iki sekmeye bolunuyor. |
 | Kural tabanli piyasa takvimi (`session.createMarketCalendar`) | Spot altinin acik oldugu saatleri New York kuralindan hesaplar. Vekil kaynaklarin (PAXG, XAUT) 7/24 uretti bi barlari boylece elenir. |
 | Tek vekil duzeltme yolu (`loader.normalizeProxy`) | Fiyat kaydirmasi, hacim olcegi ve piyasa saati suzgeci tek yerde uygulanir. Duzeltme hesaplanamazsa bar yazilmaz. |

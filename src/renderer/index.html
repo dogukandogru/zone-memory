@@ -127,6 +127,10 @@
           <span><b>OL</b> kutu oluşumu</span>
           <span><b>DK</b> bölge dokunuşu</span>
           <span class="muted">yanındaki sayı: güven (geçmişte ne kadar çok benzeri var)</span>
+          <!-- Hacim cubuklari varsayilan gizli, secim ayarlarda kalici. -->
+          <label class="check mini" for="volumeToggle" title="Grafiğin altında hacim çubuklarını göster">
+            <input type="checkbox" id="volumeToggle"><span>Hacim</span>
+          </label>
         </div>
         <div id="chartEmpty" class="chart-empty">
           Veri yok. Önce <b>Veri Çek</b>, sonra <b>Geçmişi Tara</b> düğmesini kullanın.
@@ -316,6 +320,7 @@ ANA ALAN
                         createZoneOverlay canvas'i buraya eklenir
   #chart                createChartView(#chart) kutusu
   #chartLegend          sol ust efsane kutusu
+  #volumeToggle         hacim cubuklarini ac/kapa (chart.showVolume)
   #legendSymbol #legendTf #legendO #legendH #legendL #legendC #legendChange
   #goLatestBtn          gecmis pencereden guncel mumlara donus
   #memoryExportBtn      hafiza olaylarini CSV olarak kaydet

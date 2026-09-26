@@ -81,6 +81,13 @@ export function createZoneOverlay(chartView, container) {
    *         ornek:Array<{time:number,price:number}>}|null}
    */
   let karsilastirma = null;
+  /**
+   * Secili sinyalin bar zamani (UNIX saniye) ya da null. O bar, mumlarin
+   * ARKASINDA dikey bir seritle vurgulanir: kullanici "grafikte nereyi
+   * kastettigini anlamiyorum" dedi, ok isareti tek basina yetmiyordu.
+   * @type {number|null}
+   */
+  let vurguZamani = null;
 
   let destroyed = false;
   /** Eklenti baglandiginda grafigin verdigi "yeniden ciz" istegi. */
@@ -322,6 +329,33 @@ export function createZoneOverlay(chartView, container) {
     }),
   };
 
+  /** Secili sinyal seridi: mumlarin ARKASINDA, tum pane yuksekliginde. */
+  const vurguGorunumu = {
+    zOrder: () => 'bottom',
+    renderer: () => ({
+      draw: (target) => {
+        if (vurguZamani === null) return;
+        target.useMediaCoordinateSpace((scope) => {
+          const ctx = scope.context;
+          const x = chartView.timeToX(vurguZamani);
+          if (!isNum(x)) return;
+          let aralik = 8;
+          try { aralik = chartView.chart.timeScale().options().barSpacing; } catch (_e) { /* varsayilan */ }
+          const genislik = Math.max(6, (isNum(aralik) ? aralik : 8) * 0.9);
+          const yukseklik = scope.mediaSize && isNum(scope.mediaSize.height) ? scope.mediaSize.height : 4000;
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.10)';
+          ctx.fillRect(x - genislik / 2, 0, genislik, yukseklik);
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(x - genislik / 2, 0); ctx.lineTo(x - genislik / 2, yukseklik);
+          ctx.moveTo(x + genislik / 2, 0); ctx.lineTo(x + genislik / 2, yukseklik);
+          ctx.stroke();
+        });
+      },
+    }),
+  };
+
   /** Etiket katmani: mumlarin USTUNDE, yoksa etiket mumun altinda kayboluyor. */
   const etiketGorunumu = {
     zOrder: () => 'top',
@@ -341,7 +375,7 @@ export function createZoneOverlay(chartView, container) {
     },
     detached: () => { requestUpdate = null; },
     updateAllViews: () => {},
-    paneViews: () => [dolguGorunumu, karsilastirmaGorunumu, etiketGorunumu],
+    paneViews: () => [vurguGorunumu, dolguGorunumu, karsilastirmaGorunumu, etiketGorunumu],
   };
 
   const bagli = typeof chartView.attachPrimitive === 'function' && chartView.attachPrimitive(primitive);
@@ -458,8 +492,19 @@ export function createZoneOverlay(chartView, container) {
     redraw();
   }
 
+  /**
+   * Secili sinyalin barini vurgular.
+   * @param {number|null} zaman UNIX saniye; null vurguyu kaldirir
+   */
+  function setVurguZamani(zaman) {
+    const yeni = (zaman === null || zaman === undefined || !isNum(+zaman)) ? null : +zaman;
+    if (yeni === vurguZamani) return;
+    vurguZamani = yeni;
+    redraw();
+  }
+
   return {
-    setZones, setHighlight, setAsOf, getAsOf, setKarsilastirma,
+    setZones, setHighlight, setAsOf, getAsOf, setKarsilastirma, setVurguZamani,
     redraw, destroy, onZoneClick, canvas: null,
   };
 }

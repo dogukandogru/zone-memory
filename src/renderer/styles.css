@@ -463,6 +463,16 @@ select.mini, input.mini { height: 20px; font-size: 10px; }
 .row.selected { background: #202741; border-left-color: var(--accent); }
 .row.buy { border-left-color: var(--up); }
 .row.sell { border-left-color: var(--down); }
+/* SECILI SATIR BELIRGIN OLSUN. Onceki kural yukarida duruyordu ve .buy/.sell
+   sonradan geldigi icin sol kenarin vurgu rengini eziyordu; geriye yalnizca
+   hafif bir zemin farki kaliyordu ve secili satir listede secilemiyordu.
+   Kural buraya, yon kurallarindan SONRA alindi; yon rengi sol kenarda kalir,
+   secim ic cerceve ve zeminle gosterilir. */
+.row.selected, .row.selected.buy, .row.selected.sell {
+  background: #27305a;
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.row.selected .row-main { color: var(--text); font-weight: 600; }
 .row.dim { opacity: 0.55; }
 /* Sinyal listesinin ustundeki sonuc ozeti seridi. */
 .list-summary {
@@ -578,6 +588,9 @@ table.tbl tr:hover td { background: var(--bg-hover); }
   font-size: 11px;
 }
 .detail .sec-title { margin-top: 8px; }
+/* Ayrinti kapaliyken alttaki ince serit. */
+.detail-bar { display: flex; align-items: center; gap: 6px; min-height: 22px; }
+.detail-bar .grow { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .spark {
   display: block;

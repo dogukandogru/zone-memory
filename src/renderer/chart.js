@@ -876,10 +876,30 @@ export function createChartView(container) {
     };
   }
 
+  /**
+   * Hacim cubuklarini gosterir veya gizler.
+   *
+   * Kullanici istedi: "grafikte volume gozukmesine gerek yok, acip
+   * kapanabilir hale getirelim". Gizlenince mum olceginin altinda hacim icin
+   * ayrilan %22'lik pay da geri alinir; yoksa grafigin alti bos kalirdi.
+   * @param {boolean} gorunur
+   */
+  function setVolumeVisible(gorunur) {
+    if (destroyed) return;
+    const acik = !!gorunur;
+    try { volumeSeries.applyOptions({ visible: acik }); } catch (_e) { /* eski surum */ }
+    try {
+      candleSeries.priceScale().applyOptions({
+        scaleMargins: { top: 0.08, bottom: acik ? 0.22 : 0.06 },
+      });
+    } catch (_e) { /* olcek ayari yoksa gormezden gel */ }
+  }
+
   return {
     chart,
     candleSeries,
     volumeSeries,
+    setVolumeVisible,
     attachPrimitive,
     detachPrimitive,
     onChartClick,
