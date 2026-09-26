@@ -781,7 +781,11 @@ export function renderSignals(el, signals, opts) {
     // kullanici "sagli sollu dursa daha iyi olur" dedi. Plan hesaplanamadiysa
     // (kapanis kutunun otesinde) sag taraf bos kalir.
     const ikinci = h('span', 'row-line')
-    ikinci.appendChild(turRozeti(s.kind, s.sniper))
+    // TUR ROZETI YALNIZCA KARISIK LISTEDE. Olusum ya da Dokunus sekmesinde
+    // her satira bir daha "OLUSUM" yazmak gereksiz (kullanici soyledi:
+    // "zaten o sekmedeyim"). Sekme yokken (kutunun sinyalleri gibi karisik
+    // listeler) rozet kalir; SNIPER ayri bir bilgi oldugu icin hep gosterilir.
+    if (tur === null || s.sniper) ikinci.appendChild(turRozeti(s.kind, s.sniper))
     if (s.plan) {
       const planSatiri = h('span', 'plan-line',
         'TP ' + formatPrice(s.plan.tp) + ' \u00b7 SL ' + formatPrice(s.plan.sl) + ' ')
