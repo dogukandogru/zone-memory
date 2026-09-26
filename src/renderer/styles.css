@@ -774,6 +774,9 @@ table.tbl tr:hover td { background: var(--bg-hover); }
   border-color: rgba(156, 99, 224, 0.55);
   color: #c4a0f0;
 }
+/* Listenin ustundeki TP orani ozeti. */
+.plan-ozet { padding: 4px 8px; border-bottom: 1px solid var(--border-soft); }
+.plan-ozet .up, .plan-ozet .down { font-weight: 700; }
 /* Sinyal satirinin ikinci satiri: tur rozeti solda, TP/SL sagda. */
 .row-line { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-top: 1px; }
 .plan-line { display: inline-flex; align-items: center; gap: 4px; color: var(--text-dim); font-size: 10px; white-space: nowrap; }

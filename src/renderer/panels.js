@@ -763,6 +763,38 @@ export function renderSignals(el, signals, opts) {
       'toplam ' + tam(toplam) + ' sinyal var.'))
   }
 
+  // TP ORANI (kullanici istedi: "her iki sekmede de % TP oranini gorsem").
+  // Ekrandaki listeye gore (sekme + suzgec): sonuclanan sinyallerde TP'nin
+  // payi; sure dolan ve acik olanlar orana GIRMEZ, ayrica sayilir.
+  {
+    let tp = 0
+    let sl = 0
+    let dolan = 0
+    let acik = 0
+    for (let i = 0; i < liste.length; i++) {
+      const pl = liste[i] && liste[i].plan
+      if (!pl) continue
+      if (pl.result === 'tp') tp++
+      else if (pl.result === 'sl') sl++
+      else if (pl.result === 'timeout') dolan++
+      else acik++
+    }
+    if (tp + sl + dolan + acik > 0) {
+      const oran = tp + sl > 0 ? Math.round((tp * 100) / (tp + sl)) : null
+      const ozet = h('div', 'small plan-ozet')
+      const oranKutu = h('span', oran === null ? 'muted' : (oran >= 50 ? 'up' : 'down'),
+        oran === null ? 'TP oranı: -' : 'TP oranı %' + oran)
+      oranKutu.title = 'Sonuçlanan sinyallerde (TP veya SL) hedefe ulaşanların payı. ' +
+        'Süresi dolan ve açık olanlar orana girmez.'
+      ozet.appendChild(oranKutu)
+      ozet.appendChild(h('span', 'muted', ' \u00b7 ' + tam(tp) + ' TP / ' + tam(sl) + ' SL' +
+        (dolan > 0 ? ' \u00b7 ' + tam(dolan) + ' süre doldu' : '') +
+        (acik > 0 ? ' \u00b7 ' + tam(acik) + ' açık' : '') +
+        (o.truncated === true ? ' (yüklü liste)' : '')))
+      el.appendChild(ozet)
+    }
+  }
+
   const adet = Math.min(liste.length, AZAMI_SATIR)
   let seciliSatir = null
   for (let i = 0; i < adet; i++) {
