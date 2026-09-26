@@ -305,6 +305,9 @@ select.mini, input.mini { height: 20px; font-size: 10px; }
   pointer-events: none;
 }
 .chart-key b { color: var(--text); font-family: var(--mono); font-weight: 600; }
+/* Kutu tiklamayi grafige gecirir (pointer-events: none); icindeki HACIM
+   kutucugu bu yuzden hic tiklanamiyordu. Yalnizca kutucuk tiklanabilir. */
+.chart-key .check { pointer-events: auto; cursor: pointer; }
 #legendSymbol { color: var(--text); font-weight: 600; }
 #legendChange.up { color: var(--up); }
 #legendChange.down { color: var(--down); }
