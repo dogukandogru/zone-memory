@@ -1911,16 +1911,36 @@ function ayarGruplari(saglayiciSecenekleri) {
           not: 'Olay anındaki kutu yaşı bunu aşarsa sinyal üretilmez. 0 kapatır. ' +
             'Kutunun çizim ömrü 100 bardır ama izlenmeye 600 bara kadar devam ' +
             'eder, yani çok eski bir kutuya gelen dokunuş da olay üretebiliyor.' },
-        { yol: 'signalCfg.tpRr', ad: 'Hedef oranı (TP = risk × bu)',
-          tip: 'sayi', adim: 0.1, min: 0.1, max: 10,
-          not: 'Sinyal satırındaki TP/SL için. Giriş = sinyal barının kapanışı; ' +
-            'SL = kutunun uzak kenarı, üzerine "Geçersizlik payı" kadar ATR; ' +
-            'TP = giriş ± bu oran × risk. 1 = birebir. Değiştirince tüm ' +
-            'sinyallerin TP/SL sonucu yeniden hesaplanır, tarama gerekmez.' },
         { yol: 'signalCfg.planHorizonBars', ad: 'Sonuç süresi (bar)',
           tip: 'sayi', adim: 10, min: 10, max: 5000,
           not: 'Bu kadar bar içinde ne TP ne SL vurulursa sonuç "süre doldu" olur ' +
             've sinyal artık aktif sayılmaz.' },
+      ],
+    },
+    {
+      // TP / SL MESAFELERI, DOLAR, ZAMAN DILIMI BASINA (bkz. core/learn/plan.js).
+      // Ilk surum SL'yi kutunun uzak kenarina koyuyordu; dokunus sinyalinde
+      // risk 5-6 dolar cikip ilk fitilde vuruluyordu. Kullanici dolar bazli ve
+      // dilim basina istedi.
+      baslik: 'TP / SL mesafesi (dolar)',
+      bozar: false,
+      not: 'Giriş = sinyal mumunun kapanışı. SL = giriş eksi/artı buradaki dolar, ' +
+        'TP = giriş artı/eksi buradaki dolar (AL için aşağı SL yukarı TP, SAT için tersi). ' +
+        'Örnek: 1 dakikada 4.025 alış, SL 10 ise 4.015. Değiştirince o dilimin tüm ' +
+        'sinyallerinin TP/SL sonucu yeniden hesaplanır, tarama gerekmez.',
+      alanlar: [
+        { yol: 'planByTf.1m.slUsd', ad: '1 dakika SL ($)', tip: 'sayi', adim: 1, min: 0.5, max: 10000 },
+        { yol: 'planByTf.1m.tpUsd', ad: '1 dakika TP ($)', tip: 'sayi', adim: 1, min: 0.5, max: 10000 },
+        { yol: 'planByTf.5m.slUsd', ad: '5 dakika SL ($)', tip: 'sayi', adim: 1, min: 0.5, max: 10000 },
+        { yol: 'planByTf.5m.tpUsd', ad: '5 dakika TP ($)', tip: 'sayi', adim: 1, min: 0.5, max: 10000 },
+        { yol: 'planByTf.15m.slUsd', ad: '15 dakika SL ($)', tip: 'sayi', adim: 1, min: 0.5, max: 10000 },
+        { yol: 'planByTf.15m.tpUsd', ad: '15 dakika TP ($)', tip: 'sayi', adim: 1, min: 0.5, max: 10000 },
+        { yol: 'planByTf.30m.slUsd', ad: '30 dakika SL ($)', tip: 'sayi', adim: 1, min: 0.5, max: 10000 },
+        { yol: 'planByTf.30m.tpUsd', ad: '30 dakika TP ($)', tip: 'sayi', adim: 1, min: 0.5, max: 10000 },
+        { yol: 'planByTf.1h.slUsd', ad: '1 saat SL ($)', tip: 'sayi', adim: 1, min: 0.5, max: 10000 },
+        { yol: 'planByTf.1h.tpUsd', ad: '1 saat TP ($)', tip: 'sayi', adim: 1, min: 0.5, max: 10000 },
+        { yol: 'planByTf.4h.slUsd', ad: '4 saat SL ($)', tip: 'sayi', adim: 1, min: 0.5, max: 10000 },
+        { yol: 'planByTf.4h.tpUsd', ad: '4 saat TP ($)', tip: 'sayi', adim: 1, min: 0.5, max: 10000 },
       ],
     },
     {

@@ -1017,14 +1017,16 @@ function hesapImzasi() {
  * @param {object|null} s seri (tam ya da kuyruk penceresi)
  * @param {object} uygulanan presets.resolveCfg ciktisi
  */
-function planlariUygula(liste, s, uygulanan) {
+function planlariUygula(liste, s, uygulanan, tf, cfgPatch) {
   const planMod = core('learn/plan')
   const sc = uygulanan && uygulanan.signalCfg ? uygulanan.signalCfg : {}
-  const oc = uygulanan && uygulanan.outcomeCfg ? uygulanan.outcomeCfg : {}
+  // TP/SL dolar mesafeleri zaman dilimine gore: varsayilan + kullanicinin
+  // ayar yamasi (planByTf).
+  const mesafe = planMod.planAyariCoz(tf, cfgPatch && cfgPatch.planByTf)
   const cfg = {
-    tpRr: num(sc.tpRr, planMod.DEFAULT_PLAN_CFG.tpRr),
+    slUsd: mesafe.slUsd,
+    tpUsd: mesafe.tpUsd,
     planHorizonBars: num(sc.planHorizonBars, planMod.DEFAULT_PLAN_CFG.planHorizonBars),
-    breakBufferAtr: num(oc.breakBufferAtr, planMod.DEFAULT_PLAN_CFG.breakBufferAtr),
   }
   let acik = 0
   for (let i = 0; i < liste.length; i++) {
@@ -1045,7 +1047,7 @@ function planlariUygula(liste, s, uygulanan) {
  * @param {object} uygulanan
  * @param {Array<object>} yeniler bu tikte uretilen sinyaller
  */
-async function planlariCanlidaGuncelle(tf, s, uygulanan, yeniler) {
+async function planlariCanlidaGuncelle(tf, s, uygulanan, yeniler, cfgPatch) {
   const mevcut = (await getSignals(tf, false)).slice()
   const kimlikler = new Set()
   for (let i = 0; i < mevcut.length; i++) if (mevcut[i]) kimlikler.add(String(mevcut[i].id))
@@ -1067,7 +1069,7 @@ async function planlariCanlidaGuncelle(tf, s, uygulanan, yeniler) {
   }
   if (acikOlanlar.length > 0) {
     const onceki = acikOlanlar.map((sg) => sg.plan.result)
-    planlariUygula(acikOlanlar, s, uygulanan)
+    planlariUygula(acikOlanlar, s, uygulanan, tf, cfgPatch)
     for (let i = 0; i < acikOlanlar.length; i++) {
       if (acikOlanlar[i].plan && acikOlanlar[i].plan.result !== onceki[i]) degisti = true
     }
@@ -1362,7 +1364,7 @@ handlers['engine:scan'] = async function (payload, ctx) {
     for (let i = 0; i < events.length; i++) {
       if (events[i] && !yasEngelli(events[i])) liste.push(olaydanSinyal(events[i], tf))
     }
-    planlariUygula(liste, s, uygulanan)
+    planlariUygula(liste, s, uygulanan, tf, payload.cfgPatch || null)
     await writeJsonAtomic(paths.signalsPath(tf), liste)
     signalCache = { tf: tf, signals: liste }
     log(liste.length + ' sinyal yazıldı (her kutu oluşumu ve her dokunuş).')
@@ -1470,7 +1472,7 @@ handlers['engine:scan'] = async function (payload, ctx) {
       sig.topMatches = komsular.slice(0, 6)
       liste.push(sig)
     }
-    planlariUygula(liste, s, uygulanan)
+    planlariUygula(liste, s, uygulanan, tf, payload.cfgPatch || null)
     await writeJsonAtomic(paths.signalsPath(tf), liste)
     signalCache = { tf: tf, signals: liste }
     log(liste.length + ' sinyal yazıldı (geçmişte en az ' + enAzBenzer +
@@ -1810,7 +1812,7 @@ handlers['engine:plan-refresh'] = async function (payload, ctx) {
   const s = await getSeries(tf, false)
   const liste = (await getSignals(tf, true)).slice()
   const uygulanan = core('learn/presets').resolveCfg(tf, payload.cfgPatch || cfgPatchGeriUyum(payload), null)
-  const acik = planlariUygula(liste, s, uygulanan)
+  const acik = planlariUygula(liste, s, uygulanan, tf, payload.cfgPatch || null)
   await writeJsonAtomic(paths.signalsPath(tf), liste)
   signalCache = { tf: tf, signals: liste }
   ctx.progress(100, 'Planlar hazır')
@@ -2813,7 +2815,7 @@ handlers['engine:live-tick'] = async function (payload) {
         }
         // PLAN: TP/SL seviyeleri; sonuc henuz belli degil ('open'), ama
         // gecikmeli degerlendirmede sonraki barlar gelmis olabilir.
-        if (sig) planlariUygula([sig], s, canliCfg)
+        if (sig) planlariUygula([sig], s, canliCfg, tf, payload.cfgPatch || null)
         events.push({
           key: liveEvents.eventKey(cand),
           touch: hafif,
@@ -2855,7 +2857,7 @@ handlers['engine:live-tick'] = async function (payload) {
 
       // Yeni sinyaller dosyaya, acik planlar yeni barlarla yeniden cozulur.
       try {
-        await planlariCanlidaGuncelle(tf, s, canliCfg, events.map((e) => e.signal))
+        await planlariCanlidaGuncelle(tf, s, canliCfg, events.map((e) => e.signal), payload.cfgPatch || null)
       } catch (err) {
         logs.push('Plan sonuçları güncellenemedi: ' + (err && err.message ? err.message : String(err)))
       }
