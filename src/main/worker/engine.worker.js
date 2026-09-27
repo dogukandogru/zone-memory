@@ -802,6 +802,14 @@ handlers['data:status'] = async function (payload) {
         : null,
       memoryBuiltAt: mem && mem.builtAt ? mem.builtAt : null,
       memoryBuildCommit: mem && mem.buildCommit ? mem.buildCommit : null,
+      // HESAP KODU DEGISTI MI. Ayar izi (cfgHash) yalnizca ayarlari kapsar;
+      // memory.js gibi hesap dosyalari degisince hafizanin icerigi de degisir
+      // (ornek: etiketsiz olaylarin alinmasi) ama iz ayni kalir ve yeni bar
+      // gelmeyince tarama hic tetiklenmezdi. Eski dosyada imza yoksa false:
+      // bir kez yeniden kurulur. Hafiza yoksa null.
+      memoryCoreMatch: mem && mem.count > 0
+        ? (!!mem.coreHash && mem.coreHash === hesapImzasi())
+        : null,
       hasZones: await fileExists(paths.zonesPath(tf)),
       hasPrototypes: await fileExists(paths.protosPath(tf)),
       hasSignals: await fileExists(paths.signalsPath(tf)),
@@ -1233,6 +1241,8 @@ handlers['engine:scan'] = async function (payload, ctx) {
     // yitiriyor, damga olmadan hangisinin hangi kodla kuruldugu bilinmiyordu.
     buildCommit: buildDamgasi().buildCommit,
     buildSrcHash: buildDamgasi().buildSrcHash,
+    // Hesap imzasi: hesap kodu degisince arayuz hafizayi eskimis sayar.
+    coreHash: hesapImzasi(),
     // AYAR IZI: hangi indikator ayari ve hangi etiket tanimiyla kuruldu.
     // Canli ve test bunu etkin ayarla karsilastirir; uyusmazsa uyarir.
     indicatorParams: params,
@@ -1273,6 +1283,8 @@ handlers['engine:scan'] = async function (payload, ctx) {
         builtAt: new Date().toISOString(),
         buildCommit: buildDamgasi().buildCommit,
         buildSrcHash: buildDamgasi().buildSrcHash,
+    // Hesap imzasi: hesap kodu degisince arayuz hafizayi eskimis sayar.
+    coreHash: hesapImzasi(),
       },
     },
   }

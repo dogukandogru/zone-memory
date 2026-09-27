@@ -420,6 +420,10 @@ async function saveMemory(basePath, memory) {
     // alan hic olmayabilir, okuma tarafi bunu bos kabul eder.
     buildCommit: mem.buildCommit ? String(mem.buildCommit) : null,
     buildSrcHash: mem.buildSrcHash ? String(mem.buildSrcHash) : null,
+    // HESAP IMZASI (core/util/codesig.js): hafizayi ureten HESAP kodunun
+    // parmak izi. Ayar izi kodu kapsamaz; hesap degisince (ornek: hangi
+    // olaylarin hafizaya girdigi) hafiza eskimis sayilir ve yeniden kurulur.
+    coreHash: mem.coreHash ? String(mem.coreHash) : null,
     // AYAR IZI. Hafiza hangi indikator ayari ve hangi etiket tanimiyla
     // kuruldu? Onceden yalnizca baglam vektorunun uzunluguna bakiliyordu, bu
     // yuzden kullanici targetAtr gibi bir ayari degistirip taramayi
@@ -611,6 +615,7 @@ async function loadMemory(basePath) {
       builtAt: meta.builtAt || null,
       buildCommit: meta.buildCommit || null,
       buildSrcHash: meta.buildSrcHash || null,
+      coreHash: meta.coreHash || null,
       buildId: buildId,
     },
   }
@@ -640,6 +645,7 @@ function ozetKur(m) {
     builtAt: m.builtAt || null,
     buildCommit: m.buildCommit || null,
     buildSrcHash: m.buildSrcHash || null,
+    coreHash: m.coreHash || null,
     buildId: m.buildId ? String(m.buildId) : null,
   }
 }

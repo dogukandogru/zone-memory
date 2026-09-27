@@ -105,6 +105,12 @@ olay geldiginde ayni turdeki en benzer gecmis olaylarla karsilastirilip
 
 ## Duzeltilen hatalar (olcumu veya veriyi etkileyenler)
 
+- **Hesap kodu degisince hafiza yeniden kurulmuyordu.** Ayar izi yalnizca
+  ayarlari kapsar; memory.js gibi hesap dosyalari degisince hafizanin icerigi
+  degisir ama iz ayni kalir. Yeni bar gelmeyen hafta sonunda tarama hic
+  tetiklenmedi ve asagidaki duzeltme kullaniciya ulasmadi. Hafiza artik hesap
+  imzasini (`coreHash`) tasiyor; `data:status` uyumu bildiriyor, arayuz
+  uyumsuzlukta bir kez yeniden tariyor.
 - **Kutu var, sinyal yok: etiketlenemeyen olaylar hafizaya hic girmiyordu.**
   Kullanici kutu #18.824'u gosterdi: kutu grafikte, oluşum sinyali yok.
   Sebep: eski R:R etiketleyicisi "olusumda azami risk" esigini asan olayi

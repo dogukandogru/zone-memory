@@ -783,3 +783,36 @@ test('engine:compare: bulunamayan kayitta ANLASILIR hata verir', async () => {
       /bulunamadı/)
   })
 })
+
+
+/* ------------------------------------------------------------------ */
+/* Hesap imzasi: hafiza hesap koduyla uyumlu mu                        */
+/* ------------------------------------------------------------------ */
+
+// KILITLENEN OLAY: memory.js degisti (etiketsiz olaylar hafizaya alinmaya
+// basladi) ama ayar izi ayni kaldi; yeni bar gelmeyen hafta sonunda tarama
+// hic tetiklenmedi ve kullanici eski hafizayla bakmaya devam etti. Hafiza
+// artik hesap imzasini tasir, data:status uyumu bildirir, arayuz
+// uyumsuzlukta yeniden tarar.
+test('data:status: hafiza hesap imzasini tasir, eski dosyada uyum false', async () => {
+  await isciyle(async (cagir, dataDir) => {
+    // Imzasiz (eski bicim) hafiza: uyum FALSE olmali ki bir kez yeniden kurulsun.
+    await olcumKur(dataDir, 'herhangi-bir-iz')
+    const once = await cagir('data:status', {})
+    assert.strictEqual(once.byTf[TF].memoryCoreMatch, false,
+      'imzasiz eski hafiza uyumsuz sayilmali')
+
+    // Tarama sonrasi: imza yazilir, uyum TRUE.
+    await cagir('engine:scan', { tf: TF, params: INDIKATOR_AYARI })
+    const sonra = await cagir('data:status', {})
+    assert.strictEqual(sonra.byTf[TF].memoryCoreMatch, true,
+      'taramanin yazdigi hafiza guncel hesap koduyla uyumlu olmali')
+  })
+})
+
+test('data:status: hafiza yoksa memoryCoreMatch null', async () => {
+  await isciyle(async (cagir) => {
+    const d = await cagir('data:status', {})
+    assert.strictEqual(d.byTf[TF].memoryCoreMatch, null)
+  })
+})
