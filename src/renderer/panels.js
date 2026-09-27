@@ -682,6 +682,8 @@ export function sonucEtiketi(m) {
  *          kind?:'form'|'touch', total?:number, truncated?:boolean}} [opts]
  *   kind: TUR SEKMESI. Verilirse yalnizca o turun sinyalleri listelenir;
  *   suzgecten AYRI calisir, cunku tur artik bir sekme, bir suzgec degil.
+ *   emptyText: liste tumden bossa gosterilecek metin (kutu listesi gibi
+ *   baglamlar icin; varsayilan metin "Gecmisi Tara" der ve orada yanlistir).
  */
 export function renderSignals(el, signals, opts) {
   if (!el) return
@@ -720,7 +722,7 @@ export function renderSignals(el, signals, opts) {
     // mesaj kullaniciyi Test sekmesine yolluyordu; o sekme kaldirildi.
     const turAdiMetni = tur === 'form' ? 'oluşum' : 'dokunuş'
     el.appendChild(bosKutu(hepsi.length === 0
-      ? 'Bu zaman dilimi için sinyal yok. "Geçmişi Tara" ile hafızayı kurun.'
+      ? (o.emptyText || 'Bu zaman dilimi için sinyal yok. "Geçmişi Tara" ile hafızayı kurun.')
       : (turdekiler.length === 0 && tur !== null
         ? 'Bu zaman diliminde ' + turAdiMetni + ' sinyali yok.'
         : 'Bu süzgeçle gösterilecek sinyal yok.')))
@@ -1865,7 +1867,9 @@ function ayarGruplari(saglayiciSecenekleri) {
         { yol: 'outcomeCfg.formTargetRr', ad: 'Oluşum hedefi (risk katı)', tip: 'sayi', adim: 0.1, min: 0,
           not: 'Kutu oluşumu olayında hedef, riskin bu katı kadar uzaktadır. 0 yaparsanız sabit ATR mesafesi kullanılır.' },
         { yol: 'outcomeCfg.maxFormRiskAtr', ad: 'Oluşumda azami risk (ATR)', tip: 'sayi', adim: 0.5, min: 0,
-          not: 'Kutu onaylanana kadar fiyat çok kaçtıysa olay hafızaya alınmaz. 0 sınırı kapatır.' },
+          not: 'Kutu onaylanana kadar fiyat bundan çok kaçtıysa olayın tutma sonucu ' +
+            'etiketlenmez: olay yine sinyal olabilir ama başkalarına benzer örnek ' +
+            'olarak sayılmaz. 0 sınırı kapatır.' },
       ],
     },
     {

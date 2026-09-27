@@ -253,3 +253,36 @@ test('buildMemory: bos seride guvenli sonuc dondurur', () => {
   assert.equal(m.stats.lowCoverage, 0)
   assert.deepEqual(m.ctxNames, CTX_NAMES)
 })
+
+
+// ETIKETSIZ OLAY HAFIZAYA GIRER (sinyal adayi), KOMSU OLAMAZ.
+//
+// Bir donem yalnizca etiketlenen olaylar aliniyordu: eski R:R etiketleyicisi
+// "olusumda azami risk" esigini asan olayi etiketleyemiyor, olay da hafizaya
+// hic girmiyordu. Olculdu (5m): 18.832 olusumun 10.333'u (%55) bu yuzden
+// hafizada yoktu, grafikte kutu var ama sinyal yoktu (kutu #18.824).
+test('buildMemory: etiketlenemeyen olay hafizaya outcome=null ile girer, komsu olmaz', () => {
+  const s = seriKur(400)
+  // Risk esigi asilamayacak kadar kucuk: olusum olayi etiketlenemez.
+  const m = buildMemory(s, { tf: '15m', outcomeCfg: { maxFormRiskAtr: 0.001 } })
+  assert.ok(m.stats.unlabeledStored >= 1, 'etiketsiz olay alinmaliydi')
+  assert.equal(m.stats.stored, m.events.length)
+  assert.equal(m.stats.formStored + m.stats.touchStored, m.stats.stored)
+  const etiketsiz = m.events.filter((e) => e.outcome === null)
+  assert.ok(etiketsiz.length >= 1)
+  for (const e of etiketsiz) {
+    assert.ok(e.features && e.features.shape, 'etiketsiz olayin ozellik vektoru olmali')
+    assert.equal(e.resolvedTime, null, 'cozum zamani bilinmiyor')
+    assert.equal(e.kind, 'form', 'risk esigi yalnizca olusuma uygulanir')
+  }
+  // Etiketsiz olay SORGU olur ama KOMSU olamaz: sonraki hicbir olayin aday
+  // satirinda gorunmez.
+  const cc = require('../src/core/learn/candcache')
+  const hazir = cc.prepareEvents(m).events
+  const cache = cc.buildCandidates(m, { embargoSec: 0, signalCfg: {} })
+  const yasak = new Set(hazir.map((e, i) => (e.outcome === null ? i : -1)).filter((i) => i >= 0))
+  assert.ok(yasak.size >= 1)
+  for (let i = 0; i < cache.idx.length; i++) {
+    assert.ok(!yasak.has(cache.idx[i]), 'etiketsiz olay komsu olarak kullanildi')
+  }
+})

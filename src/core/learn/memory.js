@@ -108,6 +108,8 @@ function buildMemory (s, cfg, onProgress) {
   let noLabelHorizon = 0
   let formRiskBlocked = 0
   let lowCoverage = 0
+  // Etiketsiz ama hafizaya giren olaylar (sorgu olabilir, komsu olamaz).
+  let unlabeledStored = 0
   let sumMfe = 0
   let sumMae = 0
 
@@ -193,12 +195,25 @@ function buildMemory (s, cfg, onProgress) {
       sumMae += num(outcome.maeAtr, 0)
     }
 
-    // Ikisi de yoksa bu olay hafizaya girmez, yalnizca sayilir.
-    // Veri boslugunun icinde kalan olaylar da alinmaz (bkz. yukaridaki not).
-    if (features && outcome) {
+    // OZELLIK VEKTORU OLAN HER OLAY HAFIZAYA GIRER; etiket sart degil.
+    //
+    // Bir donem yalnizca ETIKETLENEN olaylar aliniyordu ve bu, kaldirilan
+    // R:R sisteminin kaliniydi: eski etiketleyici "olusumda azami risk"
+    // esigini asan (fiyat kutu onaylanana kadar cok kacmis) olaylari
+    // etiketleyemiyor, olay da hafizaya hic girmiyordu. Olculdu (5m):
+    // 18.832 olusumun 10.333'u (%55) bu yuzden hafizada yoktu, yani grafikte
+    // kutu var, sinyal yok (kullanici sordu: kutu #18.824, kapanis kutudan
+    // 3,06 ATR uzakta).
+    //
+    // Etiketsiz olay artik SORGU olabilir (kendisi icin sinyal uretilir) ama
+    // KOMSU olamaz: aday havuzu kurali tutma sonucu bilinmeyen olayi zaten
+    // disarida tutar (candcache.adayOlabilir outcome ister). Yani benzerlik
+    // sonuclari ve guven kirilim noktalari yalnizca yeni sorgularla degisir.
+    // Veri boslugunun icinde kalan olaylar yine alinmaz (bkz. yukaridaki not).
+    if (features) {
       if (penceredeBosluk(t.bar)) {
         lowCoverage++
-      } else {
+      } else if (outcome) {
         // Sonucun belli oldugu zaman: ambargo ve aday havuzu bunu kullanir,
         // olay zamanini degil. Aksi halde sonucu henuz bilinmeyen bir olay
         // komsu olarak kullanilabiliyordu.
@@ -210,6 +225,18 @@ function buildMemory (s, cfg, onProgress) {
           features: features,
           resolvedTime: s.time[cozumBar],
         }))
+        if (form) formStored++
+        else touchStored++
+      } else {
+        // Etiketsiz: outcome null, cozum zamani yok. Sayisal sonuc alanlari
+        // BILEREK yazilmaz; Number(null) === 0 tuzagina dusmemek icin
+        // okuyanlar `typeof outcome === 'string'` ile ayirir.
+        events.push(Object.assign({}, t, {
+          outcome: null,
+          features: features,
+          resolvedTime: null,
+        }))
+        unlabeledStored++
         if (form) formStored++
         else touchStored++
       }
@@ -245,6 +272,8 @@ function buildMemory (s, cfg, onProgress) {
     formRiskBlocked: formRiskBlocked,
     // Veri boslugu yuzunden hafiza disinda birakilan olay sayisi.
     lowCoverage: lowCoverage,
+    // Etiketsiz alinan olaylar: sinyal adayi, komsu degil.
+    unlabeledStored: unlabeledStored,
     avgMfeAtr: labeled > 0 ? sumMfe / labeled : 0,
     avgMaeAtr: labeled > 0 ? sumMae / labeled : 0,
     rawWinRate: labeled > 0 ? respected / labeled : 0,

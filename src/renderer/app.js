@@ -2498,6 +2498,11 @@ function bolgePaneliniCiz() {
       onSelect: (sg) => sinyalSec(sg),
       selectedId: durum.seciliSinyalId,
       filter: 'all',
+      // Bos liste burada "hafizayi kurun" DEMEZ: tarama zaten yapilmis, bu
+      // kutu icin sinyal uretilmemis (gecmiste yeterince benzer kurulum yok
+      // ya da kutu yasi sinirini asmis).
+      emptyText: 'Bu kutu için sinyal üretilmedi: geçmişte yeterince benzer ' +
+        'kurulum bulunamadı ya da kutu yaşı sınırı aşıldı.',
     })
     const baslik = document.createElement('h4')
     baslik.className = 'sec-title'

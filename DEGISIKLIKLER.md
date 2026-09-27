@@ -105,6 +105,16 @@ olay geldiginde ayni turdeki en benzer gecmis olaylarla karsilastirilip
 
 ## Duzeltilen hatalar (olcumu veya veriyi etkileyenler)
 
+- **Kutu var, sinyal yok: etiketlenemeyen olaylar hafizaya hic girmiyordu.**
+  Kullanici kutu #18.824'u gosterdi: kutu grafikte, oluşum sinyali yok.
+  Sebep: eski R:R etiketleyicisi "olusumda azami risk" esigini asan olayi
+  (kutu onaylanana kadar fiyat 3 ATR kacmis) etiketleyemiyor, memory.js de
+  etiketsiz olayi almiyordu. Olculdu (5m): 18.832 olusumun 10.333'u (%55)
+  hafizada yoktu. Artik ozellik vektoru olan her olay hafizaya giriyor:
+  etiketsiz olay SORGU olabilir (kendisi icin sinyal uretilir) ama KOMSU
+  olamaz (aday havuzu tutma sonucu ister), yani mevcut benzerlik sonuclari
+  degismez, yalnizca yeni sorgular eklenir (5m: +9.979 olay). Kutu
+  listesindeki bos mesaj da "hafizayi kurun" yerine gercek sebebi soyluyor.
 - **"Kutu omru en fazla 100 bar" kurali CALISMIYORDU.** Kullanici bunu acikca
   istemisti ("Kutu uzunlugu 100 gecerse sinyal uretmesin") ve ayar ekranda
   duruyordu, ama esik yalnizca `signal.js decide()` icinde okunuyor; o yol
