@@ -2072,6 +2072,10 @@ function sinyalPaneliniCiz() {
     kind: durum.sinyalTuru,
     total: durum.sinyalToplam,
     truncated: durum.sinyalKirpildi,
+    // Tarama surerken "hafizayi kurun" demek yaniltici: kurulma zaten suruyor.
+    emptyText: durum.taramaCalisiyor
+      ? 'Tarama sürüyor, sinyaller tarama bitince gelir. İlk tarama 1 dakikalıkta uzun sürer; Durdur\'a basılırsa baştan başlar.'
+      : undefined,
   })
   goster(n.bos, false)
 

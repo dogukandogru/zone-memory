@@ -105,7 +105,18 @@ olay geldiginde ayni turdeki en benzer gecmis olaylarla karsilastirilip
 
 ## Duzeltilen hatalar (olcumu veya veriyi etkileyenler)
 
-- **Veri cekme "%93'te duruyor" (musteri, 1m, Windows).** %93, senkronun son
+- **Tarama "%93'te duruyor" (musteri, 1m).** Musterinin ikinci gorseli
+  isi netlestirdi: duran sey veri cekme degil TARAMA, mesaj "Benzer gecmis
+  kurulumlar araniyor". Bu adim ilerleme cubugunda %93-97 arasina
+  sikistirilmisti, oysa olculdu, 1 dakikalikta taramanin %98'i bu adim
+  (334 sn / 340 sn; musterinin PC'sinde muhtemelen 10-15 dk). Cubuk
+  dakikalarca %93 gosteriyor, kullanici "duruyor" sanip Durdur'a basiyor ve
+  her sey bastan basliyordu. Simdi bu adim %25-95 arasinda ilerler, mesajda
+  sayac ve kalan sure tahmini var ("Benzer kurulum araniyor 2641/13289,
+  kalan ~6 sn"); tarama surerken sinyal listesi "hafizayi kurun" yerine
+  "tarama suruyor, Durdur'a basilirsa bastan baslar" der. Dogrulandi: 121
+  ilerleme olayi, hic azalma yok, %25'ten %94'e duzgun.
+- **Veri cekme senkronunda Windows rename kilidi ve turetilmis dilim hatalari.** %93, senkronun son
   adimi: 1 dakikalik depo ve 5m/15m/1h dosyalari yazilmis, sira 4h'de.
   Windows'ta rename hedef dosya o an baska bir surecce (antivirus,
   dizinleyici) tutuluyorsa EPERM/EBUSY ile duser; tek denemede dusen rename

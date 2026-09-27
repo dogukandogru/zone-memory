@@ -401,12 +401,12 @@ function buildCandidates (memory, cfg, onProgress) {
     const yapilan = i - korunan
     if (typeof onProgress === 'function' && yapilan % step === 0) {
       onProgress(Math.round(((yapilan + 1) / hesaplanacak) * 100),
-        'Komşu önbelleği: ' + (yapilan + 1) + '/' + hesaplanacak)
+        'Benzer kurulum aranıyor ' + (yapilan + 1) + '/' + hesaplanacak)
     }
   }
 
   if (typeof onProgress === 'function') {
-    onProgress(100, 'Komşu önbelleği hazır: ' + n + ' olay' +
+    onProgress(100, 'Benzer kurulum araması bitti: ' + n + ' olay' +
       (korunan > 0 ? ' (' + korunan + ' satır korundu)' : ''))
   }
   return cache

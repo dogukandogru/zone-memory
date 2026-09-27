@@ -1229,11 +1229,16 @@ handlers['engine:scan'] = async function (payload, ctx) {
   // Ozellik ayari: su an yalnizca sekil penceresi. Arayuz gonderir.
   const ozellikAyari = payload.featureCfg || null
 
+  // ILERLEME ARALIKLARI SUREYE GORE. Bir donem indikator %2-80'i, komsu
+  // aramasi %93-97'yi aliyordu; oysa olculdu, 1 dakikalikta taramanin
+  // %98'i komsu aramasi (334 sn / 340 sn). Musteride cubuk dakikalarca
+  // "%93" gosterdi ve "duruyor" diye bildirildi; is suruyordu. Simdi komsu
+  // aramasi %25-95 ve kalan sure tahminiyle ilerler.
   ctx.progress(2, 'İndikatör çalışıyor')
   const built = memoryMod.buildMemory(
     s,
     { tf: tf, params: params, outcomeCfg: uygulanan.outcomeCfg, featureCfg: ozellikAyari },
-    (pct, msg) => ctx.progress(2 + num(pct, 0) * 0.78, msg)
+    (pct, msg) => ctx.progress(2 + num(pct, 0) * 0.16, msg)
   )
 
   const events = built.events || []
@@ -1249,7 +1254,7 @@ handlers['engine:scan'] = async function (payload, ctx) {
     ? null
     : await oncekiKomsuOnbellegi(tf, yeniIz, (built.ctxNames || []).length, uygulanan)
 
-  ctx.progress(82, 'Hafıza diske yazılıyor')
+  ctx.progress(19, 'Hafıza diske yazılıyor')
   await memstore.saveMemory(paths.memoryPath(tf), {
     tf: tf,
     ctxNames: built.ctxNames,
@@ -1272,10 +1277,10 @@ handlers['engine:scan'] = async function (payload, ctx) {
     cfgHash: yeniIz,
   })
 
-  ctx.progress(88, 'Bölgeler kaydediliyor')
+  ctx.progress(21, 'Bölgeler kaydediliyor')
   await writeJsonAtomic(paths.zonesPath(tf), zones)
 
-  ctx.progress(91, 'Prototipler çıkarılıyor')
+  ctx.progress(23, 'Prototipler çıkarılıyor')
   let protos = []
   try {
     protos = core('learn/cluster').buildPrototypes({ events: events }, {}) || []
@@ -1377,7 +1382,7 @@ handlers['engine:scan'] = async function (payload, ctx) {
   const yasEngelli = (e) => core('learn/signal').kutuYasiEngeli(e, uygulanan.signalCfg)
 
   if (sinyalKipi === 'hepsi') {
-    ctx.progress(95, 'Sinyaller yazılıyor')
+    ctx.progress(96, 'Sinyaller yazılıyor')
     const liste = []
     for (let i = 0; i < events.length; i++) {
       if (events[i] && !yasEngelli(events[i])) liste.push(olaydanSinyal(events[i], tf))
@@ -1393,8 +1398,19 @@ handlers['engine:scan'] = async function (payload, ctx) {
     // bakmayi engeller: bir olay ancak SONUCU BELLI olduktan sonra komsu
     // olabilir). Sinyalin kapisi tek: yeterli sayida yeterince benzer gecmis
     // kurulum var mi. Tutma orani, plan ve R/R HIC hesaplanmaz.
-    ctx.progress(93, 'Benzer geçmiş kurulumlar aranıyor')
+    ctx.progress(25, 'Benzer geçmiş kurulumlar aranıyor')
     const cc = core('learn/candcache')
+    // KALAN SURE TAHMINI: bu adim ilk taramada dakikalar surer. Yuzdeyle
+    // birlikte "kalan ~4 dk" yazmazsa kullanici durdugunu sanip Durdur'a
+    // basiyor ve her sey bastan basliyor.
+    const aramaBaslangici = Date.now()
+    const kalanMetni = (pct) => {
+      if (!(pct > 2)) return ''
+      const gecen = (Date.now() - aramaBaslangici) / 1000
+      const kalan = gecen * (100 - pct) / pct
+      if (!(kalan > 0)) return ''
+      return kalan >= 90 ? ', kalan ~' + Math.ceil(kalan / 60) + ' dk' : ', kalan ~' + Math.ceil(kalan) + ' sn'
+    }
     // `builtToTime` ANAHTARA GIRER: gecilmezse anahtar her taramada ayni kalir
     // (`t0`) ve hangi hafizaya ait oldugu anlasilmaz.
     const hafizaNesnesi = {
@@ -1409,7 +1425,7 @@ handlers['engine:scan'] = async function (payload, ctx) {
       korumaliOnbellek
         ? Object.assign({ reuse: korumaliOnbellek }, onbellekAyari)
         : onbellekAyari,
-      (pct, msg) => ctx.progress(93 + num(pct, 0) * 0.04, msg)
+      (pct, msg) => ctx.progress(25 + num(pct, 0) * 0.70, msg + kalanMetni(num(pct, 0)))
     )
     if (cache.korunan > 0) {
       log('Komşu önbelleğinin ' + cache.korunan + ' satırı korundu, yalnızca ' +
@@ -1456,7 +1472,7 @@ handlers['engine:scan'] = async function (payload, ctx) {
     }
     guvenEsikleriYaz(tf, esikler)
 
-    ctx.progress(97, 'Sinyaller yazılıyor')
+    ctx.progress(96, 'Sinyaller yazılıyor')
     const liste = []
     for (let i = 0; i < sirali.length; i++) {
       const e = sirali[i]
@@ -1519,7 +1535,7 @@ handlers['engine:scan'] = async function (payload, ctx) {
   }
 
 
-  ctx.progress(97, 'Özet hazırlanıyor')
+  ctx.progress(98, 'Özet hazırlanıyor')
   let summary = null
   try {
     summary = memoryMod.summarize({ tf: tf, ctxNames: built.ctxNames, events: events })
