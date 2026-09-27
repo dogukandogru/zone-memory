@@ -909,6 +909,7 @@ handlers['data:sync'] = async function (payload, ctx) {
   // 7,13 milyon bar bastan orneklenir ve bu dilimler "veri yok" sayilip
   // gereksiz senkron denemesi baslatilirdi.
   const uretilen = []
+  const turetilemeyen = []
   const eksikTf = []
   for (const ust of TURETILEN_TF) {
     if (!(await fileExists(paths.candlePath(ust)))) eksikTf.push(ust)
@@ -922,16 +923,33 @@ handlers['data:sync'] = async function (payload, ctx) {
       for (let i = 0; i < hedefler.length; i++) {
         const ust = hedefler[i]
         ctx.progress(75 + (i / hedefler.length) * 24, ust + ' yeniden üretiliyor')
-        const s = seriesMod.resample(taban, tfSeconds(ust))
-        await binstore.writeSeries(paths.candlePath(ust), s)
-        uretilen.push({ tf: ust, count: s.length })
+        // HER DILIM AYRI DENENIR VE GUNLUGE YAZILIR. Bir dilimin yazimi
+        // duserse (Windows'ta gecici dosya kilidi gibi) 1 dakikalik depo
+        // zaten guncellenmis durumda; senkronu bastan sona hataya cevirip
+        // ilerleme cubugunu %93'te birakmak yerine kalan dilimler denenir ve
+        // hangisinin neden dustugu hem gunlukte hem arayuzde gorunur.
+        const t0 = Date.now()
+        try {
+          const s = seriesMod.resample(taban, tfSeconds(ust))
+          await binstore.writeSeries(paths.candlePath(ust), s)
+          uretilen.push({ tf: ust, count: s.length })
+          log(ust + ' yeniden üretildi: ' + s.length + ' bar, ' + (Date.now() - t0) + ' ms')
+        } catch (err) {
+          const mesaj = err && err.message ? err.message : String(err)
+          turetilemeyen.push({ tf: ust, error: mesaj })
+          log(ust + ' yeniden üretilemedi (' + (Date.now() - t0) + ' ms): ' + mesaj)
+        }
       }
     }
   }
 
   clearCache(null)
-  ctx.progress(100, 'Veri güncellendi')
-  return Object.assign({ added: 0 }, res, { syncedTf: hedefTf, derived: uretilen })
+  ctx.progress(100, turetilemeyen.length
+    ? 'Veri güncellendi, ' + turetilemeyen.map((x) => x.tf).join(', ') + ' üretilemedi'
+    : 'Veri güncellendi')
+  return Object.assign({ added: 0 }, res, {
+    syncedTf: hedefTf, derived: uretilen, derivedErrors: turetilemeyen,
+  })
 }
 
 /**

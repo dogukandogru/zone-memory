@@ -555,3 +555,38 @@ test('series.appendInPlace: kapasiteye yerinde ekler, kopya almaz', async () => 
   const dorduncu = series.appendInPlace(ucuncu, seriKur([150], 150))
   assert.equal(dorduncu.length, 3, 'son bardan eski satir atlanmali')
 })
+
+
+// WINDOWS GECICI KILIT: rename EPERM/EBUSY ile dusebilir (antivirus, dizinleyici).
+// Musteride veri cekme 1 dakikalikta '%93'te duruyor' diye bildirildi; %93 son
+// turetilmis dosyanin yazildigi an. Tek denemede dusen rename butun senkronu
+// hataya ceviriyordu. Artik kisa aralarla yeniden denenir; kalici hata yine
+// firlatilir.
+test('writeSeries: rename gecici EPERM ile duserse yeniden dener, kalici hatayi firlatir', async () => {
+  const fsMod = require('node:fs')
+  const orijinal = fsMod.promises.rename
+  const dir = fsMod.mkdtempSync(path.join(os.tmpdir(), 'zm-rename-'))
+  const dosya = path.join(dir, 'XAUUSD_4h.bin')
+  const seri = series.fromArrays({
+    time: [1, 2, 3], open: [1, 1, 1], high: [1, 1, 1], low: [1, 1, 1], close: [1, 1, 1], volume: [1, 1, 1],
+  })
+  let kalan = 2
+  fsMod.promises.rename = async function (a, b) {
+    if (kalan > 0) { kalan--; const e = new Error('EPERM: operation not permitted'); e.code = 'EPERM'; throw e }
+    return orijinal.call(fsMod.promises, a, b)
+  }
+  try {
+    const r = await binstore.writeSeries(dosya, seri)
+    assert.equal(r.count, 3, 'iki gecici hatadan sonra yazim basarili olmali')
+    assert.equal(kalan, 0)
+    const geri = await binstore.readSeries(dosya)
+    assert.equal(geri.length, 3)
+
+    // Kalici hata (ENOSPC gibi) yeniden denenmez, firlatilir.
+    fsMod.promises.rename = async function () { const e = new Error('ENOSPC'); e.code = 'ENOSPC'; throw e }
+    await assert.rejects(binstore.writeSeries(dosya, seri), /ENOSPC/)
+  } finally {
+    fsMod.promises.rename = orijinal
+    fsMod.rmSync(dir, { recursive: true, force: true })
+  }
+})

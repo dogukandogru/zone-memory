@@ -1688,11 +1688,23 @@ async function veriCek() {
   motorDurumu('veri indiriliyor')
   ilerleme(0, 'Veri indiriliyor')
   try {
-    await cagir('data:sync', { tf: durum.tf, providerId: saglayici, provider: saglayici })
-    bildir('Veri indirme tamamlandı.')
+    const sonuc = await cagir('data:sync', { tf: durum.tf, providerId: saglayici, provider: saglayici })
+    const hatalar = sonuc && Array.isArray(sonuc.derivedErrors) ? sonuc.derivedErrors : []
+    if (hatalar.length) {
+      // Bir dilim yazilamadi: 1 dakikalik veri guncellendi, o dilim bir
+      // sonraki cekimde yeniden denenir. Sessiz kalmak "%93'te durdu"
+      // izlenimi veriyordu.
+      hataGoster('Veri indirildi ama şu dilim(ler) yazılamadı: ' +
+        hatalar.map((h) => h.tf + ' (' + h.error + ')').join('; ') +
+        '. Bir sonraki Veri Çek yeniden dener.')
+    } else {
+      bildir('Veri indirme tamamlandı.')
+    }
     ilerleme(100, 'Tamamlandı')
   } catch (err) {
     hataGoster('Veri indirilemedi: ' + hataMetni(err))
+    // Cubuk son yuzdede asili kalmasin: hata oldugu gorunsun.
+    ilerleme(0, 'Veri indirilemedi')
   } finally {
     isBitti(dugme)
     motorDurumu('hazır')

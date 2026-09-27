@@ -105,6 +105,17 @@ olay geldiginde ayni turdeki en benzer gecmis olaylarla karsilastirilip
 
 ## Duzeltilen hatalar (olcumu veya veriyi etkileyenler)
 
+- **Veri cekme "%93'te duruyor" (musteri, 1m, Windows).** %93, senkronun son
+  adimi: 1 dakikalik depo ve 5m/15m/1h dosyalari yazilmis, sira 4h'de.
+  Windows'ta rename hedef dosya o an baska bir surecce (antivirus,
+  dizinleyici) tutuluyorsa EPERM/EBUSY ile duser; tek denemede dusen rename
+  butun senkronu hataya ceviriyor ve cubuk %93'te kaliyordu. Artik rename
+  gecici kilit hatalarinda kisa aralarla yeniden denenir (binstore
+  yenidenAdlandir); turetilmis her dilim ayri denenir ve sonucu sureyle
+  birlikte gunluge yazilir; bir dilim yazilamazsa senkron yine tamamlanir,
+  hangi dilimin neden yazilamadigi arayuzde ve gunlukte gorunur; hata
+  durumunda cubuk son yuzdede asili kalmaz. Kesin sebep musterinin gunluk
+  dosyasindan (`%APPDATA%\\Zone Memory\\logs`) dogrulanmali.
 - **Hesap kodu degisince hafiza yeniden kurulmuyordu.** Ayar izi yalnizca
   ayarlari kapsar; memory.js gibi hesap dosyalari degisince hafizanin icerigi
   degisir ama iz ayni kalir. Yeni bar gelmeyen hafta sonunda tarama hic

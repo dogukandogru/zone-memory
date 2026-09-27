@@ -266,6 +266,34 @@ function zamanlariDogrula(time, count, filePath) {
 }
 
 /**
+ * Gecici dosyayi hedefin uzerine tasir; Windows'a ozgu GECICI kilit
+ * hatalarinda yeniden dener.
+ *
+ * Windows'ta rename, hedef dosya o an baska bir surec tarafindan (antivirus
+ * taramasi, arama dizinleyici, yedekleme) acik tutuluyorsa EPERM / EBUSY /
+ * EACCES ile duser; bu kilit genelde milisaniyeler icinde kalkar. Musteride
+ * veri cekme 1 dakikalikta "%93'te duruyor" diye bildirildi; %93 son
+ * turetilmis dosyanin (4h) yazildigi andir. Tek denemede dusen bir rename
+ * butun senkronu hataya cevirir ve ilerleme cubugu orada kalir.
+ * @param {string} tmpPath
+ * @param {string} filePath
+ */
+async function yenidenAdlandir(tmpPath, filePath) {
+  const GECICI = new Set(['EPERM', 'EBUSY', 'EACCES', 'ENOTEMPTY'])
+  const bekleme = [100, 250, 500, 1000, 2000]
+  for (let deneme = 0; ; deneme++) {
+    try {
+      await fs.promises.rename(tmpPath, filePath)
+      return
+    } catch (err) {
+      const kod = err && err.code
+      if (!GECICI.has(kod) || deneme >= bekleme.length) throw err
+      await new Promise(function (resolve) { setTimeout(resolve, bekleme[deneme]) })
+    }
+  }
+}
+
+/**
  * Seriyi dosyaya yazar. Once surece ozgu bir gecici dosyaya yazilir, sonra
  * rename edilir; boylece yarim kalmis yazim mevcut dosyayi bozmaz. Kuyruk
  * dosyasi silinir: barlarin tamami artik ana dosyadadir.
@@ -304,7 +332,7 @@ async function yazTemel(filePath, s) {
     pos = await writeColumn(handle, s.volume.subarray(0, count), pos)
     await handle.sync().catch(function () {})
     await handle.close()
-    await fs.promises.rename(tmpPath, filePath)
+    await yenidenAdlandir(tmpPath, filePath)
     await syncDir(filePath)
     // Kuyruk ANA DOSYADAN SONRA silinir: arada cokme olursa kuyruk barlari
     // ana dosyada zaten var, ayni zaman damgalari okumada tekillestirilir.
