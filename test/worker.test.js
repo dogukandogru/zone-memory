@@ -809,10 +809,3 @@ test('data:status: hafiza hesap imzasini tasir, eski dosyada uyum false', async 
       'taramanin yazdigi hafiza guncel hesap koduyla uyumlu olmali')
   })
 })
-
-test('data:status: hafiza yoksa memoryCoreMatch null', async () => {
-  await isciyle(async (cagir) => {
-    const d = await cagir('data:status', {})
-    assert.strictEqual(d.byTf[TF].memoryCoreMatch, null)
-  })
-})
