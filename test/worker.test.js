@@ -794,6 +794,43 @@ test('engine:compare: bulunamayan kayitta ANLASILIR hata verir', async () => {
 // hic tetiklenmedi ve kullanici eski hafizayla bakmaya devam etti. Hafiza
 // artik hesap imzasini tasir, data:status uyumu bildirir, arayuz
 // uyumsuzlukta yeniden tarar.
+// KILITLENEN OLAY: guven yuzdesi benzer kayit SAYISININ siralamasiydi; sayi
+// gecmis buyudukce buyudugu icin yeni sinyaller hep %90+ cikiyordu (musteri:
+// "neredeyse hepsi %99"). Artik havuz PAYI siralanir. Eski bicim esik dosyasi
+// uyumsuz sayilir ki arayuz o dilimi bir kez yeniden tarasin.
+test('guven olcegi: pay tabanli esik dosyasi, eski bicim uyumsuz sayilir', async () => {
+  await isciyle(async (cagir, dataDir) => {
+    await binstore.writeSeries(pathsCore.candlePath(TF, undefined, dataDir), taramaSerisi())
+    await cagir('engine:scan', { tf: TF, params: INDIKATOR_AYARI })
+    const yol = pathsCore.memoryPath(TF, undefined, dataDir) + '.guven.json'
+    assert.ok(fs.existsSync(yol), 'tarama guven esik dosyasini yazmali')
+    const esik = JSON.parse(fs.readFileSync(yol, 'utf8'))
+    assert.strictEqual(esik.olcek, 'pay', 'olcek alani pay olmali')
+    for (const tur of ['form', 'touch']) {
+      assert.strictEqual(esik[tur].length, 101)
+      for (let q = 0; q <= 100; q++) {
+        assert.ok(esik[tur][q] >= 0 && esik[tur][q] <= 1, tur + ' esikleri 0..1 pay olmali')
+        if (q > 0) assert.ok(esik[tur][q] >= esik[tur][q - 1], tur + ' esikleri azalmamali')
+      }
+    }
+    const sinyaller = await cagir('engine:signals', { tf: TF, limit: 1000 })
+    for (const s of sinyaller.signals) {
+      if (s.mode !== 'benzerlik') continue
+      assert.ok(s.confidence >= 0 && s.confidence <= 100, 'guven 0..100 olmali')
+    }
+    const guncel = await cagir('data:status', {})
+    assert.strictEqual(guncel.byTf[TF].confidenceScaleCurrent, true)
+
+    // Eski bicim: sayilar siralanmis, olcek alani yok.
+    fs.writeFileSync(yol, JSON.stringify({
+      form: esik.form.map((_x, i) => i * 10), touch: esik.touch.map((_x, i) => i * 3),
+    }))
+    const eski = await cagir('data:status', {})
+    assert.strictEqual(eski.byTf[TF].confidenceScaleCurrent, false,
+      'eski bicim esik dosyasi uyumsuz sayilmali')
+  })
+})
+
 test('data:status: hafiza hesap imzasini tasir, eski dosyada uyum false', async () => {
   await isciyle(async (cagir, dataDir) => {
     // Imzasiz (eski bicim) hafiza: uyum FALSE olmali ki bir kez yeniden kurulsun.

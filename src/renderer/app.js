@@ -1524,10 +1524,13 @@ async function tfHazirlaIc(tf, ayar) {
 
   const hafizaYok = !satir2.hasMemory
   // Eski: baglam vektoru eski surumden kalma YA DA hesap kodu degismis
-  // (memoryCoreMatch false). Ikincisi olmadan, hesap degisikligi ancak yeni
-  // bar gelince fark ediliyordu; hafta sonu hic fark edilmiyordu.
+  // (memoryCoreMatch false) YA DA guven olcegi eski bicimde
+  // (confidenceScaleCurrent false: yuzdeler sayi yerine pay uzerinden
+  // yeniden yazilmali). Bunlar olmadan, degisiklik ancak yeni bar gelince
+  // fark ediliyordu; hafta sonu hic fark edilmiyordu.
   const hafizaEski = satir2.hasMemory &&
-    (satir2.memoryCurrent === false || satir2.memoryCoreMatch === false)
+    (satir2.memoryCurrent === false || satir2.memoryCoreMatch === false ||
+      satir2.confidenceScaleCurrent === false)
   const kuruldugu = sayi(satir2.memoryBuiltToTime, 0)
   const veriSonu = sayi(satir2.lastTime, 0)
   const hafizaGeride = kuruldugu <= 0 || (veriSonu - kuruldugu) > tfSec * 2

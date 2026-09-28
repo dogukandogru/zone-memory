@@ -862,15 +862,18 @@ export function renderSignals(el, signals, opts) {
     const sag = h('span', 'row-side')
     const sonuc = sonucBilgisi(s)
     if (sade) {
-      // GUVEN: kendi turu icindeki yuzdelik dilim. "Bu kurulumun gecmiste,
-      // kendi turundeki kurulumlarin %X'inden daha cok ornegi var."
+      // GUVEN: benzer kurulum PAYININ kendi turu icindeki yuzdelik dilimi.
+      // Sayi degil pay: sayi gecmis buyudukce buyudugu icin yeni sinyaller
+      // hep %90+ cikiyordu (bkz. engine.worker.js, guven olcegi).
       if (Number.isFinite(Number(s.confidence))) {
         const g = Math.round(Number(s.confidence))
         const kutu = h('span', g >= 75 ? 'up' : (g <= 25 ? 'down' : null), '%' + g)
+        const havuz = sayi(s.poolCount, 0)
+        const pay = havuz > 0 ? Math.round(100 * sayi(s.similarCount, 0) / havuz) : null
         kutu.title = 'Geçmişte ' + tam(s.similarCount) + ' benzer kurulum bulundu' +
-          (sayi(s.poolCount, 0) > 0 ? ' (aynı türden toplam ' + tam(s.poolCount) + ' kayıt içinde)' : '') +
-          '. Yüzde, bu sayının kendi türü içindeki sıralamasıdır: ' +
-          'kurulumların %' + g + "'inden daha çok geçmiş örneği var."
+          (pay !== null ? ' (o ana kadarki ' + tam(havuz) + ' kaydın %' + pay + "'i)" : '') +
+          '. Yüzde, bu payın kendi türü içindeki sıralamasıdır: ' +
+          'aynı türdeki kurulumların %' + g + "'inden daha büyük bir pay."
         sag.appendChild(kutu)
         // INDIKATOR SKORU yuzdenin yanina (kullanici istedi): olayin oldugu
         // barda kac kosulun tuttugu. Bilgi amacli, sinyal kararina girmez.
@@ -1003,12 +1006,13 @@ export function renderSignalDetail(el, signal, opts) {
       // ("uyarıyı yazmana gerek yok"); yuzdenin tanimi kaliyor, cunku tanim
       // olmadan sayinin neyi olctugu anlasilmaz.
       el.appendChild(h('div', 'small muted',
-        'Güven, geçmişte bulunan benzer kurulum sayısının KENDİ TÜRÜ İÇİNDEKİ ' +
-        'sıralamasıdır: bu kurulumun, aynı türdeki kurulumların %' + g + "'inden " +
-        'daha çok geçmiş örneği var' +
+        'Güven, benzer kurulum PAYININ kendi türü içindeki sıralamasıdır: o ana ' +
+        'kadarki kayıtların yüzde kaçı bu yapıya benziyor' +
         (sayi(signal.poolCount, 0) > 0
-          ? ' (aynı türden toplam ' + tam(signal.poolCount) + ' kayıt tarandı)'
-          : '') + '.'))
+          ? ' (' + tam(signal.similarCount) + ' / ' + tam(signal.poolCount) + ' kayıt, %' +
+            Math.round(100 * sayi(signal.similarCount, 0) / sayi(signal.poolCount, 1)) + ')'
+          : '') +
+        '. Bu pay, aynı türdeki kurulumların %' + g + "'inden daha büyük."))
     }
     el.appendChild(kv('Bölge aralığı',
       formatPrice(signal.zoneBottom) + ' - ' + formatPrice(signal.zoneTop)))

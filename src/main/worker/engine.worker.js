@@ -810,6 +810,10 @@ handlers['data:status'] = async function (payload) {
       memoryCoreMatch: mem && mem.count > 0
         ? (!!mem.coreHash && mem.coreHash === hesapImzasi())
         : null,
+      // GUVEN OLCEGI GUNCEL MI. Esik dosyasi eski bicimdeyse (benzer sayisi
+      // siralanmis) listedeki yuzdeler yanlis olcekte: bir kez yeniden
+      // tarama gerekir. Dosya yoksa null ('hepsi' kipi ya da hic taranmamis).
+      confidenceScaleCurrent: await guvenOlcegiGuncel(tf),
       hasZones: await fileExists(paths.zonesPath(tf)),
       hasPrototypes: await fileExists(paths.protosPath(tf)),
       hasSignals: await fileExists(paths.signalsPath(tf)),
@@ -1441,24 +1445,32 @@ handlers['engine:scan'] = async function (payload, ctx) {
     const enAzBenzer = Math.max(1, Math.round(num(uygulanan.signalCfg.minMatches, 5)))
     const enAzYakinlik = num(uygulanan.signalCfg.minSimilarity, 0.8)
 
-    // GUVEN OLCEGI: TUR ICINDE YUZDELIK DILIM.
+    // GUVEN OLCEGI: HAVUZ PAYININ TUR ICINDEKI YUZDELIK DILIMI.
     //
-    // Mutlak bir olcek ("1000 kayit = %100") yanlis olurdu, cunku turlerin
-    // sayilari cok farkli. Olculdu (5m): olusumda medyan 1.236 benzer kayit,
-    // dokunusta 391. Tek olcek kullanilsa dokunus neredeyse her zaman dusuk
-    // guven gorunurdu, oysa KENDI turu icinde yuksek olabilir.
+    // Once benzer kayit SAYISI siralaniyordu. Hata: sayi yalnizca sinyalden
+    // ONCEKI olaylar arasinda aranir (gelecek bilinemez), yani gecmis
+    // buyudukce kendiliginden buyur. 2026'daki sinyalin arkasinda 20 yil,
+    // 2007'dekinin 1 yil var; yeni sinyaller sirf bu yuzden olcegin tepesine
+    // oturuyordu. Olculdu (5m, yila gore ortanca guven): 2010 %28, 2018 %73,
+    // 2026 %92; musteri "neredeyse hepsi %99" dedi. Simdi PAY siralanir: o
+    // ana kadarki havuzun yuzde kaci bu yapiya benziyor. Ayni veride 2026
+    // ortancasi %42-49'a iniyor, son sinyaller 1 ile 97 arasina dagiliyor.
     //
-    // Yuzdelik dilim kendi kendini olcekler: "%90" demek, bu kurulumun kendi
-    // turundeki kurulumlarin %90'indan daha cok gecmis ornegi var demektir.
-    const kovaSayimlari = { form: [], touch: [] }
+    // Tur icinde: turlerin paylari cok farkli (5m: olusumda havuzun %65'i,
+    // dokunusta %43'u benzer sayiliyor). Tek olcek olsaydi dokunus hep dusuk
+    // gorunurdu, oysa KENDI turu icinde yuksek olabilir. "%90" demek, bu
+    // kurulumun payi kendi turundeki kurulumlarin %90'inden buyuk demektir.
+    const kovaPaylari = { form: [], touch: [] }
     for (let i = 0; i < sirali.length; i++) {
       const e = sirali[i]
       if (!e) continue
-      kovaSayimlari[e.kind === 'form' ? 'form' : 'touch'].push(cache.benzerSayi[i])
+      kovaPaylari[e.kind === 'form' ? 'form' : 'touch']
+        .push(guvenPayi(cache.benzerSayi[i], cache.havuzSayi[i]))
     }
-    const esikler = {}
+    // `olcek` alani: eski bicim (sayi siralanmis) dosyalar bununla ayrilir.
+    const esikler = { olcek: GUVEN_OLCEGI }
     for (const tur of ['form', 'touch']) {
-      const a = kovaSayimlari[tur]
+      const a = kovaPaylari[tur]
       a.sort((x, y) => x - y)
       // 101 kirilim noktasi: %0'dan %100'e. Canli akis da bunlari kullanir.
       const nokta = new Array(101)
@@ -1494,7 +1506,8 @@ handlers['engine:scan'] = async function (payload, ctx) {
       sig.mode = 'benzerlik'
       sig.similarCount = benzerToplam
       sig.poolCount = cache.havuzSayi[i]
-      sig.confidence = guvenYuzdesi(esikler[e.kind === 'form' ? 'form' : 'touch'], benzerToplam)
+      sig.confidence = guvenYuzdesi(esikler[e.kind === 'form' ? 'form' : 'touch'],
+        guvenPayi(benzerToplam, cache.havuzSayi[i]))
       // Ekranda gosterilen en benzer birkaci (k ile sinirli olan kisim).
       sig.matchCount = komsular.length
       sig.avgSimilarity = komsular.length
@@ -2817,7 +2830,8 @@ handlers['engine:live-tick'] = async function (payload) {
                 : 0
               const esikler = canliGuvenEsikleri || (canliGuvenEsikleri = guvenEsikleriOku(tf) || {})
               sig.confidence = guvenYuzdesi(
-                esikler[cand.kind === 'form' ? 'form' : 'touch'], toplam)
+                esikler[cand.kind === 'form' ? 'form' : 'touch'],
+                guvenPayi(toplam, sig.poolCount))
               const ilk = adaylarListesi.slice(0, 6).map((m) => ({
                 id: num(m.event && m.event.id, -1),
                 time: num(m.event && m.event.time, 0),
@@ -3101,27 +3115,54 @@ function guvenEsikleriYaz(tf, esikler) {
   }
 }
 
-/** Esikleri diskten okur, yoksa null. */
+/** Guven olcegi bicimi: havuz PAYI siralanir (bkz. taramadaki aciklama). */
+const GUVEN_OLCEGI = 'pay'
+
+/**
+ * Esikleri diskten okur; yoksa ya da ESKI BICIMDEYSE null.
+ *
+ * Eski bicim benzer SAYISINI siraliyordu; pay ile okunsaydi her sinyal %0
+ * cikardi. null donunce canli sinyal %0 alir ama data:status uyumsuzlugu
+ * bildirir (confidenceScaleCurrent false) ve arayuz o dilimi bir kez
+ * yeniden tarar; komsu onbellegi korundugu icin bu saniyeler surer.
+ */
 function guvenEsikleriOku(tf) {
   try {
-    return JSON.parse(fs.readFileSync(guvenEsikYolu(tf), 'utf8'))
+    const e = JSON.parse(fs.readFileSync(guvenEsikYolu(tf), 'utf8'))
+    return e && e.olcek === GUVEN_OLCEGI ? e : null
   } catch (err) {
     return null
   }
 }
 
+/** Esik dosyasi var mi ve guncel bicimde mi; dosya yoksa null. */
+async function guvenOlcegiGuncel(tf) {
+  if (!(await fileExists(guvenEsikYolu(tf)))) return null
+  return guvenEsikleriOku(tf) !== null
+}
+
 /**
- * Benzer kayit sayisini, kendi turu icindeki YUZDELIK DILIME cevirir.
+ * Benzer kayitlarin havuz icindeki payi (0..1). Havuz bossa 0.
+ * @param {number} benzer
+ * @param {number} havuz
+ */
+function guvenPayi(benzer, havuz) {
+  const h = num(havuz, 0)
+  return h > 0 ? num(benzer, 0) / h : 0
+}
+
+/**
+ * Havuz payini, kendi turu icindeki YUZDELIK DILIME cevirir.
  *
- * @param {number[]|null} nokta 101 kirilim noktasi (%0..%100)
- * @param {number} sayi Bu kurulumun benzer kayit sayisi
+ * @param {number[]|null} nokta 101 kirilim noktasi (%0..%100), pay olarak
+ * @param {number} pay Bu kurulumun benzer / havuz payi
  * @returns {number} 0..100
  */
-function guvenYuzdesi(nokta, sayi) {
+function guvenYuzdesi(nokta, pay) {
   if (!Array.isArray(nokta) || nokta.length !== 101) return 0
   // Ilk gecilen kirilim noktasi dilimi verir.
   let q = 0
-  while (q < 100 && sayi >= nokta[q + 1]) q++
+  while (q < 100 && pay >= nokta[q + 1]) q++
   return q
 }
 
