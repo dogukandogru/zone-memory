@@ -686,6 +686,9 @@ export function sonucEtiketi(m) {
  *   suzgecten AYRI calisir, cunku tur artik bir sekme, bir suzgec degil.
  *   emptyText: liste tumden bossa gosterilecek metin (kutu listesi gibi
  *   baglamlar icin; varsayilan metin "Gecmisi Tara" der ve orada yanlistir).
+ *   from: ZAMAN ARALIGI (UNIX saniye). Verilirse yalnizca bu andan sonraki
+ *   sinyaller listelenir; sayimlar ve TP orani da buna gore. Kullanici: aralik
+ *   secimi hem CSV'yi hem listeyi suzsun.
  */
 export function renderSignals(el, signals, opts) {
   if (!el) return
@@ -705,9 +708,10 @@ export function renderSignals(el, signals, opts) {
   // gosterilecek sinyal yok" ayri seylerdir ve bos liste mesaji buna gore
   // degisir.
   const tur = o.kind === 'form' || o.kind === 'touch' ? o.kind : null
-  const turdekiler = tur === null
-    ? hepsi
-    : hepsi.filter((s) => s && (tur === 'form' ? s.kind === 'form' : s.kind !== 'form'))
+  const baslangic = Number.isFinite(Number(o.from)) && Number(o.from) > 0 ? Number(o.from) : null
+  const turdekiler = hepsi.filter((s) => s &&
+    (tur === null || (tur === 'form' ? s.kind === 'form' : s.kind !== 'form')) &&
+    (baslangic === null || sayi(s.time, 0) >= baslangic))
 
   const suzgec = o.filter || 'all'
   // 'fired' suzgeci KALDIRILDI: bu kipte liste zaten yalnizca uretilen
@@ -725,8 +729,10 @@ export function renderSignals(el, signals, opts) {
     const turAdiMetni = tur === 'form' ? 'oluşum' : 'dokunuş'
     el.appendChild(bosKutu(hepsi.length === 0
       ? (o.emptyText || 'Bu zaman dilimi için sinyal yok. "Geçmişi Tara" ile hafızayı kurun.')
-      : (turdekiler.length === 0 && tur !== null
-        ? 'Bu zaman diliminde ' + turAdiMetni + ' sinyali yok.'
+      : (turdekiler.length === 0
+        ? (baslangic !== null
+          ? 'Seçili aralıkta ' + (tur !== null ? turAdiMetni + ' ' : '') + 'sinyali yok.'
+          : 'Bu zaman diliminde ' + turAdiMetni + ' sinyali yok.')
         : 'Bu süzgeçle gösterilecek sinyal yok.')))
     return
   }
@@ -1885,8 +1891,8 @@ function ayarGruplari(saglayiciSecenekleri) {
     {
       baslik: 'Sonuç etiketleme',
       bozar: true,
-      not: 'Hafızanın öğrendiği "bölge tuttu mu" sorusunun tanımı. Buradaki hedef ' +
-        've geçersizlik seviyeleri, sinyal planındaki TP1 ve SL ile AYNI seviyelerdir.',
+      not: 'Hafızanın öğrendiği "bölge tuttu mu" sorusunun tanımı. Sinyal satırındaki ' +
+        'TP/SL bundan ayrıdır: o, "Sinyal kararı" bölümündeki ATR mesafeleriyle kurulur.',
       alanlar: [
         { yol: 'outcomeCfg.horizonBars', ad: 'Sonuç ufku (bar)', tip: 'sayi', adim: 1, min: 1,
           not: 'Sonucun beklendiği azami bar sayısı, aşılırsa zaman aşımı sayılır.' },
@@ -1941,12 +1947,16 @@ function ayarGruplari(saglayiciSecenekleri) {
           not: 'Olay anındaki kutu yaşı bunu aşarsa sinyal üretilmez. 0 kapatır. ' +
             'Kutunun çizim ömrü 100 bardır ama izlenmeye 600 bara kadar devam ' +
             'eder, yani çok eski bir kutuya gelen dokunuş da olay üretebiliyor.' },
-        { yol: 'signalCfg.tpRr', ad: 'Hedef oranı (TP = risk × bu)',
-          tip: 'sayi', adim: 0.1, min: 0.1, max: 10,
-          not: 'Sinyal satırındaki TP/SL için. Giriş = sinyal barının kapanışı; ' +
-            'SL = kutunun uzak kenarı, üzerine "Geçersizlik payı" kadar ATR; ' +
-            'TP = giriş ± bu oran × risk. 1 = birebir. Değiştirince tüm ' +
-            'sinyallerin TP/SL sonucu yeniden hesaplanır, tarama gerekmez.' },
+        { yol: 'signalCfg.slAtr', ad: 'SL mesafesi (ATR)',
+          tip: 'sayi', adim: 0.1, min: 0.1, max: 20,
+          not: 'Giriş = sinyal mumunun kapanışı; SL = giriş eksi/artı bu kadar ATR ' +
+            '(AL için aşağı, SAT için yukarı). ATR, o mumdaki 14 barlık ortalama ' +
+            'gerçek aralıktır; 1 ATR her dönemde aynı anlama gelir. Değiştirince ' +
+            'tüm sinyallerin TP/SL sonucu yeniden hesaplanır, tarama gerekmez.' },
+        { yol: 'signalCfg.tpAtr', ad: 'TP mesafesi (ATR)',
+          tip: 'sayi', adim: 0.1, min: 0.1, max: 20,
+          not: 'TP = giriş artı/eksi bu kadar ATR. SL ile aynıysa 1\'e 1; iki katıysa ' +
+            '1\'e 2. Sinyal satırındaki TP oranı buna göre değişir.' },
         { yol: 'signalCfg.planHorizonBars', ad: 'Sonuç süresi (bar)',
           tip: 'sayi', adim: 10, min: 10, max: 5000,
           not: 'Bu kadar bar içinde ne TP ne SL vurulursa sonuç "süre doldu" olur ' +

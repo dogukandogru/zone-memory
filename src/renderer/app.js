@@ -570,7 +570,16 @@ function kutuYasiSiniri() {
 /** Plan ayarinin imzasi: degisti mi anlamak icin. */
 function planAyari() {
   const c = durum.ayarlar && durum.ayarlar.signalCfg ? durum.ayarlar.signalCfg : {}
-  return String(c.tpRr) + ':' + String(c.planHorizonBars)
+  return String(c.slAtr) + ':' + String(c.tpAtr) + ':' + String(c.planHorizonBars)
+}
+
+/** Aralik secimindeki baslangic zamani (UNIX saniye) ya da null (tumu). */
+function sinyalAralikBaslangici() {
+  const sec = el('signalCsvRange')
+  const deger = sec && sec.value ? sec.value : 'all'
+  if (deger === 'all') return null
+  const gun = sayi(deger, 0)
+  return gun > 0 ? Math.floor(Date.now() / 1000) - gun * 86400 : null
 }
 
 /** Ust seritteki zaman dilimi isiklari: hangi dilimde acik (aktif) sinyal var. */
@@ -1286,10 +1295,10 @@ async function sinyalleriYukle() {
   // PLAN ALANI OLMAYAN ESKI LISTE: TP/SL ozelligi eklenmeden once yazilmis.
   // Bir kez plan-refresh ile hesaplatilir (tarama gerekmez), sonra yeniden
   // okunur. Bayrak tekrar dongusunu onler.
-  // `mode` alani tasiyan plan, geri alinan dolar bazli surumden kalma; o da
-  // bir kez yeniden hesaplanir.
+  // Eski bicim planlar (mode yok: kutu kenari; 'usd': dolar) bir kez ATR
+  // tanimiyla yeniden hesaplanir.
   if (!durum.planTazelendi && tumu.some((x) => x && (x.plan === undefined ||
-      (x.plan && x.plan.mode)))) {
+      (x.plan && x.plan.mode !== 'atr')))) {
     durum.planTazelendi = true
     await cagirGuvenli('engine:plan-refresh',
       { tf: durum.tf, cfgPatch: durum.ayarYamasiKayitli || null }, null)
@@ -2070,6 +2079,7 @@ function sinyalPaneliniCiz() {
     selectedId: durum.seciliSinyalId,
     filter: suzgec,
     kind: durum.sinyalTuru,
+    from: sinyalAralikBaslangici(),
     total: durum.sinyalToplam,
     truncated: durum.sinyalKirpildi,
     // Tarama surerken "hafizayi kurun" demek yaniltici: kurulma zaten suruyor.
@@ -2081,17 +2091,21 @@ function sinyalPaneliniCiz() {
 
   // ROZETLER: her sekme KENDI sayisini gosterir. Tek bir toplam sayi,
   // sekmeler ayrildiktan sonra hangi listeye ait oldugu belirsiz kalirdi.
+  // Aralik secildiyse sayimlar da o araliga gore: liste 6 satirken sekmede
+  // 6496 yazmasi yaniltici.
+  const aralikBas = sinyalAralikBaslangici()
   let formAdet = 0
   let touchAdet = 0
   for (let i = 0; i < durum.signals.length; i++) {
     const sg = durum.signals[i]
     if (!sg) continue
+    if (aralikBas !== null && sayi(sg.time, 0) < aralikBas) continue
     if (sg.kind === 'form') formAdet++
     else touchAdet++
   }
-  const rozetIpucu = durum.sinyalKirpildi
+  const rozetIpucu = (aralikBas !== null ? ' (seçili aralıkta)' : '') + (durum.sinyalKirpildi
     ? ' (yüklü listede; toplam ' + formatNumber(durum.sinyalToplam, 0) + ' sinyal var)'
-    : ''
+    : '')
   if (n.rozetForm) {
     n.rozetForm.textContent = String(formAdet)
     n.rozetForm.title = formAdet + ' oluşum sinyali' + rozetIpucu
@@ -2776,7 +2790,7 @@ async function ayarlariKaydet(yama) {
   // HEDEF ORANI / SONUC SURESI DEGISTI: TP/SL sonuclari tarama olmadan
   // yeniden hesaplanir (kullanici: "ayarlardan degistirdigimizde guncellensin").
   if (planAyari() !== oncekiPlan) {
-    bildir('Hedef oranı değişti, TP/SL sonuçları yeniden hesaplanıyor.')
+    bildir('TP/SL mesafesi değişti, sonuçlar yeniden hesaplanıyor.')
     await cagirGuvenli('engine:plan-refresh',
       { tf: durum.tf, cfgPatch: durum.ayarYamasiKayitli || null }, 'Planlar yeniden hesaplanamadı')
     await sinyalleriYukle()
@@ -3221,16 +3235,18 @@ function dugmeleriBagla() {
   if (sinyalCsv) {
     sinyalCsv.addEventListener('click', () => {
       const sec = el('signalCsvRange')
-      const deger = sec && sec.value ? sec.value : '30'
-      const simdi = Math.floor(Date.now() / 1000)
-      const gun = deger === 'all' ? null : sayi(deger, 30)
+      const deger = sec && sec.value ? sec.value : 'all'
+      const bas = sinyalAralikBaslangici()
       csvDisaAktar('signals', {
-        from: gun ? simdi - gun * 86400 : undefined,
+        from: bas === null ? undefined : bas,
         to: undefined,
-        rangeLabel: gun ? 'son' + gun + 'gun' : 'tumu',
+        rangeLabel: bas === null ? 'tumu' : 'son' + sayi(deger, 0) + 'gun',
       })
     })
   }
+  // Aralik degisince liste de suzulur (sayimlar ve TP orani dahil).
+  const aralikSec = el('signalCsvRange')
+  if (aralikSec) aralikSec.addEventListener('change', () => sinyalPaneliniCiz())
 
   const iptal = el('cancelBtn')
   if (iptal) {

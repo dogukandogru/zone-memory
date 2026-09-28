@@ -1038,11 +1038,10 @@ function hesapImzasi() {
 function planlariUygula(liste, s, uygulanan) {
   const planMod = core('learn/plan')
   const sc = uygulanan && uygulanan.signalCfg ? uygulanan.signalCfg : {}
-  const oc = uygulanan && uygulanan.outcomeCfg ? uygulanan.outcomeCfg : {}
   const cfg = {
-    tpRr: num(sc.tpRr, planMod.DEFAULT_PLAN_CFG.tpRr),
+    slAtr: num(sc.slAtr, planMod.DEFAULT_PLAN_CFG.slAtr),
+    tpAtr: num(sc.tpAtr, planMod.DEFAULT_PLAN_CFG.tpAtr),
     planHorizonBars: num(sc.planHorizonBars, planMod.DEFAULT_PLAN_CFG.planHorizonBars),
-    breakBufferAtr: num(oc.breakBufferAtr, planMod.DEFAULT_PLAN_CFG.breakBufferAtr),
   }
   let acik = 0
   for (let i = 0; i < liste.length; i++) {

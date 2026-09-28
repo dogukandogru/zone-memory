@@ -7,18 +7,10 @@
  * sonuclanirken tp mi olmus yoksa sl mi onu ekleyelim; 1'e 1 yapabiliriz ilk
  * basta, ayarlardan degistirdigimizde ona gore guncellensin".
  *
- * TANIM (tek yer, tarama ve canli ayni kodu kullanir):
- *   giris  = sinyal barinin kapanisi (signal.price)
- *   SL     = kutunun UZAK kenari, uzerine "gecersizlik payi" kadar ATR:
- *            AL'da kutu alti - pay, SAT'ta kutu ustu + pay. Kutu mantigiyla
- *            tutarli: kutu kirilinca islem de biter.
- *   risk   = |giris - SL|
- *   TP     = giris +/- tpRr * risk   (tpRr varsayilan 1, yani 1'e 1)
- *   sonuc  = sinyal barindan SONRAKI barlarda hangisi once vurulur:
- *            'sl' | 'tp' | 'open' (seri bitti, henuz vurulmadi) |
- *            'timeout' (planHorizonBars doldu, ikisi de vurulmadi)
- *   Ayni barda ikisi de vurulursa SL sayilir (temkinli: bar ici sira
- *   bilinmez, kotu durum varsayilir).
+ * TANIM (tek yer, tarama ve canli ayni kodu kullanir): bkz. planKur; sonuc
+ * sinyal barindan SONRAKI barlarda hangisi once vurulur: 'sl' | 'tp' | 'open'
+ * (seri bitti) | 'timeout' (planHorizonBars doldu). Ayni barda ikisi de
+ * vurulursa SL sayilir (bar ici sira bilinmez, kotu durum varsayilir).
  *
  * Bu modul KARARA GIRMEZ: sinyal uretilip uretilmeyecegi baska yerde
  * belirlenir; burasi yalnizca plani ve sonucunu hesaplar.
@@ -26,11 +18,14 @@
 
 const series = require('../series')
 
+/** Plan bicimi: eski (kutu kenari / dolar) planlari ayirt etmek icin. */
+const PLAN_MODE = 'atr'
+
 /** Varsayilanlar; signal.js DEFAULT_SIGNAL_CFG ile ayni degerler. */
 const DEFAULT_PLAN_CFG = {
-  tpRr: 1.0,
+  slAtr: 1.0,
+  tpAtr: 1.0,
   planHorizonBars: 200,
-  breakBufferAtr: 0.25,
 }
 
 function sayi (v, varsayilan) {
@@ -39,30 +34,38 @@ function sayi (v, varsayilan) {
 }
 
 /**
- * Plan seviyelerini kurar.
- * @param {{price?:number, zoneTop?:number, zoneBottom?:number, atr?:number,
- *          direction?:string, isSupport?:boolean}} signal
- * @param {{tpRr?:number, breakBufferAtr?:number}} [cfg]
+ * Plan seviyelerini kurar: ATR cinsinden SL ve TP mesafesi.
+ *
+ * Kullanici istedi: "ATR'ye gore TP ve ATR'ye gore SL ayarlayabilmeliyim".
+ *   giris = sinyal barinin kapanisi
+ *   SL    = giris -/+ slAtr * ATR   (AL'da asagida, SAT'ta yukarida)
+ *   TP    = giris +/- tpAtr * ATR
+ * ATR olayin oldugu bardaki 14 barlik ortalama gercek araliktir (signal.atr),
+ * yani mesafe piyasanin o anki oynakligiyla olcekli: 2011'de de 2026'da da
+ * "1 ATR" ayni anlama gelir. Onceki tanim (kutunun uzak kenari + pay, TP =
+ * risk x oran) kaldirildi: dokunusta risk 5-6 dolara dusup ilk fitilde SL
+ * vuruluyordu ve iki mesafe ayri ayri ayarlanamiyordu.
+ *
+ * @param {{price?:number, atr?:number, direction?:string, isSupport?:boolean}} signal
+ * @param {{slAtr?:number, tpAtr?:number}} [cfg]
  * @returns {{entry:number, sl:number, tp:number, risk:number, rr:number}|null}
- *          Risk hesaplanamiyorsa (kapanis zaten kutunun otesinde, ATR yok) null
+ *          Giris ya da ATR yoksa null
  */
 function planKur (signal, cfg) {
   if (!signal) return null
   const c = Object.assign({}, DEFAULT_PLAN_CFG, cfg || {})
   const entry = sayi(signal.price, NaN)
-  const ust = sayi(signal.zoneTop, NaN)
-  const alt = sayi(signal.zoneBottom, NaN)
   const atr = sayi(signal.atr, NaN)
-  if (!Number.isFinite(entry) || !Number.isFinite(ust) || !Number.isFinite(alt)) return null
+  if (!Number.isFinite(entry) || entry <= 0) return null
   if (!(atr > 0)) return null
+  const slAtr = sayi(c.slAtr, DEFAULT_PLAN_CFG.slAtr)
+  const tpAtr = sayi(c.tpAtr, DEFAULT_PLAN_CFG.tpAtr)
+  if (!(slAtr > 0) || !(tpAtr > 0)) return null
   const yukari = signal.direction ? signal.direction !== 'SELL' : !!signal.isSupport
-  const pay = Math.max(0, sayi(c.breakBufferAtr, DEFAULT_PLAN_CFG.breakBufferAtr)) * atr
-  const sl = yukari ? alt - pay : ust + pay
-  const risk = yukari ? entry - sl : sl - entry
-  if (!(risk > 0)) return null
-  const rr = Math.max(0.01, sayi(c.tpRr, DEFAULT_PLAN_CFG.tpRr))
-  const tp = yukari ? entry + rr * risk : entry - rr * risk
-  return { entry: entry, sl: sl, tp: tp, risk: risk, rr: rr }
+  const risk = slAtr * atr
+  const sl = yukari ? entry - risk : entry + risk
+  const tp = yukari ? entry + tpAtr * atr : entry - tpAtr * atr
+  return { entry: entry, sl: sl, tp: tp, risk: risk, rr: tpAtr / slAtr }
 }
 
 /**
@@ -99,7 +102,7 @@ function planCoz (s, startIdx, plan, yukari, horizonBars) {
  * bulunamazsa sonuc 'open' kalir.
  * @param {import('../series').Series|null} s
  * @param {object} signal
- * @param {{tpRr?:number, planHorizonBars?:number, breakBufferAtr?:number}} [cfg]
+ * @param {{slAtr?:number, tpAtr?:number, planHorizonBars?:number}} [cfg]
  * @returns {object|null} takilan plan
  */
 function sinyaliPlanla (s, signal, cfg) {
@@ -119,6 +122,7 @@ function sinyaliPlanla (s, signal, cfg) {
     }
   }
   signal.plan = {
+    mode: PLAN_MODE,
     entry: kurulan.entry,
     sl: kurulan.sl,
     tp: kurulan.tp,
@@ -130,4 +134,4 @@ function sinyaliPlanla (s, signal, cfg) {
   return signal.plan
 }
 
-module.exports = { DEFAULT_PLAN_CFG, planKur, planCoz, sinyaliPlanla }
+module.exports = { PLAN_MODE, DEFAULT_PLAN_CFG, planKur, planCoz, sinyaliPlanla }

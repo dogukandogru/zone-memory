@@ -144,11 +144,12 @@ const DEFAULT_SIGNAL_CFG = {
    */
   maxZoneAgeBars: 100,
   /**
-   * SINYAL PLANI (bkz. learn/plan.js). TP = giris +/- tpRr * risk; risk,
-   * girisle kutunun uzak kenari (+ gecersizlik payi) arasindaki mesafedir.
-   * Kullanici "1'e 1 ile baslayalim, ayarlardan degissin" dedi.
+   * SINYAL PLANI (bkz. learn/plan.js): SL = giris -/+ slAtr * ATR,
+   * TP = giris +/- tpAtr * ATR. Kullanici ikisini ayri ayri ATR cinsinden
+   * ayarlamak istedi. Varsayilan 1'e 1.
    */
-  tpRr: 1.0,
+  slAtr: 1.0,
+  tpAtr: 1.0,
   /** Plan sonucu icin en fazla kac bar beklenir; dolarsa 'timeout'. */
   planHorizonBars: 200,
   /**
