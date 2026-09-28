@@ -3,23 +3,22 @@
 /**
  * SINYAL PLANI: giris, zarar durdur (SL), hedef (TP) ve sonuc.
  *
- * TANIM (DOLAR BAZLI, zaman dilimi basina):
- *   giris = sinyal barinin kapanisi (signal.price)
- *   SL    = giris -/+ slUsd   (AL'da asagida, SAT'ta yukarida)
- *   TP    = giris +/- tpUsd
- *   sonuc = sinyal barindan SONRAKI barlarda hangisi once vurulur:
- *           'sl' | 'tp' | 'open' (seri bitti, henuz vurulmadi) |
- *           'timeout' (planHorizonBars doldu, ikisi de vurulmadi)
- *   Ayni barda ikisi de vurulursa SL sayilir (bar ici sira bilinmez,
- *   kotu durum varsayilir).
+ * Kullanici istedi: "sinyal verdiginde tp ve sl nerede oldugunu ve islem
+ * sonuclanirken tp mi olmus yoksa sl mi onu ekleyelim; 1'e 1 yapabiliriz ilk
+ * basta, ayarlardan degistirdigimizde ona gore guncellensin".
  *
- * NEDEN DOLAR, NEDEN KUTU KENARI DEGIL: ilk surum SL'yi kutunun uzak
- * kenarina koyuyordu (+ ATR payi). Dokunus sinyalinde giris kutunun hemen
- * yaninda oldugu icin risk 5-6 dolar cikiyor ve ilk fitilde SL vuruluyordu;
- * kullanici ornek gosterdi (16.09 20:55 SAT: SL 5,5 dolar otede, sonra fiyat
- * 100 dolar dustu). Kullanicinin tanimi: "M1'de 10 dolar, M5'te 20, M15'te
- * 30; 4025'te aldik, 4015'e gelince SL". Mesafeler onsun o anki fiyatina
- * gore dolardir ve her zaman dilimi icin Ayarlar'dan ayri ayri degisir.
+ * TANIM (tek yer, tarama ve canli ayni kodu kullanir):
+ *   giris  = sinyal barinin kapanisi (signal.price)
+ *   SL     = kutunun UZAK kenari, uzerine "gecersizlik payi" kadar ATR:
+ *            AL'da kutu alti - pay, SAT'ta kutu ustu + pay. Kutu mantigiyla
+ *            tutarli: kutu kirilinca islem de biter.
+ *   risk   = |giris - SL|
+ *   TP     = giris +/- tpRr * risk   (tpRr varsayilan 1, yani 1'e 1)
+ *   sonuc  = sinyal barindan SONRAKI barlarda hangisi once vurulur:
+ *            'sl' | 'tp' | 'open' (seri bitti, henuz vurulmadi) |
+ *            'timeout' (planHorizonBars doldu, ikisi de vurulmadi)
+ *   Ayni barda ikisi de vurulursa SL sayilir (temkinli: bar ici sira
+ *   bilinmez, kotu durum varsayilir).
  *
  * Bu modul KARARA GIRMEZ: sinyal uretilip uretilmeyecegi baska yerde
  * belirlenir; burasi yalnizca plani ve sonucunu hesaplar.
@@ -27,27 +26,11 @@
 
 const series = require('../series')
 
-/** Plan bicimi: eski (kutu kenari) planlari ayirt etmek icin. */
-const PLAN_MODE = 'usd'
-
-/**
- * Zaman dilimi basina varsayilan TP/SL (dolar). 1m, 5m, 15m kullanicinin
- * verdigi sayilar; digerleri ayni olcekle uzatildi. Hepsi Ayarlar'dan
- * degisir; TP varsayilan olarak SL'ye esit (1'e 1).
- */
-const DEFAULT_PLAN_BY_TF = {
-  '1m': { slUsd: 10, tpUsd: 10 },
-  '5m': { slUsd: 20, tpUsd: 20 },
-  '15m': { slUsd: 30, tpUsd: 30 },
-  '30m': { slUsd: 40, tpUsd: 40 },
-  '1h': { slUsd: 60, tpUsd: 60 },
-  '4h': { slUsd: 100, tpUsd: 100 },
-  '1d': { slUsd: 150, tpUsd: 150 },
-}
-
-/** Zaman diliminden bagimsiz varsayilanlar. */
+/** Varsayilanlar; signal.js DEFAULT_SIGNAL_CFG ile ayni degerler. */
 const DEFAULT_PLAN_CFG = {
+  tpRr: 1.0,
   planHorizonBars: 200,
+  breakBufferAtr: 0.25,
 }
 
 function sayi (v, varsayilan) {
@@ -56,38 +39,30 @@ function sayi (v, varsayilan) {
 }
 
 /**
- * Zaman dilimi icin etkin TP/SL mesafeleri: varsayilan + kullanici yamasi.
- * @param {string} tf
- * @param {object|null} [patchByTf] Ayarlardaki `planByTf` (yalnizca degisenler)
- * @returns {{slUsd:number, tpUsd:number}}
- */
-function planAyariCoz (tf, patchByTf) {
-  const taban = DEFAULT_PLAN_BY_TF[tf] || DEFAULT_PLAN_BY_TF['15m']
-  const yama = patchByTf && typeof patchByTf === 'object' && patchByTf[tf] &&
-    typeof patchByTf[tf] === 'object' ? patchByTf[tf] : {}
-  const sl = sayi(yama.slUsd, taban.slUsd)
-  const tp = sayi(yama.tpUsd, taban.tpUsd)
-  return { slUsd: sl > 0 ? sl : taban.slUsd, tpUsd: tp > 0 ? tp : taban.tpUsd }
-}
-
-/**
  * Plan seviyelerini kurar.
- * @param {{price?:number, direction?:string, isSupport?:boolean}} signal
- * @param {{slUsd?:number, tpUsd?:number}} cfg
+ * @param {{price?:number, zoneTop?:number, zoneBottom?:number, atr?:number,
+ *          direction?:string, isSupport?:boolean}} signal
+ * @param {{tpRr?:number, breakBufferAtr?:number}} [cfg]
  * @returns {{entry:number, sl:number, tp:number, risk:number, rr:number}|null}
+ *          Risk hesaplanamiyorsa (kapanis zaten kutunun otesinde, ATR yok) null
  */
 function planKur (signal, cfg) {
   if (!signal) return null
-  const c = cfg || {}
+  const c = Object.assign({}, DEFAULT_PLAN_CFG, cfg || {})
   const entry = sayi(signal.price, NaN)
-  const slUsd = sayi(c.slUsd, NaN)
-  const tpUsd = sayi(c.tpUsd, NaN)
-  if (!Number.isFinite(entry) || entry <= 0) return null
-  if (!(slUsd > 0) || !(tpUsd > 0)) return null
+  const ust = sayi(signal.zoneTop, NaN)
+  const alt = sayi(signal.zoneBottom, NaN)
+  const atr = sayi(signal.atr, NaN)
+  if (!Number.isFinite(entry) || !Number.isFinite(ust) || !Number.isFinite(alt)) return null
+  if (!(atr > 0)) return null
   const yukari = signal.direction ? signal.direction !== 'SELL' : !!signal.isSupport
-  const sl = yukari ? entry - slUsd : entry + slUsd
-  const tp = yukari ? entry + tpUsd : entry - tpUsd
-  return { entry: entry, sl: sl, tp: tp, risk: slUsd, rr: tpUsd / slUsd }
+  const pay = Math.max(0, sayi(c.breakBufferAtr, DEFAULT_PLAN_CFG.breakBufferAtr)) * atr
+  const sl = yukari ? alt - pay : ust + pay
+  const risk = yukari ? entry - sl : sl - entry
+  if (!(risk > 0)) return null
+  const rr = Math.max(0.01, sayi(c.tpRr, DEFAULT_PLAN_CFG.tpRr))
+  const tp = yukari ? entry + rr * risk : entry - rr * risk
+  return { entry: entry, sl: sl, tp: tp, risk: risk, rr: rr }
 }
 
 /**
@@ -124,7 +99,7 @@ function planCoz (s, startIdx, plan, yukari, horizonBars) {
  * bulunamazsa sonuc 'open' kalir.
  * @param {import('../series').Series|null} s
  * @param {object} signal
- * @param {{slUsd:number, tpUsd:number, planHorizonBars?:number}} cfg
+ * @param {{tpRr?:number, planHorizonBars?:number, breakBufferAtr?:number}} [cfg]
  * @returns {object|null} takilan plan
  */
 function sinyaliPlanla (s, signal, cfg) {
@@ -144,7 +119,6 @@ function sinyaliPlanla (s, signal, cfg) {
     }
   }
   signal.plan = {
-    mode: PLAN_MODE,
     entry: kurulan.entry,
     sl: kurulan.sl,
     tp: kurulan.tp,
@@ -156,6 +130,4 @@ function sinyaliPlanla (s, signal, cfg) {
   return signal.plan
 }
 
-module.exports = {
-  PLAN_MODE, DEFAULT_PLAN_BY_TF, DEFAULT_PLAN_CFG, planAyariCoz, planKur, planCoz, sinyaliPlanla,
-}
+module.exports = { DEFAULT_PLAN_CFG, planKur, planCoz, sinyaliPlanla }

@@ -68,10 +68,6 @@ const DEFAULTS = {
   featureCfg: { shapeWindowBars: 32 },
   outcomeCfg: coreConst('../core/learn/outcome', 'DEFAULT_OUTCOME_CFG', {}),
   signalCfg: coreConst('../core/learn/signal', 'DEFAULT_SIGNAL_CFG', {}),
-  // TP / SL MESAFELERI, DOLAR, ZAMAN DILIMI BASINA (bkz. core/learn/plan.js).
-  // Kullanici: "M1'de 10 dolar, M5'te 20, M15'te 30; 4025'te aldik, 4015'e
-  // gelince SL". Her dilim Ayarlar'dan ayri degisir.
-  planByTf: coreConst('../core/learn/plan', 'DEFAULT_PLAN_BY_TF', {}),
   // TEK KAYNAK OANDA. Kullanicinin TradingView'da baktigi akisin kendisidir:
   // spot XAU_USD ve tick sayisina dayali hacim verir, vekil DEGILDIR. Olculdu:
   // grafikteki kutularin %100'unu uretir (eski HistData + Binance ikilisi
@@ -310,21 +306,8 @@ const SINIRLAR = {
   'featureCfg.shapeWindowBars': [16, 512],
   'signalCfg.touchMinWinRate': [0, 1],
   'signalCfg.maxZoneAgeBars': [0, 2000],
+  'signalCfg.tpRr': [0.1, 10],
   'signalCfg.planHorizonBars': [10, 5000],
-  'planByTf.1m.slUsd': [0.5, 10000],
-  'planByTf.1m.tpUsd': [0.5, 10000],
-  'planByTf.5m.slUsd': [0.5, 10000],
-  'planByTf.5m.tpUsd': [0.5, 10000],
-  'planByTf.15m.slUsd': [0.5, 10000],
-  'planByTf.15m.tpUsd': [0.5, 10000],
-  'planByTf.30m.slUsd': [0.5, 10000],
-  'planByTf.30m.tpUsd': [0.5, 10000],
-  'planByTf.1h.slUsd': [0.5, 10000],
-  'planByTf.1h.tpUsd': [0.5, 10000],
-  'planByTf.4h.slUsd': [0.5, 10000],
-  'planByTf.4h.tpUsd': [0.5, 10000],
-  'planByTf.1d.slUsd': [0.5, 10000],
-  'planByTf.1d.tpUsd': [0.5, 10000],
   'signalCfg.k': [1, 200],
   'signalCfg.minSimilarity': [0, 0.999],
   'signalCfg.minMatches': [1, 1000],

@@ -570,8 +570,7 @@ function kutuYasiSiniri() {
 /** Plan ayarinin imzasi: degisti mi anlamak icin. */
 function planAyari() {
   const c = durum.ayarlar && durum.ayarlar.signalCfg ? durum.ayarlar.signalCfg : {}
-  const t = durum.ayarlar && durum.ayarlar.planByTf ? durum.ayarlar.planByTf : {}
-  return String(c.planHorizonBars) + ':' + JSON.stringify(t)
+  return String(c.tpRr) + ':' + String(c.planHorizonBars)
 }
 
 /** Ust seritteki zaman dilimi isiklari: hangi dilimde acik (aktif) sinyal var. */
@@ -1287,9 +1286,10 @@ async function sinyalleriYukle() {
   // PLAN ALANI OLMAYAN ESKI LISTE: TP/SL ozelligi eklenmeden once yazilmis.
   // Bir kez plan-refresh ile hesaplatilir (tarama gerekmez), sonra yeniden
   // okunur. Bayrak tekrar dongusunu onler.
-  // Eski bicim (kutu kenari) planlari da yenilenir: mode 'usd' degilse.
+  // `mode` alani tasiyan plan, geri alinan dolar bazli surumden kalma; o da
+  // bir kez yeniden hesaplanir.
   if (!durum.planTazelendi && tumu.some((x) => x && (x.plan === undefined ||
-      (x.plan && x.plan.mode !== 'usd')))) {
+      (x.plan && x.plan.mode)))) {
     durum.planTazelendi = true
     await cagirGuvenli('engine:plan-refresh',
       { tf: durum.tf, cfgPatch: durum.ayarYamasiKayitli || null }, null)
