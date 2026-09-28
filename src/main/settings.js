@@ -77,7 +77,9 @@ const DEFAULTS = {
   // TELEGRAM: canli sinyaller kanala gonderilir (bkz. main/telegram.js).
   // Token pakete gomulu (apiKeys.telegram); kanal kimligi burada. Yalnizca
   // paketlenmis uygulama gonderir; kutu kapatilirsa hic gondermez.
-  telegram: { enabled: true, chatId: '' },
+  // Kanal: "Hocam Sagolsun" (gizli kanal, sayisal kimlik; getUpdates ile
+  // okundu). Kullanici Ayarlar'dan degistirebilir.
+  telegram: { enabled: true, chatId: '-1003667938853' },
   // GERIYE TEST VE PLAN MALIYETI
   // Islem maliyeti ve kayma olcumun en belirleyici girdisidir (1 dakikalikta
   // brut edimin tamamini yiyor) ama bir donem yalnizca kodda sabitti ve
