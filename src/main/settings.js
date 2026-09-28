@@ -48,7 +48,7 @@ function gomuluAnahtarlar() {
     const ham = require('./apiKeys.local.json')
     if (!ham || typeof ham !== 'object') return {}
     const out = {}
-    for (const ad of ['twelvedata', 'polygon', 'oanda']) {
+    for (const ad of ['twelvedata', 'polygon', 'oanda', 'telegram']) {
       if (typeof ham[ad] === 'string' && ham[ad].trim() !== '') out[ad] = ham[ad].trim()
     }
     return out
@@ -73,7 +73,11 @@ const DEFAULTS = {
   // grafikteki kutularin %100'unu uretir (eski HistData + Binance ikilisi
   // %56,7'sini). Digerleri kodda duruyor ama varsayilan degil.
   providers: { history: 'oanda', live: 'oanda' },
-  apiKeys: Object.assign({ twelvedata: '', polygon: '', oanda: '' }, gomuluAnahtarlar()),
+  apiKeys: Object.assign({ twelvedata: '', polygon: '', oanda: '', telegram: '' }, gomuluAnahtarlar()),
+  // TELEGRAM: canli sinyaller kanala gonderilir (bkz. main/telegram.js).
+  // Token pakete gomulu (apiKeys.telegram); kanal kimligi burada. Yalnizca
+  // paketlenmis uygulama gonderir; kutu kapatilirsa hic gondermez.
+  telegram: { enabled: true, chatId: '' },
   // GERIYE TEST VE PLAN MALIYETI
   // Islem maliyeti ve kayma olcumun en belirleyici girdisidir (1 dakikalikta
   // brut edimin tamamini yiyor) ama bir donem yalnizca kodda sabitti ve

@@ -201,6 +201,8 @@ function main() {
     polygon: anahtar('polygon-key', 'ZONE_MEMORY_POLYGON_KEY'),
     twelvedata: anahtar('twelvedata-key', 'ZONE_MEMORY_TWELVEDATA_KEY'),
     oanda: anahtar('oanda-key', 'ZONE_MEMORY_OANDA_KEY'),
+    // Telegram bot tokeni (canli sinyal bildirimi). Depo sirri TELEGRAM_BOT_TOKEN.
+    telegram: anahtar('telegram-token', 'ZONE_MEMORY_TELEGRAM_TOKEN'),
   }
   const veriYok = arg['no-data'] === true
   const kuruMu = arg['dry-run'] === true

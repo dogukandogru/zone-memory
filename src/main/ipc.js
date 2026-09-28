@@ -21,6 +21,7 @@ const live = require('./live')
 const paths = require('./paths')
 const logfile = require('./logfile')
 const notify = require('./notify')
+const telegram = require('./telegram')
 
 /** @type {import('electron').BrowserWindow|null} */
 let mainWindow = null
@@ -281,8 +282,17 @@ function register(win) {
   registered = true
 
   live.setEmitter(send)
-  live.setNotifier((veri) => notify.signalGeldi(veri))
+  // Masaustu bildirimi ve Telegram ayni kancadan; ikisi de kendi kuralini
+  // uygular (notify: kanitli tur; telegram: paketli + tetiklenmis).
+  live.setNotifier((veri) => {
+    notify.signalGeldi(veri)
+    telegram.sinyalGonder(veri).catch(() => {})
+  })
   notify.init({ emit: send })
+  telegram.init({
+    emit: send,
+    log: (message) => send('log', { level: 'info', source: 'telegram', message: message }),
+  })
   engine.onLog((message) => {
     send('log', { source: 'engine', message: message, time: Math.floor(Date.now() / 1000) })
   })

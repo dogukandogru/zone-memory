@@ -1954,6 +1954,19 @@ function ayarGruplari(saglayiciSecenekleri) {
       ],
     },
     {
+      // TELEGRAM: yalnizca canli sinyaller, yalnizca paketlenmis uygulama.
+      baslik: 'Telegram',
+      bozar: false,
+      not: 'Canlı akışta üretilen sinyaller (geçmiş liste değil) Telegram kanalına ' +
+        'gönderilir. Yalnızca kurulu uygulama gönderir; geliştirme çalıştırması göndermez.',
+      alanlar: [
+        { yol: 'telegram.enabled', ad: 'Sinyalleri Telegram kanalına gönder' },
+        { yol: 'telegram.chatId', ad: 'Kanal kimliği', tip: 'metin',
+          not: 'Herkese açık kanalda @kullaniciadi, gizli kanalda -100 ile başlayan sayısal ' +
+            'kimlik. Bot kanala yönetici olarak eklenmiş olmalı.' },
+      ],
+    },
+    {
       baslik: 'Sağlayıcı ve anahtarlar',
       bozar: false,
       onaylar: [

@@ -110,6 +110,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ZONE_MEMORY_OANDA_KEY: ${{ secrets.OANDA_API_KEY }}
+          ZONE_MEMORY_TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         run: node scripts/prepare-dist.mjs --win --no-data --publish
 
       # Anahtar gercekten pakete girdi mi. Girmediyse musteri yine "API
@@ -129,6 +130,9 @@ jobs:
             const k = typeof a.oanda === "string" ? a.oanda.trim() : ""
             if (!k) { console.error("HATA: oanda anahtari BOS."); process.exit(1) }
             console.log("oanda anahtari yerinde, " + k.length + " karakter")
+            const t = typeof a.telegram === "string" ? a.telegram.trim() : ""
+            if (!t) { console.error("HATA: telegram tokeni BOS. Depo sirri TELEGRAM_BOT_TOKEN tanimli mi?"); process.exit(1) }
+            console.log("telegram tokeni yerinde, " + t.length + " karakter")
           '
 
       # Yine de iki surum olustuysa erken yakala: bozuk bir yayin, musterinin
