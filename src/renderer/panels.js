@@ -70,6 +70,8 @@ const CTX_ETIKET = {
 
 /** Listelerde bir kerede cizilecek azami satir (arayuzu tikamamak icin). */
 const AZAMI_SATIR = 500
+/** Kaydirinca eklenen satir parcasi. */
+const PARCA_BOYU = 300
 
 /* ------------------------------------------------------------------ */
 /* Bicimlendirme                                                       */
@@ -797,10 +799,13 @@ export function renderSignals(el, signals, opts) {
     }
   }
 
-  const adet = Math.min(liste.length, AZAMI_SATIR)
+  // SATIRLAR PARCA PARCA CIZILIR (kullanici: "18 bin sinyali de yukleyebilsin,
+  // asagi kaydirdikca gelsin, programi kastirmadan"). Liste tumuyle bellekte,
+  // sayimlar ve TP orani tumune gore; DOM'a once PARCA_BOYU satir konur,
+  // kaydirma dibe yaklasinca sonraki parca eklenir. 18 bin satiri tek
+  // seferde cizmek arayuzu saniyelerce kilitliyordu.
   let seciliSatir = null
-  for (let i = 0; i < adet; i++) {
-    const s = liste[i]
+  const satirKur = (s) => {
     const alis = s.direction !== 'SELL'
     const satir = h('div', 'row ' + (alis ? 'buy' : 'sell') + (s.fired ? '' : ' dim') +
       (o.selectedId !== undefined && o.selectedId !== null && String(s.id) === String(o.selectedId) ? ' selected' : ''))
@@ -910,13 +915,35 @@ export function renderSignals(el, signals, opts) {
     satir.appendChild(sag)
 
     tiklamaBagla(satir, o.onSelect, s)
-    el.appendChild(satir)
+    return satir
   }
 
-  if (liste.length > adet) {
-    el.appendChild(h('div', 'empty small',
-      tam(liste.length - adet) + ' kayıt daha var, süzgeci daraltın.'))
+  const altNot = h('div', 'empty small')
+  let gosterilen = 0
+  const parcaEkle = (adet) => {
+    const son = Math.min(liste.length, gosterilen + adet)
+    for (let i = gosterilen; i < son; i++) el.appendChild(satirKur(liste[i]))
+    gosterilen = son
+    if (gosterilen < liste.length) {
+      altNot.textContent = tam(liste.length - gosterilen) + ' kayıt daha, aşağı kaydırınca gelir.'
+      el.appendChild(altNot)
+    } else if (altNot.parentNode) {
+      altNot.parentNode.removeChild(altNot)
+    }
   }
+  parcaEkle(AZAMI_SATIR)
+  // Secili satir ilk parcanin disindaysa oraya kadar cizilir ki gorunur olsun.
+  if (o.selectedId !== undefined && o.selectedId !== null) {
+    const idx = liste.findIndex((x) => x && String(x.id) === String(o.selectedId))
+    while (idx >= gosterilen && gosterilen < liste.length) parcaEkle(PARCA_BOYU)
+  }
+  // Onceki cizimin kaydirma dinleyicisi kaldirilir, yoksa her cizimde birikir.
+  if (el.__zmParcaDinleyici) el.removeEventListener('scroll', el.__zmParcaDinleyici)
+  el.__zmParcaDinleyici = () => {
+    if (gosterilen >= liste.length) return
+    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 200) parcaEkle(PARCA_BOYU)
+  }
+  el.addEventListener('scroll', el.__zmParcaDinleyici)
   // Kaydirma geri verilir; secili satir gorunur alanin disindaysa getirilir.
   el.scrollTop = kaydirma
   if (seciliSatir && typeof seciliSatir.scrollIntoView === 'function') {
@@ -1722,7 +1749,10 @@ function ayarGruplari(saglayiciSecenekleri) {
             'HER KURULUM: benzerlik de aranmaz, her kutu oluşumu ve her dönüş ' +
             'sinyaldir.' },
         { yol: 'featureCfg.shapeWindowBars', ad: 'Şekil penceresi (bar)',
-          tip: 'sayi', adim: 8, min: 16, max: 512,
+          // adim 1: her tam sayi gecerli (features.sekilPenceresi 16..512'ye
+          // kirpar, kat sarti yok). 8'er adim ok tuslariyla 100'e gitmeyi
+          // engelliyordu; kullanici "duzenleyemiyorum" sandi.
+          tip: 'sayi', adim: 1, min: 16, max: 512,
           not: 'Geçmişte benzer kurulum aranırken şeklin KAÇ BARA baktığı. ' +
             'Varsayılan 32. Şekil her zaman 16 noktadır; pencere büyüdükçe her ' +
             'nokta daha çok barın ortalaması olur, yani daha geniş ama daha kaba ' +

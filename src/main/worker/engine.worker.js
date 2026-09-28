@@ -1722,7 +1722,7 @@ handlers['engine:touches'] = async function (payload) {
  */
 handlers['engine:export-csv'] = async function (payload) {
   const tf = requireTf(payload.tf)
-  const ne = payload.what === 'trades' ? 'trades' : 'events'
+  const ne = payload.what === 'trades' ? 'trades' : (payload.what === 'signals' ? 'signals' : 'events')
   const dosya = String(payload.filePath || '')
   if (!dosya) throw new Error('Dosya yolu verilmedi.')
   const csv = core('csv')
@@ -1733,7 +1733,53 @@ handlers['engine:export-csv'] = async function (payload) {
   let kullanilanAyar = null
   let cfgHash = null
 
-  if (ne === 'trades') {
+  if (ne === 'signals') {
+    // SINYAL LISTESI, tarih araligiyla (kullanici: kar/zarar karsilastirmasi
+    // disarida yapilacak). Plan alanlari duzlestirilir; komsu listesi
+    // (topMatches) CSV'ye sigmaz ve karsilastirmaya gerekmez.
+    const hepsi = await getSignals(tf, false)
+    const from = num(payload.from, 0)
+    const to = num(payload.to, MAX_TIME)
+    for (let i = 0; i < hepsi.length; i++) {
+      const sg = hepsi[i]
+      if (!sg) continue
+      const t = num(sg.time, 0)
+      if (t < from || t > to) continue
+      const pl = sg.plan || null
+      satirlar.push({
+        time: t,
+        direction: sg.direction || '',
+        kind: sg.kind || '',
+        sniper: sg.sniper ? 1 : 0,
+        price: num(sg.price, 0),
+        zoneId: num(sg.zoneId, 0),
+        zoneTop: num(sg.zoneTop, 0),
+        zoneBottom: num(sg.zoneBottom, 0),
+        zoneAgeBars: num(sg.zoneAgeBars, 0),
+        zoneFlow: num(sg.zoneFlow, 0),
+        atr: num(sg.atr, 0),
+        volRatio: num(sg.volRatio, 0),
+        score: num(sg.score, 0),
+        maxScore: num(sg.maxScore, 0),
+        similarCount: num(sg.similarCount, 0),
+        poolCount: num(sg.poolCount, 0),
+        confidence: num(sg.confidence, 0),
+        plan_entry: pl ? num(pl.entry, 0) : '',
+        plan_sl: pl ? num(pl.sl, 0) : '',
+        plan_tp: pl ? num(pl.tp, 0) : '',
+        plan_rr: pl ? num(pl.rr, 0) : '',
+        plan_result: pl ? String(pl.result || '') : '',
+        plan_resolvedTime: pl && Number.isFinite(pl.resolvedTime) ? pl.resolvedTime : '',
+        plan_resolvedTimeUtc: pl && Number.isFinite(pl.resolvedTime) ? csv.isoUtc(pl.resolvedTime) : '',
+        plan_bars: pl ? num(pl.bars, 0) : '',
+      })
+    }
+    const alanlar = satirlar.length ? Object.keys(satirlar[0]) : ['time']
+    sutunlar = csv.zamanSutunlari('time').concat(
+      alanlar.filter((k) => k !== 'time').map((k) => ({ key: k, header: k })))
+    const memMeta = await core('store/memstore').statMemory(paths.memoryPath(tf)).catch(() => null)
+    cfgHash = memMeta && memMeta.cfgHash ? memMeta.cfgHash : null
+  } else if (ne === 'trades') {
     if (!sonBacktest || sonBacktest.tf !== tf) {
       throw new Error('Önce bu zaman diliminde Test sekmesinden ölçüm çalıştırın.')
     }
@@ -1820,7 +1866,9 @@ handlers['engine:signals'] = async function (payload) {
   const all = await getSignals(tf, false)
   const from = num(payload.from, 0)
   const to = num(payload.to, MAX_TIME)
-  const limit = clampInt(payload.limit, 1, 20000, 2000)
+  // Ust sinir 60.000: arayuz artik listenin tamamini istiyor (parca parca
+  // cizer). 5m'de 19 bin kayit ~19 MB, tf basina bir kez.
+  const limit = clampInt(payload.limit, 1, 60000, 2000)
 
   const picked = []
   for (let i = 0; i < all.length; i++) {

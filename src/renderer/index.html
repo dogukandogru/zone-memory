@@ -192,6 +192,15 @@
                 <input type="checkbox" id="asOfToggle"><span>Sonrasını gizle</span>
               </label>
               <button type="button" class="btn mini" id="signalRefreshBtn">Yenile</button>
+              <!-- CSV: secili aralik (kar/zarar karsilastirmasi disarida yapilacak). -->
+              <select id="signalCsvRange" class="select mini" title="CSV için tarih aralığı">
+                <option value="7">Son 1 hafta</option>
+                <option value="30" selected>Son 1 ay</option>
+                <option value="90">Son 3 ay</option>
+                <option value="365">Son 1 yıl</option>
+                <option value="all">Tümü</option>
+              </select>
+              <button type="button" class="btn mini" id="signalCsvBtn" title="Seçili aralıktaki tüm sinyalleri CSV olarak kaydet">CSV</button>
             </span>
           </div>
           <!-- Kutu olusumu ve bolgeye donus AYRI LISTELER. Ikisi ayri
@@ -356,7 +365,7 @@ SAG PANEL
                         her birinde data-panel="..."; etkin olana .active
                         (.panel gizli, .panel.active gorunur)
 
-  Sinyaller: #signalFilter #asOfToggle #signalRefreshBtn
+  Sinyaller: #signalFilter #asOfToggle #signalRefreshBtn #signalCsvRange #signalCsvBtn
              #signalKindTabs #signalTabForm #signalTabTouch
              #signalCountForm #signalCountTouch
              #signalList #signalEmpty #signalDetail

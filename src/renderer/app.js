@@ -1271,10 +1271,10 @@ async function bolgeleriYukle(from, to) {
 
 /** Sinyalleri yukler, isaretleri ve paneli tazeler. */
 async function sinyalleriYukle() {
-  // LIMIT 1000: liste OLUSUM ve DOKUNUS sekmelerine bolunuyor, yani cekilen
-  // kayitlarin kabaca yarisi her sekmeye dusuyor. 500'de her sekmede ~250
-  // satir kaliyordu; panel zaten en fazla 500 satir ciziyor.
-  const ham = await cagirGuvenli('engine:signals', { tf: durum.tf, limit: 1000 }, 'Sinyaller alınamadı')
+  // TUMU YUKLENIR (kullanici: "18 bin sinyali de yukleyebilsin"). Isci en
+  // fazla 60.000 verir; 5m'de 19 bin kayit ~19 MB, bir kez cekilir. Panel
+  // satirlari parca parca cizer (renderSignals), arayuz kilitlenmez.
+  const ham = await cagirGuvenli('engine:signals', { tf: durum.tf, limit: 60000 }, 'Sinyaller alınamadı')
   if (ham === null) return
   // KUTU YASI SINIRI EKRANDA DA UYGULANIR. Tarama listeyi yazarken uyguluyor,
   // ama liste dosyasi eski olabilir (kural eklenmeden once yazilmis, ya da
@@ -1293,7 +1293,7 @@ async function sinyalleriYukle() {
     durum.planTazelendi = true
     await cagirGuvenli('engine:plan-refresh',
       { tf: durum.tf, cfgPatch: durum.ayarYamasiKayitli || null }, null)
-    const yeniden = await cagirGuvenli('engine:signals', { tf: durum.tf, limit: 1000 }, null)
+    const yeniden = await cagirGuvenli('engine:signals', { tf: durum.tf, limit: 60000 }, null)
     if (yeniden !== null) tumu = sinyalleriNormalle(yeniden)
   }
   const sinir = kutuYasiSiniri()
@@ -1794,8 +1794,8 @@ function canliAnahtariniIsaretle() {
  *
  * @param {'events'|'trades'} ne
  */
-async function csvDisaAktar(ne) {
-  const sonuc = await cagirGuvenli('export:csv', { tf: durum.tf, what: ne },
+async function csvDisaAktar(ne, ekstra) {
+  const sonuc = await cagirGuvenli('export:csv', Object.assign({ tf: durum.tf, what: ne }, ekstra || {}),
     'CSV yazılamadı')
   if (!sonuc || sonuc.cancelled) return
   bildir(formatNumber(sayi(sonuc.rows, 0), 0) + ' satır yazıldı: ' + String(sonuc.filePath))
@@ -2752,6 +2752,10 @@ async function ayarlariKaydet(yama) {
   } else {
     bildir('Ayarlar kaydedildi. Hafızayı etkileyen değişiklikler için "Geçmişi Tara" çalıştırın.')
   }
+  // Durum yazisi: "Kaydedilmemis degisiklik var" kaydettikten sonra da
+  // kaliyordu ve kullanici kaydedilmedi saniyordu.
+  const durumYazisi = el('settingsStatus')
+  if (durumYazisi) durumYazisi.textContent = 'Kaydedildi.'
   await ayarYamasiniYenile()
   ayarPaneliniCiz(true)
   saglayiciSecimleriniKur()
@@ -3211,6 +3215,22 @@ function dugmeleriBagla() {
 
   const hafizaCsv = el('memoryExportBtn')
   if (hafizaCsv) hafizaCsv.addEventListener('click', () => csvDisaAktar('events'))
+  // SINYAL CSV'SI: secili aralik (kullanici: "son 1 aylik, son 1 haftalik
+  // indirilebilsin, csv uzerinden kar zarar karsilastirmasi yapilacak").
+  const sinyalCsv = el('signalCsvBtn')
+  if (sinyalCsv) {
+    sinyalCsv.addEventListener('click', () => {
+      const sec = el('signalCsvRange')
+      const deger = sec && sec.value ? sec.value : '30'
+      const simdi = Math.floor(Date.now() / 1000)
+      const gun = deger === 'all' ? null : sayi(deger, 30)
+      csvDisaAktar('signals', {
+        from: gun ? simdi - gun * 86400 : undefined,
+        to: undefined,
+        rangeLabel: gun ? 'son' + gun + 'gun' : 'tumu',
+      })
+    })
+  }
 
   const iptal = el('cancelBtn')
   if (iptal) {

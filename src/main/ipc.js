@@ -188,17 +188,22 @@ async function dispatch(cmd, payload) {
     // CSV DOKUMU: dosya secimi ANA SURECTE yapilir (renderer'in dosya
     // sistemine erisimi yok) ve yol isciye iletilir.
     case 'export:csv': {
-      const ne = p.what === 'trades' ? 'trades' : 'events'
+      const ne = p.what === 'trades' ? 'trades' : (p.what === 'signals' ? 'signals' : 'events')
       const tf = p.tf ? String(p.tf) : ''
-      const ad = 'XAUUSD_' + tf + (ne === 'trades' ? '_islemler' : '_olaylar') + '.csv'
+      const aralik = ne === 'signals' && p.rangeLabel ? '_' + String(p.rangeLabel).replace(/[^a-z0-9]/gi, '') : ''
+      const ad = 'XAUUSD_' + tf +
+        (ne === 'trades' ? '_islemler' : (ne === 'signals' ? '_sinyaller' + aralik : '_olaylar')) + '.csv'
       const secim = await dialog.showSaveDialog(mainWindow || undefined, {
-        title: ne === 'trades' ? 'İşlem dökümünü kaydet' : 'Hafıza olaylarını kaydet',
+        title: ne === 'trades' ? 'İşlem dökümünü kaydet'
+          : (ne === 'signals' ? 'Sinyal listesini kaydet' : 'Hafıza olaylarını kaydet'),
         defaultPath: ad,
         filters: [{ name: 'CSV', extensions: ['csv'] }],
       })
       if (secim.canceled || !secim.filePath) return { cancelled: true }
       return await engine.call('engine:export-csv', {
         tf: tf, what: ne, filePath: secim.filePath,
+        from: Number.isFinite(p.from) ? p.from : undefined,
+        to: Number.isFinite(p.to) ? p.to : undefined,
       })
     }
 
