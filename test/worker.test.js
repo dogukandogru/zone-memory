@@ -794,40 +794,51 @@ test('engine:compare: bulunamayan kayitta ANLASILIR hata verir', async () => {
 // hic tetiklenmedi ve kullanici eski hafizayla bakmaya devam etti. Hafiza
 // artik hesap imzasini tasir, data:status uyumu bildirir, arayuz
 // uyumsuzlukta yeniden tarar.
-// KILITLENEN OLAY: guven yuzdesi benzer kayit SAYISININ siralamasiydi; sayi
-// gecmis buyudukce buyudugu icin yeni sinyaller hep %90+ cikiyordu (musteri:
-// "neredeyse hepsi %99"). Artik havuz PAYI siralanir. Eski bicim esik dosyasi
-// uyumsuz sayilir ki arayuz o dilimi bir kez yeniden tarasin.
-test('guven olcegi: pay tabanli esik dosyasi, eski bicim uyumsuz sayilir', async () => {
+// KILITLENEN OLAY: guven yuzdesi once benzer kayit SAYISININ, sonra havuz
+// PAYININ siralamasiydi; ikisinin de TP ile korelasyonu sifirdi (musteri:
+// "neredeyse hepsi %99"). Artik "en benzer 10 kurulumun kaci TP oldu"
+// (learn/guven.js). Olcek dosyasi olay plan sonuclarini tasir; eski bicim
+// dosya uyumsuz sayilir ki arayuz o dilimi bir kez yeniden tarasin.
+test('guven: komsularin TP oranindan hesaplanir, olcek dosyasi eski bicimi ayirir', async () => {
   await isciyle(async (cagir, dataDir) => {
     await binstore.writeSeries(pathsCore.candlePath(TF, undefined, dataDir), taramaSerisi())
     await cagir('engine:scan', { tf: TF, params: INDIKATOR_AYARI })
     const yol = pathsCore.memoryPath(TF, undefined, dataDir) + '.guven.json'
-    assert.ok(fs.existsSync(yol), 'tarama guven esik dosyasini yazmali')
-    const esik = JSON.parse(fs.readFileSync(yol, 'utf8'))
-    assert.strictEqual(esik.olcek, 'pay', 'olcek alani pay olmali')
-    for (const tur of ['form', 'touch']) {
-      assert.strictEqual(esik[tur].length, 101)
-      for (let q = 0; q <= 100; q++) {
-        assert.ok(esik[tur][q] >= 0 && esik[tur][q] <= 1, tur + ' esikleri 0..1 pay olmali')
-        if (q > 0) assert.ok(esik[tur][q] >= esik[tur][q - 1], tur + ' esikleri azalmamali')
+    assert.ok(fs.existsSync(yol), 'tarama guven olcek dosyasini yazmali')
+    const gv = JSON.parse(fs.readFileSync(yol, 'utf8'))
+    assert.strictEqual(gv.olcek, 'tp', 'olcek alani tp olmali')
+    assert.ok(gv.taban.form >= 0 && gv.taban.form <= 1 && gv.taban.touch >= 0 && gv.taban.touch <= 1)
+    assert.ok(gv.olaylar && typeof gv.olaylar === 'object', 'olay plan sonuclari dosyada olmali')
+    const sinyaller = (await cagir('engine:signals', { tf: TF, limit: 1000 })).signals
+      .filter((x) => x.mode === 'benzerlik')
+    for (const x of sinyaller) {
+      assert.ok(x.confidence >= 0 && x.confidence <= 100, 'guven 0..100 olmali')
+      assert.ok(Array.isArray(x.confidenceMatches) && x.confidenceMatches.length <= 10)
+      assert.ok(x.confidenceTp <= x.confidenceN && x.confidenceN <= x.confidenceMatches.length)
+      // Nedensellik: sayilan her komsunun sonucu sinyalden ONCE belli olmali.
+      for (const m of x.confidenceMatches) {
+        const k = gv.olaylar[String(m.id)]
+        if (!k || (k[0] !== 'tp' && k[0] !== 'sl')) continue
+        assert.ok(m.time < x.time, 'komsu sinyalden once olmali')
       }
-    }
-    const sinyaller = await cagir('engine:signals', { tf: TF, limit: 1000 })
-    for (const s of sinyaller.signals) {
-      if (s.mode !== 'benzerlik') continue
-      assert.ok(s.confidence >= 0 && s.confidence <= 100, 'guven 0..100 olmali')
     }
     const guncel = await cagir('data:status', {})
     assert.strictEqual(guncel.byTf[TF].confidenceScaleCurrent, true)
 
-    // Eski bicim: sayilar siralanmis, olcek alani yok.
-    fs.writeFileSync(yol, JSON.stringify({
-      form: esik.form.map((_x, i) => i * 10), touch: esik.touch.map((_x, i) => i * 3),
-    }))
+    // TP MESAFESI DEGISINCE GUVEN DE DEGISIR: TP 20 ATR'de hicbir komsu
+    // TP'ye ulasamaz, sayilan komsulardan TP sayisi sifira iner.
+    await cagir('engine:plan-refresh', { tf: TF, cfgPatch: { signalCfg: { tpAtr: 20 } } })
+    const sonra = (await cagir('engine:signals', { tf: TF, limit: 1000 })).signals
+      .filter((x) => x.mode === 'benzerlik')
+    for (const x of sonra) assert.strictEqual(x.confidenceTp, 0, 'TP 20 ATR ile komsu TP sayisi sifir olmali')
+    const gv2 = JSON.parse(fs.readFileSync(yol, 'utf8'))
+    assert.strictEqual(gv2.planCfg.tpAtr, 20, 'olcek dosyasi yeni plan ayarini tasimali')
+
+    // Eski bicim (pay siralanmis): olcek alani farkli, uyumsuz sayilir.
+    fs.writeFileSync(yol, JSON.stringify({ olcek: 'pay', form: [], touch: [] }))
     const eski = await cagir('data:status', {})
     assert.strictEqual(eski.byTf[TF].confidenceScaleCurrent, false,
-      'eski bicim esik dosyasi uyumsuz sayilmali')
+      'eski bicim olcek dosyasi uyumsuz sayilmali')
   })
 })
 

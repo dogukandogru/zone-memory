@@ -24,6 +24,7 @@
  */
 
 const https = require('https')
+const { guvenMetni } = require('../core/learn/guven')
 
 /** @type {((message:string)=>void)|null} */
 let logla = null
@@ -67,8 +68,9 @@ function metinKur(veri) {
   if (Number.isFinite(Number(s.zoneBottom)) && Number.isFinite(Number(s.zoneTop))) {
     satirlar.push('Kutu ' + fiyat(s.zoneBottom) + ' - ' + fiyat(s.zoneTop))
   }
-  if (Number.isFinite(Number(s.confidence))) {
-    satirlar.push('Güven %' + Math.round(Number(s.confidence)) +
+  const guven = guvenMetni(s)
+  if (guven) {
+    satirlar.push(guven +
       (Number.isFinite(Number(s.similarCount)) ? ', ' + Math.round(Number(s.similarCount)) + ' benzer kurulum' : ''))
   }
   if (s.plan && Number.isFinite(Number(s.plan.tp)) && Number.isFinite(Number(s.plan.sl))) {

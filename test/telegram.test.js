@@ -26,7 +26,7 @@ test('mesaj metni: yon, tur, dilim, zaman, fiyat, kutu, guven, TP/SL, skor; em-d
   assert.match(m, /\d{2}\.\d{2}\.\d{4} \d{2}:\d{2} UTC/)
   assert.match(m, /Fiyat 4265\.22/)
   assert.match(m, /Kutu 4260\.10 - 4262\.40/)
-  assert.match(m, /Güven %99, 4098 benzer kurulum/)
+  assert.match(m, /TP şansı %99, 4098 benzer kurulum/)
   assert.match(m, /TP 4270\.00 · SL 4260\.00/)
   assert.match(m, /skoru 2\/4/)
   assert.ok(!m.includes(String.fromCharCode(0x2014)))

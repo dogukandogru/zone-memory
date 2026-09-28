@@ -1039,14 +1039,19 @@ function hesapImzasi() {
  * @param {object|null} s seri (tam ya da kuyruk penceresi)
  * @param {object} uygulanan presets.resolveCfg ciktisi
  */
-function planlariUygula(liste, s, uygulanan) {
+function planCfgCoz(uygulanan) {
   const planMod = core('learn/plan')
   const sc = uygulanan && uygulanan.signalCfg ? uygulanan.signalCfg : {}
-  const cfg = {
+  return {
     slAtr: num(sc.slAtr, planMod.DEFAULT_PLAN_CFG.slAtr),
     tpAtr: num(sc.tpAtr, planMod.DEFAULT_PLAN_CFG.tpAtr),
     planHorizonBars: num(sc.planHorizonBars, planMod.DEFAULT_PLAN_CFG.planHorizonBars),
   }
+}
+
+function planlariUygula(liste, s, uygulanan) {
+  const planMod = core('learn/plan')
+  const cfg = planCfgCoz(uygulanan)
   let acik = 0
   for (let i = 0; i < liste.length; i++) {
     if (!liste[i]) continue
@@ -1445,41 +1450,8 @@ handlers['engine:scan'] = async function (payload, ctx) {
     const enAzBenzer = Math.max(1, Math.round(num(uygulanan.signalCfg.minMatches, 5)))
     const enAzYakinlik = num(uygulanan.signalCfg.minSimilarity, 0.8)
 
-    // GUVEN OLCEGI: HAVUZ PAYININ TUR ICINDEKI YUZDELIK DILIMI.
-    //
-    // Once benzer kayit SAYISI siralaniyordu. Hata: sayi yalnizca sinyalden
-    // ONCEKI olaylar arasinda aranir (gelecek bilinemez), yani gecmis
-    // buyudukce kendiliginden buyur. 2026'daki sinyalin arkasinda 20 yil,
-    // 2007'dekinin 1 yil var; yeni sinyaller sirf bu yuzden olcegin tepesine
-    // oturuyordu. Olculdu (5m, yila gore ortanca guven): 2010 %28, 2018 %73,
-    // 2026 %92; musteri "neredeyse hepsi %99" dedi. Simdi PAY siralanir: o
-    // ana kadarki havuzun yuzde kaci bu yapiya benziyor. Ayni veride 2026
-    // ortancasi %42-49'a iniyor, son sinyaller 1 ile 97 arasina dagiliyor.
-    //
-    // Tur icinde: turlerin paylari cok farkli (5m: olusumda havuzun %65'i,
-    // dokunusta %43'u benzer sayiliyor). Tek olcek olsaydi dokunus hep dusuk
-    // gorunurdu, oysa KENDI turu icinde yuksek olabilir. "%90" demek, bu
-    // kurulumun payi kendi turundeki kurulumlarin %90'inden buyuk demektir.
-    const kovaPaylari = { form: [], touch: [] }
-    for (let i = 0; i < sirali.length; i++) {
-      const e = sirali[i]
-      if (!e) continue
-      kovaPaylari[e.kind === 'form' ? 'form' : 'touch']
-        .push(guvenPayi(cache.benzerSayi[i], cache.havuzSayi[i]))
-    }
-    // `olcek` alani: eski bicim (sayi siralanmis) dosyalar bununla ayrilir.
-    const esikler = { olcek: GUVEN_OLCEGI }
-    for (const tur of ['form', 'touch']) {
-      const a = kovaPaylari[tur]
-      a.sort((x, y) => x - y)
-      // 101 kirilim noktasi: %0'dan %100'e. Canli akis da bunlari kullanir.
-      const nokta = new Array(101)
-      for (let q = 0; q <= 100; q++) {
-        nokta[q] = a.length ? a[Math.min(a.length - 1, Math.floor((a.length - 1) * q / 100))] : 0
-      }
-      esikler[tur] = nokta
-    }
-    guvenEsikleriYaz(tf, esikler)
+    // GUVEN: "bu yapi gecmiste geldiginde kacinda TP oldu" (learn/guven.js).
+    // Planlar kurulduktan sonra hesaplanir; bkz. asagida guvenleriHesapla.
 
     ctx.progress(96, 'Sinyaller yazılıyor')
     const liste = []
@@ -1487,13 +1459,19 @@ handlers['engine:scan'] = async function (payload, ctx) {
       const e = sirali[i]
       if (!e) continue
       const komsular = []
+      // Guven icin en benzer GUVEN_KOMSU kurulum, ESIK GOZETMEKSIZIN: olcum
+      // boyle yapildi (en yakin 10), esikle daraltmak sayiyi degistirir.
+      const guvenKomsulari = []
       for (let j = 0; j < k; j++) {
         const ix = cache.idx[i * k + j]
         if (ix < 0) continue
         const benzerlik = cache.sim[i * k + j]
-        if (!(benzerlik >= enAzYakinlik)) continue
         const komsu = sirali[ix]
         if (!komsu) continue
+        if (guvenKomsulari.length < guvenMod.GUVEN_KOMSU) {
+          guvenKomsulari.push({ id: num(komsu.id, -1), time: num(komsu.time, 0) })
+        }
+        if (!(benzerlik >= enAzYakinlik)) continue
         komsular.push({ id: num(komsu.id, -1), time: num(komsu.time, 0), similarity: benzerlik })
       }
       // TUM benzer kayitlarin sayisi; `k` ile sinirli DEGIL.
@@ -1506,8 +1484,7 @@ handlers['engine:scan'] = async function (payload, ctx) {
       sig.mode = 'benzerlik'
       sig.similarCount = benzerToplam
       sig.poolCount = cache.havuzSayi[i]
-      sig.confidence = guvenYuzdesi(esikler[e.kind === 'form' ? 'form' : 'touch'],
-        guvenPayi(benzerToplam, cache.havuzSayi[i]))
+      sig.confidenceMatches = guvenKomsulari
       // Ekranda gosterilen en benzer birkaci (k ile sinirli olan kisim).
       sig.matchCount = komsular.length
       sig.avgSimilarity = komsular.length
@@ -1517,6 +1494,8 @@ handlers['engine:scan'] = async function (payload, ctx) {
       liste.push(sig)
     }
     planlariUygula(liste, s, uygulanan)
+    // Guven, komsularin planina bakar; planlar kurulduktan sonra gelir.
+    guvenleriHesapla(tf, liste, sirali, s, uygulanan)
     await writeJsonAtomic(paths.signalsPath(tf), liste)
     signalCache = { tf: tf, signals: liste }
     log(liste.length + ' sinyal yazıldı (geçmişte en az ' + enAzBenzer +
@@ -1776,6 +1755,8 @@ handlers['engine:export-csv'] = async function (payload) {
         similarCount: num(sg.similarCount, 0),
         poolCount: num(sg.poolCount, 0),
         confidence: num(sg.confidence, 0),
+        confidenceTp: num(sg.confidenceTp, 0),
+        confidenceN: num(sg.confidenceN, 0),
         plan_entry: pl ? num(pl.entry, 0) : '',
         plan_sl: pl ? num(pl.sl, 0) : '',
         plan_tp: pl ? num(pl.tp, 0) : '',
@@ -1905,6 +1886,15 @@ handlers['engine:plan-refresh'] = async function (payload, ctx) {
   const liste = (await getSignals(tf, true)).slice()
   const uygulanan = core('learn/presets').resolveCfg(tf, payload.cfgPatch || cfgPatchGeriUyum(payload), null)
   const acik = planlariUygula(liste, s, uygulanan)
+  // GUVEN DE DEGISIR: komsularin TP/SL sonucu yeni mesafeye gore baska.
+  // Hafiza okunamiyorsa (eski surum) guven eski kalir; yeniden tarama
+  // zaten istenir.
+  try {
+    const mem = await getMemory(tf, false)
+    if (mem && Array.isArray(mem.events)) guvenleriHesapla(tf, liste, mem.events, s, uygulanan)
+  } catch (err) {
+    log('Güven yenilenemedi: ' + (err && err.message ? err.message : String(err)))
+  }
   await writeJsonAtomic(paths.signalsPath(tf), liste)
   signalCache = { tf: tf, signals: liste }
   ctx.progress(100, 'Planlar hazır')
@@ -2828,10 +2818,18 @@ handlers['engine:live-tick'] = async function (payload) {
               sig.poolCount = Number.isFinite(adaylarListesi.poolCount)
                 ? adaylarListesi.poolCount
                 : 0
-              const esikler = canliGuvenEsikleri || (canliGuvenEsikleri = guvenEsikleriOku(tf) || {})
-              sig.confidence = guvenYuzdesi(
-                esikler[cand.kind === 'form' ? 'form' : 'touch'],
-                guvenPayi(toplam, sig.poolCount))
+              // Guven: komsularin plan sonuclari TARAMANIN (ya da plan
+              // yenilemenin) yazdigi dosyadan okunur; canlida seri uzerinden
+              // yeniden cozulmez, cozulseydi ekrandaki liste ile tutmazdi.
+              const gv = canliGuvenEsikleri || (canliGuvenEsikleri = guvenEsikleriOku(tf) || {})
+              sig.confidenceMatches = adaylarListesi.slice(0, guvenMod.GUVEN_KOMSU).map((m) => ({
+                id: num(m.event && m.event.id, -1),
+                time: num(m.event && m.event.time, 0),
+              }))
+              Object.assign(sig, guvenMod.guvenHesapla(
+                sig.confidenceMatches.map((m) => kayitliOlayPlani(gv, m.id)),
+                num(cand.time, fetchedAt),
+                gv.taban ? gv.taban[cand.kind === 'form' ? 'form' : 'touch'] : undefined))
               const ilk = adaylarListesi.slice(0, 6).map((m) => ({
                 id: num(m.event && m.event.id, -1),
                 time: num(m.event && m.event.time, 0),
@@ -3101,12 +3099,12 @@ handlers['engine:live-log'] = async function (payload) {
  * @param {Array} trades
  * @param {{events:Array}} memory
  */
-/** Guven esiklerinin dosya yolu (tur basina 101 kirilim noktasi). */
+/** Guven olcegi dosyasinin yolu (taban oranlar + olay plan sonuclari). */
 function guvenEsikYolu(tf) {
   return paths.memoryPath(tf) + '.guven.json'
 }
 
-/** Esikleri diske yazar; canli akis da ayni olcegi kullanmali. */
+/** Olcegi diske yazar; canli akis da ayni olcegi kullanmali. */
 function guvenEsikleriYaz(tf, esikler) {
   try {
     fs.writeFileSync(guvenEsikYolu(tf), JSON.stringify(esikler))
@@ -3115,21 +3113,21 @@ function guvenEsikleriYaz(tf, esikler) {
   }
 }
 
-/** Guven olcegi bicimi: havuz PAYI siralanir (bkz. taramadaki aciklama). */
-const GUVEN_OLCEGI = 'pay'
+const guvenMod = core('learn/guven')
 
 /**
- * Esikleri diskten okur; yoksa ya da ESKI BICIMDEYSE null.
+ * Esik dosyasini okur; yoksa ya da ESKI BICIMDEYSE null.
  *
- * Eski bicim benzer SAYISINI siraliyordu; pay ile okunsaydi her sinyal %0
- * cikardi. null donunce canli sinyal %0 alir ama data:status uyumsuzlugu
- * bildirir (confidenceScaleCurrent false) ve arayuz o dilimi bir kez
- * yeniden tarar; komsu onbellegi korundugu icin bu saniyeler surer.
+ * Dosya artik guven olcegini TASIR: taban oranlar ve her hafiza olayinin
+ * plan sonucu (id -> [sonuc, cozum zamani]). Eski bicimler (benzer sayisi ya
+ * da pay siralanmis) `olcek` alani ile ayrilir. null donunce data:status
+ * uyumsuzlugu bildirir (confidenceScaleCurrent false) ve arayuz o dilimi bir
+ * kez yeniden tarar; komsu onbellegi korundugu icin bu saniyeler surer.
  */
 function guvenEsikleriOku(tf) {
   try {
     const e = JSON.parse(fs.readFileSync(guvenEsikYolu(tf), 'utf8'))
-    return e && e.olcek === GUVEN_OLCEGI ? e : null
+    return e && e.olcek === guvenMod.GUVEN_OLCEGI ? e : null
   } catch (err) {
     return null
   }
@@ -3141,29 +3139,64 @@ async function guvenOlcegiGuncel(tf) {
   return guvenEsikleriOku(tf) !== null
 }
 
-/**
- * Benzer kayitlarin havuz icindeki payi (0..1). Havuz bossa 0.
- * @param {number} benzer
- * @param {number} havuz
- */
-function guvenPayi(benzer, havuz) {
-  const h = num(havuz, 0)
-  return h > 0 ? num(benzer, 0) / h : 0
+/** Dosyadaki olay plani kaydini plan nesnesine cevirir; yoksa null. */
+function kayitliOlayPlani(gv, id) {
+  const kayit = gv && gv.olaylar ? gv.olaylar[String(id)] : null
+  if (!Array.isArray(kayit)) return null
+  return { result: kayit[0], resolvedTime: kayit[1] }
 }
 
 /**
- * Havuz payini, kendi turu icindeki YUZDELIK DILIME cevirir.
+ * Sinyallerin guvenini komsularin plan sonucundan hesaplar ve olcek
+ * dosyasini yazar. Tarama ve plan yenileme AYNI yolu kullanir.
  *
- * @param {number[]|null} nokta 101 kirilim noktasi (%0..%100), pay olarak
- * @param {number} pay Bu kurulumun benzer / havuz payi
- * @returns {number} 0..100
+ * Her hafiza olayinin plani kullanicinin TP/SL mesafesiyle cozulur (34 bin
+ * olayda bir saniyenin altinda); komsu olmayan olaylar da dosyaya girer,
+ * cunku canlida hangi olayin komsu cikacagi onceden bilinmez.
+ *
+ * @param {string} tf
+ * @param {Array} liste Sinyaller (planlari kurulmus olmali)
+ * @param {Array} olaylar Hafiza olaylari
+ * @param {Object} s Seri
+ * @param {Object} uygulanan Cozulmus ayar
  */
-function guvenYuzdesi(nokta, pay) {
-  if (!Array.isArray(nokta) || nokta.length !== 101) return 0
-  // Ilk gecilen kirilim noktasi dilimi verir.
-  let q = 0
-  while (q < 100 && pay >= nokta[q + 1]) q++
-  return q
+function guvenleriHesapla(tf, liste, olaylar, s, uygulanan) {
+  const planMod = core('learn/plan')
+  const cfg = planCfgCoz(uygulanan)
+  const olayPlanlari = {}
+  const planBul = (id) => {
+    const k = kayitliOlayPlani({ olaylar: olayPlanlari }, id)
+    return k
+  }
+  for (let i = 0; i < olaylar.length; i++) {
+    const e = olaylar[i]
+    if (!e) continue
+    const taslak = {
+      price: num(e.price, 0),
+      atr: num(e.atr, 0),
+      direction: e.direction || (e.isSupport ? 'BUY' : 'SELL'),
+      time: num(e.time, 0),
+    }
+    const p = planMod.sinyaliPlanla(s, taslak, cfg)
+    if (p) olayPlanlari[String(num(e.id, -1))] = [p.result, p.resolvedTime]
+  }
+  const taban = guvenMod.tabanOranlari(liste)
+  for (let i = 0; i < liste.length; i++) {
+    const sig = liste[i]
+    if (!sig || !Array.isArray(sig.confidenceMatches)) continue
+    Object.assign(sig, guvenMod.guvenHesapla(
+      sig.confidenceMatches.map((m) => planBul(m.id)),
+      num(sig.time, 0),
+      taban[sig.kind === 'form' ? 'form' : 'touch']))
+  }
+  guvenEsikleriYaz(tf, {
+    olcek: guvenMod.GUVEN_OLCEGI,
+    komsu: guvenMod.GUVEN_KOMSU,
+    onsel: guvenMod.GUVEN_ONSEL,
+    planCfg: cfg,
+    taban: taban,
+    olaylar: olayPlanlari,
+  })
 }
 
 /**

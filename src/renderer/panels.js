@@ -862,19 +862,27 @@ export function renderSignals(el, signals, opts) {
     const sag = h('span', 'row-side')
     const sonuc = sonucBilgisi(s)
     if (sade) {
-      // GUVEN: benzer kurulum PAYININ kendi turu icindeki yuzdelik dilimi.
-      // Sayi degil pay: sayi gecmis buyudukce buyudugu icin yeni sinyaller
-      // hep %90+ cikiyordu (bkz. engine.worker.js, guven olcegi).
+      // GUVEN: "bu yapi gecmiste geldiginde kacinda TP oldu". En benzer 10
+      // kurulumun, kullanicinin TP/SL mesafesiyle sonucu; taban orana dogru
+      // hafifce cekilmis (bkz. core/learn/guven.js). Onceki tanimlar
+      // (yayginlik siralamasi) TP ile iliskisizdi, kullanici bunu istedi.
       if (Number.isFinite(Number(s.confidence))) {
         const g = Math.round(Number(s.confidence))
-        const kutu = h('span', g >= 75 ? 'up' : (g <= 25 ? 'down' : null), '%' + g)
-        const havuz = sayi(s.poolCount, 0)
-        const pay = havuz > 0 ? Math.round(100 * sayi(s.similarCount, 0) / havuz) : null
-        kutu.title = 'Geçmişte ' + tam(s.similarCount) + ' benzer kurulum bulundu' +
-          (pay !== null ? ' (o ana kadarki ' + tam(havuz) + ' kaydın %' + pay + "'i)" : '') +
-          '. Yüzde, bu payın kendi türü içindeki sıralamasıdır: ' +
-          'aynı türdeki kurulumların %' + g + "'inden daha büyük bir pay."
+        const kutu = h('span', g >= 55 ? 'up' : (g <= 40 ? 'down' : null), '%' + g)
+        const n = sayi(s.confidenceN, 0)
+        const tpSayi = sayi(s.confidenceTp, 0)
+        const taban = Number.isFinite(Number(s.confidenceBase)) ? Math.round(100 * Number(s.confidenceBase)) : null
+        kutu.title = 'TP şansı: bu yapıya en çok benzeyen ' +
+          (n > 0
+            ? tam(n) + ' geçmiş kurulumun ' + tam(tpSayi) + ' tanesi TP ile bitmiş'
+            : 'geçmiş kurulumlardan hiçbiri sonuçlanmamış, yüzde türün taban oranı') +
+          ' (senin TP/SL mesafenle, yalnızca sinyal anında sonucu belli olanlar). ' +
+          (taban !== null ? 'Oran, türün taban oranına (%' + taban + ') doğru hafifçe çekilir; ' : '') +
+          'geçmişte ' + tam(s.similarCount) + ' benzer kurulum var.'
         sag.appendChild(kutu)
+        if (n > 0) {
+          sag.appendChild(h('span', 'muted', ' ' + tam(tpSayi) + '/' + tam(n)))
+        }
         // INDIKATOR SKORU yuzdenin yanina (kullanici istedi): olayin oldugu
         // barda kac kosulun tuttugu. Bilgi amacli, sinyal kararina girmez.
         const enCokSkor = sayi(s.maxScore, 0)
@@ -995,9 +1003,12 @@ export function renderSignalDetail(el, signal, opts) {
     const enCok = sayi(signal.maxScore, 0)
     const guvenVar = Number.isFinite(Number(signal.confidence))
     const g = guvenVar ? Math.round(Number(signal.confidence)) : 0
+    const guvenN = sayi(signal.confidenceN, 0)
+    const guvenTp = sayi(signal.confidenceTp, 0)
     el.appendChild(statIzgara([
       stat('Benzer kurulum', guvenVar ? tam(signal.similarCount) : '-'),
-      stat('Güven', guvenVar ? '%' + g : '-', g >= 75 ? 'up' : (g <= 25 ? 'down' : null)),
+      stat('TP şansı', guvenVar ? '%' + g + (guvenN > 0 ? ' (' + tam(guvenTp) + '/' + tam(guvenN) + ')' : '') : '-',
+        g >= 55 ? 'up' : (g <= 40 ? 'down' : null)),
       stat('Kutu', kutuYuksekligi(signal).replace('Kutu ', '')),
       stat('İndikatör skoru', enCok > 0 ? tam(signal.score) + '/' + tam(enCok) : '-'),
     ]))
@@ -1005,14 +1016,15 @@ export function renderSignalDetail(el, signal, opts) {
       // NE OLDUGUNU SOYLER, UYARMAZ. Kullanici uyari metnini istemedi
       // ("uyarıyı yazmana gerek yok"); yuzdenin tanimi kaliyor, cunku tanim
       // olmadan sayinin neyi olctugu anlasilmaz.
+      const taban = Number.isFinite(Number(signal.confidenceBase))
+        ? Math.round(100 * Number(signal.confidenceBase)) : null
       el.appendChild(h('div', 'small muted',
-        'Güven, benzer kurulum PAYININ kendi türü içindeki sıralamasıdır: o ana ' +
-        'kadarki kayıtların yüzde kaçı bu yapıya benziyor' +
-        (sayi(signal.poolCount, 0) > 0
-          ? ' (' + tam(signal.similarCount) + ' / ' + tam(signal.poolCount) + ' kayıt, %' +
-            Math.round(100 * sayi(signal.similarCount, 0) / sayi(signal.poolCount, 1)) + ')'
-          : '') +
-        '. Bu pay, aynı türdeki kurulumların %' + g + "'inden daha büyük."))
+        'TP şansı: bu yapıya en çok benzeyen ' + (guvenN > 0 ? tam(guvenN) + ' geçmiş kurulumun ' +
+          tam(guvenTp) + ' tanesi senin TP/SL mesafenle TP ile bitmiş' :
+          'geçmiş kurulumların hiçbirinin sonucu sinyal anında belli değil') +
+        '. Yalnızca sinyal anında sonucu belli olanlar sayılır' +
+        (taban !== null ? ', oran türün taban oranına (%' + taban + ') doğru hafifçe çekilir' : '') +
+        '. TP/SL mesafesini değiştirirsen bu yüzde de değişir.'))
     }
     el.appendChild(kv('Bölge aralığı',
       formatPrice(signal.zoneBottom) + ' - ' + formatPrice(signal.zoneTop)))

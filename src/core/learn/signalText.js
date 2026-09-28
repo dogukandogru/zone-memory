@@ -14,6 +14,8 @@
  * hafiza tabani ne. Bu uc sayi birlikte okunmadan oran yaniltici.
  */
 
+const { guvenMetni } = require('./guven')
+
 /** Sayi degilse veya sonlu degilse varsayilani dondurur. */
 function num (v, def) {
   return typeof v === 'number' && isFinite(v) ? v : def
@@ -55,9 +57,10 @@ function sinyalOzeti (signal, opts) {
   // bicimde var.
   const benzer = num(signal.similarCount, NaN)
   if (isFinite(benzer)) {
+    // Once TP sansi: "TP şansı %56 (6/10)"; sonra kac benzer kurulum.
+    const guven = guvenMetni(signal)
+    if (guven) parcalar.push(guven)
     parcalar.push(Math.round(benzer) + ' benzer kurulum')
-    const guven = num(signal.confidence, NaN)
-    if (isFinite(guven)) parcalar.push('güven %' + Math.round(guven))
     return parcalar.join(', ')
   }
 
