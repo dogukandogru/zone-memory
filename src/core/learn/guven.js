@@ -6,31 +6,38 @@
  * Sinyalin en benzer GUVEN_KOMSU gecmis kurulumu alinir (sekil + baglam,
  * ayni tur ve yon, yalnizca sinyalden onceki olaylar). Her birinin
  * kullanicinin TP/SL mesafesiyle nereye gittigi bakilir; yalnizca SINYAL
- * ANINDA sonucu belli olanlar sayilir (gelecek bilgisi karismaz). Oran,
- * turun taban oranina dogru GUVEN_ONSEL sanal gozlemle cekilir: 3 ornekten
- * %100 cikmasin.
+ * ANINDA sonucu belli olanlar sayilir (gelecek bilgisi karismaz). Her komsu
+ * BENZERLIGIYLE agirlik alir: w = exp((benzerlik - 1) / GUVEN_TAU). Yakin
+ * olan cok, uzak olan az sayilir; 50. komsudan sonrasi olcumde hicbir sey
+ * eklemedigi icin oraya kadar bakilir. Oran, turun taban oranina dogru
+ * GUVEN_ONSEL sanal gozlemle cekilir (etkin orneklem uzerinden): birkac
+ * ornekten %100 cikmasin.
  *
- * NEDEN BU TANIM. Onceki iki tanim olculdu ve TP ile korelasyonu SIFIRDI:
- *   - benzer kurulum sayisinin tur icindeki siralamasi (r = -0,025), gecmis
- *     buyudukce sayi buyudugu icin yeni sinyaller hep %90+ cikiyordu;
- *   - havuz payinin siralamasi (r = -0,025 ile -0,049).
- * En benzer 10 kurulumun TP orani ise 5m'de r = 0,085 (z 2,5): oran %65'in
- * ustundeyken sinyallerin %57'si, %35'in altindayken %40'i TP olmus. Zayif
- * ama sifirdan farkli; 15m'de dogrulanmadi (341 sinyal, r = 0,044).
- * Kullanici karari: "daha once bu sinyalin geldigi ve TP oldugu sinyalleri
- * alsak ve o sekilde bir yuzde uretsek". Yayginlik yuzdesi kaldirildi;
- * karistirmak bilgiyi yariya indiriyordu (r 0,085 -> 0,043).
- *
- * ONSEL = 10, KOMSU = 10: ustteki dilim (7/10 ve ustu) gercekte %57 TP
- * olmustu; a = 10 ile 7/10 -> %59, 10/10 -> %73 gosterilir, yani kalibre.
- * a = 5 olsaydi 10/10 -> %82, gercekten iyimser.
+ * NEDEN BU TANIM. Onceki tanimlar olculdu (5m/15m, son 1 yil, gercek TP ile
+ * korelasyon r):
+ *   - benzer kurulum sayisinin tur icindeki siralamasi: -0,025 / -0,049;
+ *     gecmis buyudukce sayi buyudugu icin yeni sinyaller hep %90+ cikiyordu;
+ *   - havuz payinin siralamasi: ayni, sifir;
+ *   - en benzer 10, esit agirlik: 0,085 / 0,044;
+ *   - esigi gecen HEPSI, esit agirlik: 0,036 / 0,102 (5m'de havuzun %65'i
+ *     "benzer" sayildigi icin taban orana cokuyor);
+ *   - en benzer 50, exp(0,02) agirlik: 0,078 / 0,121  <- SECILEN;
+ *     100 ve 200 komsu ya da hepsi ayni ya da daha dusuk (0,074/0,122,
+ *     0,067/0,120, 0,066/0,115).
+ * Kullanici istegi: "en cok benzeyen 10 yerine benzeme oranina gore
+ * agirlikli katsayi, hepsini katalim". Uzaktakilerin agirligi sifira yakin
+ * oldugu icin 50 komsu "hepsi" ile ayni sonucu verir ve TP/SL mesafesi
+ * degisince saniyeler icinde yeniden hesaplanabilir (hepsi icin komsu
+ * aramasi bastan gerekirdi, dakikalar).
  */
 
-/** Esik dosyasindaki olcek adi; eski bicimler (sayi, pay) bununla ayrilir. */
-const GUVEN_OLCEGI = 'tp'
-/** En benzer kac kurulum sayilir. */
-const GUVEN_KOMSU = 10
-/** Taban orana dogru kac sanal gozlem. */
+/** Esik dosyasindaki olcek adi; eski bicimler bununla ayrilir. */
+const GUVEN_OLCEGI = 'tp-agirlikli'
+/** En benzer kac kurulum katilir. */
+const GUVEN_KOMSU = 50
+/** Agirlik sicakligi: w = exp((benzerlik - 1) / tau). */
+const GUVEN_TAU = 0.02
+/** Taban orana dogru kac sanal gozlem (etkin orneklem uzerinden). */
 const GUVEN_ONSEL = 10
 /** Turun taban orani bilinmiyorsa. */
 const TABAN_VARSAYILAN = 0.5
@@ -38,6 +45,11 @@ const TABAN_VARSAYILAN = 0.5
 function sayi (v, d) {
   const n = Number(v)
   return Number.isFinite(n) ? n : d
+}
+
+/** Benzerlige gore agirlik (0..1]; benzerlik 1 ise 1. */
+function komsuAgirligi (benzerlik) {
+  return Math.exp((Math.min(1, sayi(benzerlik, 0)) - 1) / GUVEN_TAU)
 }
 
 /**
@@ -57,31 +69,43 @@ function komsuSonucu (plan, sinyalZamani) {
 /**
  * Guven yuzdesi ve dayanagi.
  *
- * @param {Array<{result?:string, resolvedTime?:number|null}|null>} komsuPlanlari
- *        En benzerden baslayarak komsularin planlari; ilk GUVEN_KOMSU tanesi
- *        sayilir. Plani olmayan komsu null olabilir.
+ * @param {Array<{similarity?:number, plan?:{result?:string, resolvedTime?:number|null}|null}|null>} komsular
+ *        En benzerden baslayarak; ilk GUVEN_KOMSU tanesi katilir. Plani
+ *        olmayan komsu atlanir.
  * @param {number} sinyalZamani Sinyalin UNIX saniyesi
  * @param {number} taban Turun taban TP orani (0..1)
- * @returns {{confidence:number, confidenceTp:number, confidenceN:number, confidenceBase:number}}
- *          confidence 0..100; confidenceTp/confidenceN sayilan komsulardan
- *          kaci TP; confidenceBase kullanilan taban (0..1)
+ * @returns {{confidence:number, confidenceRaw:number|null, confidenceN:number,
+ *            confidenceNeff:number, confidenceBase:number}}
+ *          confidence 0..100 (kuculutulmus); confidenceRaw agirlikli ham
+ *          oran (sayilan komsu yoksa null); confidenceN sayilan komsu;
+ *          confidenceNeff etkin orneklem; confidenceBase kullanilan taban
  */
-function guvenHesapla (komsuPlanlari, sinyalZamani, taban) {
+function guvenHesapla (komsular, sinyalZamani, taban) {
   const t = Math.min(1, Math.max(0, sayi(taban, TABAN_VARSAYILAN)))
-  const liste = Array.isArray(komsuPlanlari) ? komsuPlanlari.slice(0, GUVEN_KOMSU) : []
-  let tp = 0
+  const liste = Array.isArray(komsular) ? komsular.slice(0, GUVEN_KOMSU) : []
+  let wToplam = 0
+  let wTp = 0
+  let wKare = 0
   let n = 0
   for (let i = 0; i < liste.length; i++) {
-    const sonuc = komsuSonucu(liste[i], sinyalZamani)
+    const k = liste[i]
+    if (!k) continue
+    const sonuc = komsuSonucu(k.plan, sinyalZamani)
     if (sonuc === null) continue
+    const w = komsuAgirligi(k.similarity)
     n++
-    if (sonuc === 'tp') tp++
+    wToplam += w
+    wKare += w * w
+    if (sonuc === 'tp') wTp += w
   }
-  const oran = (tp + GUVEN_ONSEL * t) / (n + GUVEN_ONSEL)
+  const nEff = wKare > 0 ? (wToplam * wToplam) / wKare : 0
+  const ham = wToplam > 0 ? wTp / wToplam : null
+  const oran = ham === null ? t : (ham * nEff + GUVEN_ONSEL * t) / (nEff + GUVEN_ONSEL)
   return {
     confidence: Math.round(100 * oran),
-    confidenceTp: tp,
+    confidenceRaw: ham,
     confidenceN: n,
+    confidenceNeff: Math.round(nEff * 10) / 10,
     confidenceBase: t,
   }
 }
@@ -112,27 +136,23 @@ function tabanOranlari (liste) {
 }
 
 /**
- * Ekran metni: "TP şansı %56 (6/10)". Dayanak sayilari yoksa yalnizca yuzde.
- * @param {{confidence?:number, confidenceTp?:number, confidenceN?:number}} s
+ * Ekran metni: "TP şansı %56". Dayanak ayrintisi ipucunda, burada degil.
+ * @param {{confidence?:number}} s
  * @returns {string} confidence yoksa bos dize
  */
 function guvenMetni (s) {
   const g = sayi(s && s.confidence, NaN)
   if (!Number.isFinite(g)) return ''
-  const n = sayi(s && s.confidenceN, NaN)
-  const tp = sayi(s && s.confidenceTp, NaN)
-  let metin = 'TP şansı %' + Math.round(g)
-  if (Number.isFinite(n) && n > 0 && Number.isFinite(tp)) {
-    metin += ' (' + Math.round(tp) + '/' + Math.round(n) + ')'
-  }
-  return metin
+  return 'TP şansı %' + Math.round(g)
 }
 
 module.exports = {
   GUVEN_OLCEGI,
   GUVEN_KOMSU,
+  GUVEN_TAU,
   GUVEN_ONSEL,
   TABAN_VARSAYILAN,
+  komsuAgirligi,
   komsuSonucu,
   guvenHesapla,
   tabanOranlari,

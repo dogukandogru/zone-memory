@@ -137,7 +137,7 @@ export function sinyalOzetiMetni(signal) {
   if (!signal) return ''
   const parcalar = []
   // BENZERLIK KIPI: bkz. core/learn/signalText.js sinyalOzeti, ayni bicim.
-  // Guven metni: core/learn/guven.js guvenMetni ile AYNI ("TP şansı %56 (6/10)").
+  // Guven metni: core/learn/guven.js guvenMetni ile AYNI ("TP şansı %56").
   // Ayrim `similarCount` ile yapilir; `confidence` iki bicimde de var ama
   // olcegi farkli (eski 0..1, yeni 0..100).
   const benzer = Number(signal.similarCount)
@@ -190,7 +190,7 @@ export function isaretMetni(signal) {
 }
 
 /**
- * Guven metni: "TP şansı %56 (6/10)". core/learn/guven.js guvenMetni ile
+ * Guven metni: "TP şansı %56". core/learn/guven.js guvenMetni ile
  * ayni bicim; renderer core'a erisemedigi icin burada yinelenir.
  * @param {{confidence?:number, confidenceTp?:number, confidenceN?:number}} s
  * @returns {string} confidence yoksa bos dize
@@ -198,11 +198,5 @@ export function isaretMetni(signal) {
 export function guvenMetni(s) {
   const g = Number(s && s.confidence)
   if (!Number.isFinite(g)) return ''
-  const n = Number(s && s.confidenceN)
-  const tp = Number(s && s.confidenceTp)
-  let metin = 'TP şansı %' + Math.round(g)
-  if (Number.isFinite(n) && n > 0 && Number.isFinite(tp)) {
-    metin += ' (' + Math.round(tp) + '/' + Math.round(n) + ')'
-  }
-  return metin
+  return 'TP şansı %' + Math.round(g)
 }

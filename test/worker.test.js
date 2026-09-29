@@ -796,46 +796,57 @@ test('engine:compare: bulunamayan kayitta ANLASILIR hata verir', async () => {
 // uyumsuzlukta yeniden tarar.
 // KILITLENEN OLAY: guven yuzdesi once benzer kayit SAYISININ, sonra havuz
 // PAYININ siralamasiydi; ikisinin de TP ile korelasyonu sifirdi (musteri:
-// "neredeyse hepsi %99"). Artik "en benzer 10 kurulumun kaci TP oldu"
-// (learn/guven.js). Olcek dosyasi olay plan sonuclarini tasir; eski bicim
-// dosya uyumsuz sayilir ki arayuz o dilimi bir kez yeniden tarasin.
-test('guven: komsularin TP oranindan hesaplanir, olcek dosyasi eski bicimi ayirir', async () => {
+// "neredeyse hepsi %99"). Artik "en benzer 50 kurulumun, benzerlik
+// agirlikli, kaci TP oldu" (learn/guven.js). Komsular taramanin komsu
+// onbelleginden okunur; olcek dosyasi olay plan sonuclarini tasir; eski
+// bicim dosya uyumsuz sayilir ki arayuz o dilimi bir kez yeniden tarasin.
+test('guven: komsularin agirlikli TP oranindan hesaplanir, olcek dosyasi eski bicimi ayirir', async () => {
   await isciyle(async (cagir, dataDir) => {
     await binstore.writeSeries(pathsCore.candlePath(TF, undefined, dataDir), taramaSerisi())
-    await cagir('engine:scan', { tf: TF, params: INDIKATOR_AYARI })
+    // Sentetik seride az olay var; sinyal cikabilsin diye kapilar gevsek.
+    const gevsek = { signalCfg: { minMatches: 1, minSimilarity: 0.3 } }
+    await cagir('engine:scan', { tf: TF, params: INDIKATOR_AYARI, cfgPatch: gevsek })
     const yol = pathsCore.memoryPath(TF, undefined, dataDir) + '.guven.json'
     assert.ok(fs.existsSync(yol), 'tarama guven olcek dosyasini yazmali')
     const gv = JSON.parse(fs.readFileSync(yol, 'utf8'))
-    assert.strictEqual(gv.olcek, 'tp', 'olcek alani tp olmali')
+    assert.strictEqual(gv.olcek, 'tp-agirlikli', 'olcek alani tp-agirlikli olmali')
+    assert.strictEqual(gv.komsu, 50)
     assert.ok(gv.taban.form >= 0 && gv.taban.form <= 1 && gv.taban.touch >= 0 && gv.taban.touch <= 1)
     assert.ok(gv.olaylar && typeof gv.olaylar === 'object', 'olay plan sonuclari dosyada olmali')
     const sinyaller = (await cagir('engine:signals', { tf: TF, limit: 1000 })).signals
       .filter((x) => x.mode === 'benzerlik')
+    // Fikstur tek kutu uretir; sinyal cikmazsa dosya bicimi ve durum yine
+    // dogrulanir, sinyal varsa alanlar da.
     for (const x of sinyaller) {
       assert.ok(x.confidence >= 0 && x.confidence <= 100, 'guven 0..100 olmali')
-      assert.ok(Array.isArray(x.confidenceMatches) && x.confidenceMatches.length <= 10)
-      assert.ok(x.confidenceTp <= x.confidenceN && x.confidenceN <= x.confidenceMatches.length)
-      // Nedensellik: sayilan her komsunun sonucu sinyalden ONCE belli olmali.
-      for (const m of x.confidenceMatches) {
-        const k = gv.olaylar[String(m.id)]
-        if (!k || (k[0] !== 'tp' && k[0] !== 'sl')) continue
-        assert.ok(m.time < x.time, 'komsu sinyalden once olmali')
-      }
+      assert.ok(x.confidenceN >= 0 && x.confidenceN <= 50, 'en fazla 50 komsu sayilir')
+      assert.ok(x.confidenceNeff <= x.confidenceN + 1e-9, 'etkin orneklem sayilan komsuyu asamaz')
+      assert.strictEqual(x.confidenceMatches, undefined, 'tarama sinyali komsu listesi TASIMAZ (dosya sismesin)')
     }
     const guncel = await cagir('data:status', {})
     assert.strictEqual(guncel.byTf[TF].confidenceScaleCurrent, true)
 
     // TP MESAFESI DEGISINCE GUVEN DE DEGISIR: TP 20 ATR'de hicbir komsu
-    // TP'ye ulasamaz, sayilan komsulardan TP sayisi sifira iner.
-    await cagir('engine:plan-refresh', { tf: TF, cfgPatch: { signalCfg: { tpAtr: 20 } } })
+    // TP'ye ulasamaz, agirlikli ham oran sifira iner (ya da sayilan komsu
+    // kalmaz). Komsular onbellekten okunur, tarama gerekmez.
+    const yenileme = await cagir('engine:plan-refresh', { tf: TF, cfgPatch: { signalCfg: Object.assign({ tpAtr: 20 }, gevsek.signalCfg) } })
+    // KILITLENEN HATA: anahtar elle kopyalanan alanlarla uretiliyordu,
+    // builtToTime undefined gidiyordu, anahtar tutmuyordu ve guven sessizce
+    // eski kaliyordu. Kaynak ONBELLEK olmali, sinyal listesi kadar yenilenmeli.
+    assert.strictEqual(yenileme.guven.kaynak, 'onbellek', 'komsular onbellekten okunmali')
+    assert.strictEqual(yenileme.guven.yenilenen, sinyaller.length, 'her benzerlik sinyalinin guveni yenilenmeli')
     const sonra = (await cagir('engine:signals', { tf: TF, limit: 1000 })).signals
       .filter((x) => x.mode === 'benzerlik')
-    for (const x of sonra) assert.strictEqual(x.confidenceTp, 0, 'TP 20 ATR ile komsu TP sayisi sifir olmali')
+    for (const x of sonra) {
+      assert.ok(x.confidenceN === 0 || x.confidenceRaw === 0, 'TP 20 ATR ile komsu TP orani sifir olmali')
+    }
     const gv2 = JSON.parse(fs.readFileSync(yol, 'utf8'))
     assert.strictEqual(gv2.planCfg.tpAtr, 20, 'olcek dosyasi yeni plan ayarini tasimali')
+    assert.ok(Object.keys(gv2.olaylar).length > 0 &&
+      Object.values(gv2.olaylar).every((k) => k[0] !== 'tp'), 'TP 20 ATR ile hicbir olay plani tp olamaz')
 
-    // Eski bicim (pay siralanmis): olcek alani farkli, uyumsuz sayilir.
-    fs.writeFileSync(yol, JSON.stringify({ olcek: 'pay', form: [], touch: [] }))
+    // Eski bicim (en benzer 10, esit agirlik): olcek alani farkli, uyumsuz.
+    fs.writeFileSync(yol, JSON.stringify({ olcek: 'tp', taban: { form: 0.5, touch: 0.5 }, olaylar: {} }))
     const eski = await cagir('data:status', {})
     assert.strictEqual(eski.byTf[TF].confidenceScaleCurrent, false,
       'eski bicim olcek dosyasi uyumsuz sayilmali')

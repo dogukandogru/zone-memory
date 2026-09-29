@@ -1120,7 +1120,9 @@ async function planlariCanlidaGuncelle(tf, s, uygulanan, yeniler) {
  */
 function komsuOnbellekAyari(uygulanan) {
   return {
-    signalCfg: uygulanan.signalCfg,
+    // Guven hesabi en benzer GUVEN_KOMSU komsuya bakar; kullanicinin k'si
+    // daha kucukse onbellek yine o kadar komsu tutar (anahtara girer).
+    signalCfg: guvenIcinSinyalAyari(uygulanan.signalCfg),
     outcomeCfg: uygulanan.planOutcomeCfg,
     coreHash: hesapImzasi(),
   }
@@ -1459,19 +1461,13 @@ handlers['engine:scan'] = async function (payload, ctx) {
       const e = sirali[i]
       if (!e) continue
       const komsular = []
-      // Guven icin en benzer GUVEN_KOMSU kurulum, ESIK GOZETMEKSIZIN: olcum
-      // boyle yapildi (en yakin 10), esikle daraltmak sayiyi degistirir.
-      const guvenKomsulari = []
       for (let j = 0; j < k; j++) {
         const ix = cache.idx[i * k + j]
         if (ix < 0) continue
         const benzerlik = cache.sim[i * k + j]
+        if (!(benzerlik >= enAzYakinlik)) continue
         const komsu = sirali[ix]
         if (!komsu) continue
-        if (guvenKomsulari.length < guvenMod.GUVEN_KOMSU) {
-          guvenKomsulari.push({ id: num(komsu.id, -1), time: num(komsu.time, 0) })
-        }
-        if (!(benzerlik >= enAzYakinlik)) continue
         komsular.push({ id: num(komsu.id, -1), time: num(komsu.time, 0), similarity: benzerlik })
       }
       // TUM benzer kayitlarin sayisi; `k` ile sinirli DEGIL.
@@ -1484,7 +1480,6 @@ handlers['engine:scan'] = async function (payload, ctx) {
       sig.mode = 'benzerlik'
       sig.similarCount = benzerToplam
       sig.poolCount = cache.havuzSayi[i]
-      sig.confidenceMatches = guvenKomsulari
       // Ekranda gosterilen en benzer birkaci (k ile sinirli olan kisim).
       sig.matchCount = komsular.length
       sig.avgSimilarity = komsular.length
@@ -1495,7 +1490,8 @@ handlers['engine:scan'] = async function (payload, ctx) {
     }
     planlariUygula(liste, s, uygulanan)
     // Guven, komsularin planina bakar; planlar kurulduktan sonra gelir.
-    guvenleriHesapla(tf, liste, sirali, s, uygulanan)
+    // Komsular onbellekten okunur (esik gozetmeksizin en benzer 50).
+    guvenleriHesapla(tf, liste, sirali, s, uygulanan, onbellekKomsuBulucu(cache, sirali))
     await writeJsonAtomic(paths.signalsPath(tf), liste)
     signalCache = { tf: tf, signals: liste }
     log(liste.length + ' sinyal yazıldı (geçmişte en az ' + enAzBenzer +
@@ -1755,7 +1751,7 @@ handlers['engine:export-csv'] = async function (payload) {
         similarCount: num(sg.similarCount, 0),
         poolCount: num(sg.poolCount, 0),
         confidence: num(sg.confidence, 0),
-        confidenceTp: num(sg.confidenceTp, 0),
+        confidenceRaw: Number.isFinite(Number(sg.confidenceRaw)) ? num(sg.confidenceRaw, 0) : '',
         confidenceN: num(sg.confidenceN, 0),
         plan_entry: pl ? num(pl.entry, 0) : '',
         plan_sl: pl ? num(pl.sl, 0) : '',
@@ -1888,17 +1884,38 @@ handlers['engine:plan-refresh'] = async function (payload, ctx) {
   const acik = planlariUygula(liste, s, uygulanan)
   // GUVEN DE DEGISIR: komsularin TP/SL sonucu yeni mesafeye gore baska.
   // Hafiza okunamiyorsa (eski surum) guven eski kalir; yeniden tarama
-  // zaten istenir.
+  // zaten istenir. Donen `guven` alani testte ve gunlukte kaynagi soyler.
+  const guven = { kaynak: 'yok', yenilenen: 0 }
   try {
     const mem = await getMemory(tf, false)
-    if (mem && Array.isArray(mem.events)) guvenleriHesapla(tf, liste, mem.events, s, uygulanan)
+    if (mem && Array.isArray(mem.events)) {
+      const cc = core('learn/candcache')
+      const hazir = cc.prepareEvents(mem)
+      // Komsular taramanin yazdigi onbellekten; anahtar tutmuyorsa (hafiza
+      // degismis) yalnizca kendi komsularini tasiyan canli sinyaller yenilenir.
+      // Anahtar HAFIZA NESNESININ KENDISIYLE uretilir: loadMemory
+      // `builtToTime`i meta altinda verir, cacheKey orayi da okur; alan
+      // elle kopyalanirsa undefined gider ve anahtar sessizce tutmaz (oldu).
+      let cache = null
+      try {
+        const cozulen = cc.deserialize(await fsp.readFile(paths.candCachePath(tf)))
+        const anahtar = cc.cacheKey(mem, komsuOnbellekAyari(uygulanan))
+        if (cozulen && cozulen.key === anahtar && cozulen.n === hazir.events.length) cache = cozulen
+        else log('Komşu önbelleği güven için kullanılamadı (' + (cozulen ? cozulen.key : '-') + ' != ' + anahtar + '), sonraki taramada yenilenir.')
+      } catch (err) {
+        log('Komşu önbelleği okunamadı: ' + (err && err.message ? err.message : String(err)))
+      }
+      guven.kaynak = cache ? 'onbellek' : 'sinyal'
+      guven.yenilenen = guvenleriHesapla(tf, liste, hazir.events, s, uygulanan,
+        cache ? onbellekKomsuBulucu(cache, hazir.events) : (sig) => sig.confidenceMatches || null)
+    }
   } catch (err) {
     log('Güven yenilenemedi: ' + (err && err.message ? err.message : String(err)))
   }
   await writeJsonAtomic(paths.signalsPath(tf), liste)
   signalCache = { tf: tf, signals: liste }
   ctx.progress(100, 'Planlar hazır')
-  return { tf: tf, signals: liste.length, open: acik }
+  return { tf: tf, signals: liste.length, open: acik, guven: guven }
 }
 
 /**
@@ -2806,7 +2823,7 @@ handlers['engine:live-tick'] = async function (payload) {
             ozellikYok++
           } else {
             const adaylarListesi = core('learn/signal').findCandidates(
-              cand, feats, mem, canliCfg.signalCfg, num(cand.time, fetchedAt))
+              cand, feats, mem, guvenIcinSinyalAyari(canliCfg.signalCfg), num(cand.time, fetchedAt))
             const toplam = Number.isFinite(adaylarListesi.similarCount)
               ? adaylarListesi.similarCount
               : adaylarListesi.length
@@ -2822,12 +2839,14 @@ handlers['engine:live-tick'] = async function (payload) {
               // yenilemenin) yazdigi dosyadan okunur; canlida seri uzerinden
               // yeniden cozulmez, cozulseydi ekrandaki liste ile tutmazdi.
               const gv = canliGuvenEsikleri || (canliGuvenEsikleri = guvenEsikleriOku(tf) || {})
+              // Canli sinyal onbellekte yok; komsulari kendi uzerinde tasir ki
+              // TP/SL mesafesi degisince guveni yeniden hesaplanabilsin.
               sig.confidenceMatches = adaylarListesi.slice(0, guvenMod.GUVEN_KOMSU).map((m) => ({
                 id: num(m.event && m.event.id, -1),
-                time: num(m.event && m.event.time, 0),
+                similarity: Math.round(num(m.similarity, 0) * 10000) / 10000,
               }))
               Object.assign(sig, guvenMod.guvenHesapla(
-                sig.confidenceMatches.map((m) => kayitliOlayPlani(gv, m.id)),
+                sig.confidenceMatches.map((m) => ({ similarity: m.similarity, plan: kayitliOlayPlani(gv, m.id) })),
                 num(cand.time, fetchedAt),
                 gv.taban ? gv.taban[cand.kind === 'form' ? 'form' : 'touch'] : undefined))
               const ilk = adaylarListesi.slice(0, 6).map((m) => ({
@@ -3147,6 +3166,46 @@ function kayitliOlayPlani(gv, id) {
 }
 
 /**
+ * Guven hesabi icin sinyal ayari: k, en az GUVEN_KOMSU. Komsu onbellegi ve
+ * canli aday aramasi bunu kullanir; kullanicinin k'si listelenen ornek
+ * sayisini belirlemeye devam eder.
+ */
+function guvenIcinSinyalAyari(signalCfg) {
+  const sc = signalCfg || {}
+  return Object.assign({}, sc, { k: Math.max(Math.round(num(sc.k, 25)), guvenMod.GUVEN_KOMSU) })
+}
+
+/**
+ * Onbellekten komsu bulucu: sinyalin olayina ait satirdaki en benzer
+ * GUVEN_KOMSU komsu (esik gozetmeksizin, benzerlik sirali). Kendi
+ * komsularini tasiyan (canli) sinyalde onlar kullanilir.
+ *
+ * @param {{n:number, k:number, idx:Int32Array, sim:Float32Array}} cache
+ * @param {Array} sirali Onbellekle ayni sirada olaylar
+ * @returns {(sig:Object) => Array<{id:number, similarity:number}>|null}
+ */
+function onbellekKomsuBulucu(cache, sirali) {
+  const satir = new Map()
+  for (let i = 0; i < sirali.length; i++) {
+    if (sirali[i]) satir.set(num(sirali[i].id, -1), i)
+  }
+  const k = cache.k
+  const adet = Math.min(k, guvenMod.GUVEN_KOMSU)
+  return function (sig) {
+    if (Array.isArray(sig.confidenceMatches)) return sig.confidenceMatches
+    const i = satir.get(num(sig.eventId, -1))
+    if (i === undefined) return null
+    const cikti = []
+    for (let j = 0; j < adet; j++) {
+      const ix = cache.idx[i * k + j]
+      if (ix < 0 || !sirali[ix]) continue
+      cikti.push({ id: num(sirali[ix].id, -1), similarity: cache.sim[i * k + j] })
+    }
+    return cikti
+  }
+}
+
+/**
  * Sinyallerin guvenini komsularin plan sonucundan hesaplar ve olcek
  * dosyasini yazar. Tarama ve plan yenileme AYNI yolu kullanir.
  *
@@ -3159,15 +3218,13 @@ function kayitliOlayPlani(gv, id) {
  * @param {Array} olaylar Hafiza olaylari
  * @param {Object} s Seri
  * @param {Object} uygulanan Cozulmus ayar
+ * @param {(sig:Object) => Array<{id:number, similarity:number}>|null} komsuBul
+ * @returns {number} Guveni yenilenen sinyal sayisi
  */
-function guvenleriHesapla(tf, liste, olaylar, s, uygulanan) {
+function guvenleriHesapla(tf, liste, olaylar, s, uygulanan, komsuBul) {
   const planMod = core('learn/plan')
   const cfg = planCfgCoz(uygulanan)
   const olayPlanlari = {}
-  const planBul = (id) => {
-    const k = kayitliOlayPlani({ olaylar: olayPlanlari }, id)
-    return k
-  }
   for (let i = 0; i < olaylar.length; i++) {
     const e = olaylar[i]
     if (!e) continue
@@ -3180,23 +3237,30 @@ function guvenleriHesapla(tf, liste, olaylar, s, uygulanan) {
     const p = planMod.sinyaliPlanla(s, taslak, cfg)
     if (p) olayPlanlari[String(num(e.id, -1))] = [p.result, p.resolvedTime]
   }
+  const gv = { olaylar: olayPlanlari }
   const taban = guvenMod.tabanOranlari(liste)
+  let yenilenen = 0
   for (let i = 0; i < liste.length; i++) {
     const sig = liste[i]
-    if (!sig || !Array.isArray(sig.confidenceMatches)) continue
+    if (!sig) continue
+    const komsular = komsuBul(sig)
+    if (!Array.isArray(komsular)) continue
     Object.assign(sig, guvenMod.guvenHesapla(
-      sig.confidenceMatches.map((m) => planBul(m.id)),
+      komsular.map((m) => ({ similarity: m.similarity, plan: kayitliOlayPlani(gv, m.id) })),
       num(sig.time, 0),
       taban[sig.kind === 'form' ? 'form' : 'touch']))
+    yenilenen++
   }
   guvenEsikleriYaz(tf, {
     olcek: guvenMod.GUVEN_OLCEGI,
     komsu: guvenMod.GUVEN_KOMSU,
+    tau: guvenMod.GUVEN_TAU,
     onsel: guvenMod.GUVEN_ONSEL,
     planCfg: cfg,
     taban: taban,
     olaylar: olayPlanlari,
   })
+  return yenilenen
 }
 
 /**

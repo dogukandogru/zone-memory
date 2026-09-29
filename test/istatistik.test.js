@@ -137,11 +137,11 @@ test('YENI BICIM: ozet ve isaret benzer kurulum sayisi ile guveni gosterir', asy
   const yeni = {
     kind: 'form', direction: 'BUY', mode: 'benzerlik',
     similarCount: 1247, poolCount: 2829, confidence: 82, matchCount: 6,
-    confidenceTp: 9, confidenceN: 10,
+    confidenceRaw: 0.9, confidenceN: 50,
   }
   const ozet = signalText.sinyalOzeti(yeni)
   assert.match(ozet, /1247 benzer kurulum/)
-  assert.match(ozet, /TP şansı %82 \(9\/10\)/)
+  assert.match(ozet, /TP şansı %82, 1247/)
   assert.strictEqual(signalText.isaretMetni(yeni), 'OL %82')
   // Dayanak sayilari yoksa yalnizca yuzde (eski kayit).
   assert.match(signalText.sinyalOzeti({ kind: 'form', similarCount: 5, confidence: 47 }), /TP şansı %47, 5 benzer kurulum/)

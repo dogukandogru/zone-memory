@@ -57,7 +57,7 @@ function sinyalOzeti (signal, opts) {
   // bicimde var.
   const benzer = num(signal.similarCount, NaN)
   if (isFinite(benzer)) {
-    // Once TP sansi: "TP şansı %56 (6/10)"; sonra kac benzer kurulum.
+    // Once TP sansi: "TP şansı %56"; sonra kac benzer kurulum.
     const guven = guvenMetni(signal)
     if (guven) parcalar.push(guven)
     parcalar.push(Math.round(benzer) + ' benzer kurulum')

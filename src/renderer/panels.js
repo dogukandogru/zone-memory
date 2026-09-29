@@ -674,6 +674,29 @@ export function sonucEtiketi(m) {
 
 /* ------------------------------------------------------------------ */
 /* renderSignals                                                       */
+
+/**
+ * Guven yuzdesinin aciklamasi (satir ipucu ve ayrinti paneli ayni metin).
+ * @param {Object} s Sinyal
+ * @returns {string}
+ */
+function guvenIpucu(s) {
+  const n = sayi(s.confidenceN, 0)
+  const ham = Number.isFinite(Number(s.confidenceRaw)) ? Math.round(100 * Number(s.confidenceRaw)) : null
+  const etkin = Number.isFinite(Number(s.confidenceNeff)) ? Math.round(Number(s.confidenceNeff)) : null
+  const taban = Number.isFinite(Number(s.confidenceBase)) ? Math.round(100 * Number(s.confidenceBase)) : null
+  let metin = 'TP şansı: bu yapıya en çok benzeyen 50 geçmiş kurulumun senin TP/SL ' +
+    'mesafenle sonucu, benzerlik ağırlıklı (yakın olan daha çok sayılır). '
+  if (n > 0 && ham !== null) {
+    metin += 'Sonucu sinyal anında belli olan ' + tam(n) + ' kurulumda ağırlıklı TP oranı %' + ham +
+      (etkin !== null ? ' (etkin örneklem ' + tam(etkin) + ')' : '') + '. '
+  } else {
+    metin += 'Sonucu sinyal anında belli olan kurulum yok, yüzde türün taban oranı. '
+  }
+  if (taban !== null) metin += 'Oran, türün taban oranına (%' + taban + ') doğru hafifçe çekilir. '
+  if (Number.isFinite(Number(s.similarCount))) metin += 'Geçmişte ' + tam(s.similarCount) + ' benzer kurulum var.'
+  return metin.trim()
+}
 /* ------------------------------------------------------------------ */
 
 /**
@@ -862,27 +885,15 @@ export function renderSignals(el, signals, opts) {
     const sag = h('span', 'row-side')
     const sonuc = sonucBilgisi(s)
     if (sade) {
-      // GUVEN: "bu yapi gecmiste geldiginde kacinda TP oldu". En benzer 10
-      // kurulumun, kullanicinin TP/SL mesafesiyle sonucu; taban orana dogru
-      // hafifce cekilmis (bkz. core/learn/guven.js). Onceki tanimlar
-      // (yayginlik siralamasi) TP ile iliskisizdi, kullanici bunu istedi.
+      // GUVEN: "bu yapi gecmiste geldiginde kacinda TP oldu". En benzer 50
+      // kurulumun, kullanicinin TP/SL mesafesiyle sonucu, benzerlik
+      // agirlikli; taban orana dogru hafifce cekilmis (core/learn/guven.js).
+      // Onceki tanimlar (yayginlik siralamasi) TP ile iliskisizdi.
       if (Number.isFinite(Number(s.confidence))) {
         const g = Math.round(Number(s.confidence))
         const kutu = h('span', g >= 55 ? 'up' : (g <= 40 ? 'down' : null), '%' + g)
-        const n = sayi(s.confidenceN, 0)
-        const tpSayi = sayi(s.confidenceTp, 0)
-        const taban = Number.isFinite(Number(s.confidenceBase)) ? Math.round(100 * Number(s.confidenceBase)) : null
-        kutu.title = 'TP şansı: bu yapıya en çok benzeyen ' +
-          (n > 0
-            ? tam(n) + ' geçmiş kurulumun ' + tam(tpSayi) + ' tanesi TP ile bitmiş'
-            : 'geçmiş kurulumlardan hiçbiri sonuçlanmamış, yüzde türün taban oranı') +
-          ' (senin TP/SL mesafenle, yalnızca sinyal anında sonucu belli olanlar). ' +
-          (taban !== null ? 'Oran, türün taban oranına (%' + taban + ') doğru hafifçe çekilir; ' : '') +
-          'geçmişte ' + tam(s.similarCount) + ' benzer kurulum var.'
+        kutu.title = guvenIpucu(s)
         sag.appendChild(kutu)
-        if (n > 0) {
-          sag.appendChild(h('span', 'muted', ' ' + tam(tpSayi) + '/' + tam(n)))
-        }
         // INDIKATOR SKORU yuzdenin yanina (kullanici istedi): olayin oldugu
         // barda kac kosulun tuttugu. Bilgi amacli, sinyal kararina girmez.
         const enCokSkor = sayi(s.maxScore, 0)
@@ -1003,12 +1014,9 @@ export function renderSignalDetail(el, signal, opts) {
     const enCok = sayi(signal.maxScore, 0)
     const guvenVar = Number.isFinite(Number(signal.confidence))
     const g = guvenVar ? Math.round(Number(signal.confidence)) : 0
-    const guvenN = sayi(signal.confidenceN, 0)
-    const guvenTp = sayi(signal.confidenceTp, 0)
     el.appendChild(statIzgara([
       stat('Benzer kurulum', guvenVar ? tam(signal.similarCount) : '-'),
-      stat('TP şansı', guvenVar ? '%' + g + (guvenN > 0 ? ' (' + tam(guvenTp) + '/' + tam(guvenN) + ')' : '') : '-',
-        g >= 55 ? 'up' : (g <= 40 ? 'down' : null)),
+      stat('TP şansı', guvenVar ? '%' + g : '-', g >= 55 ? 'up' : (g <= 40 ? 'down' : null)),
       stat('Kutu', kutuYuksekligi(signal).replace('Kutu ', '')),
       stat('İndikatör skoru', enCok > 0 ? tam(signal.score) + '/' + tam(enCok) : '-'),
     ]))
@@ -1016,15 +1024,8 @@ export function renderSignalDetail(el, signal, opts) {
       // NE OLDUGUNU SOYLER, UYARMAZ. Kullanici uyari metnini istemedi
       // ("uyarıyı yazmana gerek yok"); yuzdenin tanimi kaliyor, cunku tanim
       // olmadan sayinin neyi olctugu anlasilmaz.
-      const taban = Number.isFinite(Number(signal.confidenceBase))
-        ? Math.round(100 * Number(signal.confidenceBase)) : null
-      el.appendChild(h('div', 'small muted',
-        'TP şansı: bu yapıya en çok benzeyen ' + (guvenN > 0 ? tam(guvenN) + ' geçmiş kurulumun ' +
-          tam(guvenTp) + ' tanesi senin TP/SL mesafenle TP ile bitmiş' :
-          'geçmiş kurulumların hiçbirinin sonucu sinyal anında belli değil') +
-        '. Yalnızca sinyal anında sonucu belli olanlar sayılır' +
-        (taban !== null ? ', oran türün taban oranına (%' + taban + ') doğru hafifçe çekilir' : '') +
-        '. TP/SL mesafesini değiştirirsen bu yüzde de değişir.'))
+      el.appendChild(h('div', 'small muted', guvenIpucu(signal) +
+        ' TP/SL mesafesini değiştirirsen bu yüzde de değişir.'))
     }
     el.appendChild(kv('Bölge aralığı',
       formatPrice(signal.zoneBottom) + ' - ' + formatPrice(signal.zoneTop)))
@@ -1949,7 +1950,8 @@ function ayarGruplari(saglayiciSecenekleri) {
       alanlar: [
         { yol: 'signalCfg.k', ad: 'Komşu sayısı (k)', tip: 'sayi', adim: 1, min: 1, max: 200,
           not: 'Sinyal panelinde listelenen "en benzer örnek" sayısı. Geçmişte kaç ' +
-            'benzer kurulum olduğunu SINIRLAMAZ: o sayı, eşiği geçen tüm kayıtlardır.' },
+            'benzer kurulum olduğunu SINIRLAMAZ: o sayı, eşiği geçen tüm kayıtlardır. ' +
+            'TP şansı her zaman en benzer 50 kuruluma bakar, bu ayardan bağımsız.' },
         { yol: 'signalCfg.minSimilarity', ad: 'En az benzerlik', tip: 'sayi', adim: 0.01, min: 0, max: 0.999,
           not: 'Bu eşiğin altındaki eşleşmeler sayılmaz. Ölçüldü: 0,80 eşiği rastgele ' +
             'çiftlerin yaklaşık %41\'ini geçiriyor, yani tek başına seçici değildir. ' +
