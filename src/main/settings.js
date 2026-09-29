@@ -117,7 +117,7 @@ const DEFAULTS = {
   // GRAFIK GORUNUMU. Hacim cubuklari varsayilan KAPALI: kullanici "grafikte
   // volume gozukmesine gerek yok" dedi; grafigin ustundeki kutucuktan acilir
   // ve secim burada kalicidir.
-  chart: { showVolume: false },
+  chart: { showVolume: false, hideWeak: true },
   theme: 'dark',
 }
 

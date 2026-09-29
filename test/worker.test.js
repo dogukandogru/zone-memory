@@ -828,7 +828,7 @@ test('guven: komsularin agirlikli TP oranindan hesaplanir, olcek dosyasi eski bi
 
     for (const x of sinyaller) {
       assert.strictEqual(typeof x.weak, 'boolean', 'zayif bayragi her sinyalde olmali')
-      assert.strictEqual(x.weak, x.confidence < 42, 'zayif = TP sansi esigin (varsayilan 42) altinda')
+      assert.strictEqual(x.weak, x.confidence < 55, 'zayif = TP sansi esigin (varsayilan 55) altinda')
       assert.ok(x.plan, 'plansiz sinyal listeye girmez (kutu kirilmis)')
     }
     // TP MESAFESI DEGISINCE GUVEN DE DEGISIR: hedef orani 20 (TP = 20 x risk)

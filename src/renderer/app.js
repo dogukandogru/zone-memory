@@ -515,6 +515,7 @@ function sinyalleriNormalle(ham) {
   // Kirpma bilgisi: isci son N sinyali doner, panel bunu yazmali.
   durum.sinyalToplam = (ham && Number.isFinite(Number(ham.total))) ? Number(ham.total) : liste.length
   durum.sinyalKirpildi = !!(ham && ham.truncated === true)
+  zayifBayraklariniKur(liste)
   for (let i = 0; i < liste.length; i++) {
     const s = liste[i]
     if (!s) continue
@@ -546,6 +547,49 @@ function veriDurumuKaydi(ham, tf) {
 function hacimGorunurMu() {
   const a = durum.ayarlar && durum.ayarlar.chart
   return !!(a && a.showVolume === true)
+}
+
+/** Ayarlara gore zayif sinyaller gizli mi (varsayilan gizli). */
+function zayiflarGizliMi() {
+  const a = durum.ayarlar && durum.ayarlar.chart
+  return !(a && a.hideWeak === false)
+}
+
+/** "Zayiflari gizle" kutucugunu ayara gore kurar. */
+function zayifGizlemeyiUygula() {
+  const kutu = el('weakToggle')
+  const gizli = zayiflarGizliMi()
+  if (kutu && kutu.checked !== gizli) kutu.checked = gizli
+}
+
+/**
+ * Zayif esigi (yuzde), ayardaki plan kipine gore basa basla kaydirilmis;
+ * core/learn/plan.js zayifEsigi ile ayni formul (renderer core'a erisemez).
+ * 0 = kapali.
+ */
+function zayifEsigi() {
+  const c = durum.ayarlar && durum.ayarlar.signalCfg ? durum.ayarlar.signalCfg : {}
+  const m = sayi(c.minConfidence, 55)
+  if (!(m > 0)) return 0
+  const rr = planKipi() === 'atr'
+    ? sayi(c.tpAtr, 1) / Math.max(1e-9, sayi(c.slAtr, 1))
+    : sayi(c.tpRr, 1)
+  const r = rr > 0 ? rr : 1
+  return Math.max(0, m - 50 + 100 / (1 + r))
+}
+
+/**
+ * Zayif bayragini AYARDAKI esikle yeniden kurar. Dosyadaki bayrak taramanin
+ * yazdigi esige gore; esik varsayilani degisince (42 -> 55) ya da kullanici
+ * esigi degistirince liste yeniden taranmadan dogru gorunsun.
+ */
+function zayifBayraklariniKur(liste) {
+  const esik = zayifEsigi()
+  for (let i = 0; i < liste.length; i++) {
+    const s = liste[i]
+    if (!s || !Number.isFinite(Number(s.confidence))) continue
+    s.weak = esik > 0 && Number(s.confidence) < esik
+  }
 }
 
 /** Hacim gorunurlugunu grafige ve kutucuga uygular. */
@@ -2819,6 +2863,7 @@ async function ayarlariKaydet(yama) {
   }
   // HEDEF ORANI / SONUC SURESI DEGISTI: TP/SL sonuclari tarama olmadan
   // yeniden hesaplanir (kullanici: "ayarlardan degistirdigimizde guncellensin").
+  zayifBayraklariniKur(durum.signals)
   if (planAyari() !== oncekiPlan) {
     bildir('TP/SL mesafesi değişti, sonuçlar yeniden hesaplanıyor.')
     await cagirGuvenli('engine:plan-refresh',
@@ -2986,6 +3031,7 @@ function canliSinyalEkle(s) {
   if (s.id === undefined || s.id === null || s.id === '') {
     s.id = 'sig-' + sayi(s.time, Date.now()) + '-' + (s.direction === 'SELL' ? 'S' : 'B')
   }
+  zayifBayraklariniKur([s])
   let yer = -1
   for (let i = 0; i < durum.signals.length; i++) {
     if (durum.signals[i] && String(durum.signals[i].id) === String(s.id)) { yer = i; break }
@@ -3277,8 +3323,17 @@ function dugmeleriBagla() {
   // Aralik degisince liste de suzulur (sayimlar ve TP orani dahil).
   const aralikSec = el('signalCsvRange')
   if (aralikSec) aralikSec.addEventListener('change', () => sinyalPaneliniCiz())
+  // Zayiflari gizle: secim ayarlara yazilir, sonraki acilista da ayni kalir
+  // (varsayilan gizli: liste acilista yalnizca girilecek sinyalleri gosterir).
   const zayifKutu = el('weakToggle')
-  if (zayifKutu) zayifKutu.addEventListener('change', () => sinyalPaneliniCiz())
+  if (zayifKutu) {
+    zayifKutu.addEventListener('change', async () => {
+      sinyalPaneliniCiz()
+      const yeni = await cagirGuvenli('settings:set',
+        { patch: { chart: { hideWeak: !!zayifKutu.checked } } }, 'Zayıf gizleme ayarı kaydedilemedi')
+      if (yeni && typeof yeni === 'object') durum.ayarlar = yeni
+    })
+  }
 
   const iptal = el('cancelBtn')
   if (iptal) {
@@ -3414,6 +3469,7 @@ async function baslat() {
   if (ayarlar && typeof ayarlar === 'object') {
     durum.ayarlar = ayarlar
     hacimGorunurlugunuUygula()
+    zayifGizlemeyiUygula()
     if (ayarlar.timeframe && TF_SANIYE[ayarlar.timeframe]) durum.tf = ayarlar.timeframe
   }
   // Kullanicinin ACIKCA degistirdigi alanlar. Motor bunu zaman dilimine ait

@@ -163,10 +163,13 @@ const DEFAULT_SIGNAL_CFG = {
   /**
    * ZAYIF SINYAL ESIGI: TP sansi (yuzde) bunun altindaysa sinyal "zayif"
    * isaretlenir (listede soluk, ZAYIF rozeti; Telegram'da uyari). Olculdu
-   * (uretim modeli, zaman ayrimli test): esik 42 sinyallerin %15-17'sini
-   * yakalar, o dilimin TP orani %29-32; kalanlar %48-50.
+   * (agac modeli, zaman ayrimli, 2023-09 sonrasi 37 ay, 100 $ risk): esik 55
+   * ile kalanlar 5m'de %74-78 TP, 15m'de %66-69; ikisi birlikte ayda ~11
+   * islem, ortalama +380 $, 37 ayda 2 eksi ay. Esik 42 ile kalanlar ancak
+   * basa bas. Bu yuzden varsayilan 55: liste acilista "girilecek" sinyalleri
+   * gosterir.
    */
-  minConfidence: 42,
+  minConfidence: 55,
   /** Plan sonucu icin en fazla kac bar beklenir; dolarsa 'timeout'. */
   planHorizonBars: 200,
   /**
