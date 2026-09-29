@@ -319,7 +319,7 @@ const SINIRLAR = {
   'signalCfg.planHorizonBars': [10, 5000],
   'signalCfg.k': [1, 200],
   'signalCfg.minSimilarity': [0, 0.999],
-  'signalCfg.minMatches': [1, 1000],
+  'signalCfg.minMatches': [0, 1000],
   'signalCfg.minWinRate': [0, 1],
   'signalCfg.minRr': [0, 10],
   'signalCfg.minExpectancy': [-1, 5],

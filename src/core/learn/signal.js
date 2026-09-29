@@ -77,7 +77,15 @@ const DEFAULT_SIGNAL_CFG = {
   mode: 'benzerlik',
   k: 25,
   minSimilarity: 0.80,
-  minMatches: 15,
+  /**
+   * EN AZ BENZER KURULUM KAPISI. 0 = kapi yok: her olusum ve dokunus (kutu
+   * yasi ve plan sartiyla) sinyal olur, elemeyi TP sansi modeli yapar.
+   * Olculdu (5m, zaman ayrimli, agac modeli): TP sansi >= 55 olan
+   * dokunuslarin %99'unun benzer sayisi 5'in altinda; kapi 5 iken bu grup
+   * (223 islem, %78 TP) 44 isleme, 20 iken 36'ya dusuyordu. Yani en iyi
+   * sinyaller "gecmiste sik gorulen" degil, ozellikleriyle iyi olanlar.
+   */
+  minMatches: 0,
   minWinRate: 0.62,
   excludeWithinSec: 86400 * 3,
   // BENZERLIK ON AYARI. Ayarlar ekranindan secilir; `ozel` secilirse

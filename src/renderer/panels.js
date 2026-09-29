@@ -1975,9 +1975,11 @@ function ayarGruplari(saglayiciSecenekleri) {
             'çiftlerin yaklaşık %41\'ini geçiriyor, yani tek başına seçici değildir. ' +
             'Bu değeri değiştirmek güven yüzdesini de değiştirir, çünkü güven "eşiği ' +
             'geçen kaç kayıt var" sorusunun cevabıdır.' },
-        { yol: 'signalCfg.minMatches', ad: 'En az eşleşme', tip: 'sayi', adim: 1, min: 1, max: 1000,
-          not: 'Sinyal üretmek için gereken eşik üstü kayıt sayısı. Ölçüldü (5m): ' +
-            'oluşumda medyan 1.236, dokunuşta 391 benzer kayıt bulunuyor.' },
+        { yol: 'signalCfg.minMatches', ad: 'En az benzer kurulum', tip: 'sayi', adim: 1, min: 0, max: 1000,
+          not: '0 = kapı yok (önerilen): her oluşum ve dokunuş sinyal olur, elemeyi TP şansı ' +
+            'yapar. Ölçüldü: en iyi sinyallerin (TP şansı %55 üstü dokunuşlar, %78 TP) ' +
+            'neredeyse hepsinin benzer sayısı 5\'in altında; kapı 5 iken bu grubun beşte ' +
+            'dördü eleniyordu.' },
         { yol: 'signalCfg.maxZoneAgeBars', ad: 'En fazla kutu yaşı (bar)',
           tip: 'sayi', adim: 10, min: 0, max: 2000,
           not: 'Olay anındaki kutu yaşı bunu aşarsa sinyal üretilmez. 0 kapatır. ' +

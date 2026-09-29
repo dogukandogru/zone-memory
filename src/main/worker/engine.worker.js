@@ -1474,7 +1474,8 @@ handlers['engine:scan'] = async function (payload, ctx) {
     const hazir = cc.prepareEvents({ events: events })
     const sirali = hazir.events
     const k = cache.k
-    const enAzBenzer = Math.max(1, Math.round(num(uygulanan.signalCfg.minMatches, 5)))
+    // 0 = kapi yok (varsayilan): eleme TP sansi modelinde (bkz. signal.js).
+    const enAzBenzer = Math.max(0, Math.round(num(uygulanan.signalCfg.minMatches, 0)))
     const enAzYakinlik = num(uygulanan.signalCfg.minSimilarity, 0.8)
 
     // GUVEN: "bu yapi gecmiste geldiginde kacinda TP oldu" (learn/guven.js).
@@ -2854,7 +2855,7 @@ handlers['engine:live-tick'] = async function (payload) {
             const toplam = Number.isFinite(adaylarListesi.similarCount)
               ? adaylarListesi.similarCount
               : adaylarListesi.length
-            const enAz = Math.max(1, Math.round(num(canliCfg.signalCfg.minMatches, 5)))
+            const enAz = Math.max(0, Math.round(num(canliCfg.signalCfg.minMatches, 0)))
             if (toplam >= enAz) {
               sig = olaydanSinyal(cand, tf)
               sig.mode = 'benzerlik'
