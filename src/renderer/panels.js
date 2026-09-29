@@ -702,7 +702,7 @@ function guvenIpucu(s) {
     }
     if (taban !== null) metin += 'Oran, türün taban oranına (%' + taban + ') doğru hafifçe çekilir. '
   }
-  if (s.weak) metin += 'ZAYIF: eşiğin altında, ölçümde bu dilimin yalnızca %20-24\'ü TP oldu. '
+  if (s.weak) metin += 'ZAYIF: eşiğin altında, ölçümde bu dilimin yalnızca %29-32\'si TP oldu. '
   if (Number.isFinite(Number(s.similarCount))) metin += 'Geçmişte ' + tam(s.similarCount) + ' benzer kurulum var.'
   return metin.trim()
 }
@@ -869,7 +869,7 @@ export function renderSignals(el, signals, opts) {
     // ile saklanir. Olculdu: bu dilimin %20-24'u TP.
     if (s.weak) {
       const z = h('span', 'badge tiny badge-weak', 'ZAYIF')
-      z.title = 'TP şansı zayıf sinyal eşiğinin altında. Ölçümde bu dilimdeki sinyallerin yalnızca %20-24\'ü TP oldu.'
+      z.title = 'TP şansı zayıf sinyal eşiğinin altında. Ölçümde bu dilimdeki sinyallerin yalnızca %29-32\'si TP oldu.'
       ikinci.appendChild(z)
     }
     if (s.plan) {
@@ -2010,7 +2010,7 @@ function ayarGruplari(saglayiciSecenekleri) {
           tip: 'sayi', adim: 1, min: 0, max: 100,
           not: 'TP şansı bunun altındaysa sinyal ZAYIF işaretlenir: listede soluk ' +
             'görünür, Telegram mesajında uyarı yazar, "Zayıfları gizle" ile saklanır. ' +
-            'Ölçüldü: en düşük dilimdeki sinyallerin yalnızca %20-24\'ü TP oluyor. 0 = kapalı.' },
+            'Ölçüldü: varsayılan 42 sinyallerin altıda birini yakalar, o dilimin TP oranı %29-32. 0 = kapalı.' },
         { yol: 'signalCfg.planHorizonBars', ad: 'Sonuç süresi (bar)',
           tip: 'sayi', adim: 10, min: 10, max: 5000,
           not: 'Bu kadar bar içinde ne TP ne SL vurulursa sonuç "süre doldu" olur ' +

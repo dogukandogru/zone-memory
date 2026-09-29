@@ -154,10 +154,11 @@ const DEFAULT_SIGNAL_CFG = {
   tpAtr: 1.0,
   /**
    * ZAYIF SINYAL ESIGI: TP sansi (yuzde) bunun altindaysa sinyal "zayif"
-   * isaretlenir (listede soluk, ZAYIF rozeti; Telegram'da uyari). Olculdu:
-   * modelin en kotu %20 dilimi %20-24 TP; esik 35 o dilimi yakalar.
+   * isaretlenir (listede soluk, ZAYIF rozeti; Telegram'da uyari). Olculdu
+   * (uretim modeli, zaman ayrimli test): esik 42 sinyallerin %15-17'sini
+   * yakalar, o dilimin TP orani %29-32; kalanlar %48-50.
    */
-  minConfidence: 35,
+  minConfidence: 42,
   /** Plan sonucu icin en fazla kac bar beklenir; dolarsa 'timeout'. */
   planHorizonBars: 200,
   /**
