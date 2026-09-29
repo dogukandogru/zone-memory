@@ -931,13 +931,31 @@ function planCizgileri(s) {
     const pl = s && s.plan ? s.plan : null
     if (pl && typeof view.setPlanLines === 'function') {
       try {
+        // Kullanici istedi: TP ve SL yalnizca sinyal mumunda degil, sinyal
+        // SONUCLANANA KADAR uzasin; TP alani ve SL alani kendi renginde
+        // boyansin; vurulan seviyeye giden cizgi de gorunsun. Bitis: sonuc
+        // bari (tp/sl/timeout); acik planda bitis yok, saga dogru uzar.
+        const giris = sayi(pl.entry, NaN)
+        const tp = sayi(pl.tp, NaN)
+        const sl = sayi(pl.sl, NaN)
+        const cozum = sayi(pl.resolvedTime, NaN)
+        const vurulan = pl.result === 'tp' ? tp : (pl.result === 'sl' ? sl : NaN)
         view.setPlanLines({
           time: sayi(s.time, 0),
+          endTime: Number.isFinite(cozum) ? cozum : null,
           levels: [
-            { price: sayi(pl.entry, NaN), color: '#d1d4dc', title: 'Giriş', width: 1, dashed: false },
-            { price: sayi(pl.tp, NaN), color: RENK.up, title: 'TP', width: 1, dashed: true },
-            { price: sayi(pl.sl, NaN), color: RENK.down, title: 'SL', width: 1, dashed: true },
+            { price: giris, color: '#d1d4dc', title: 'Giriş', width: 1, dashed: false },
+            { price: tp, color: RENK.up, title: 'TP', width: 1, dashed: true },
+            { price: sl, color: RENK.down, title: 'SL', width: 1, dashed: true },
           ].filter((c) => Number.isFinite(c.price)),
+          zones: [
+            { from: giris, to: tp, color: 'rgba(38, 166, 154, 0.14)' },
+            { from: giris, to: sl, color: 'rgba(239, 83, 80, 0.14)' },
+          ].filter((z) => Number.isFinite(z.from) && Number.isFinite(z.to)),
+          path: Number.isFinite(vurulan) && Number.isFinite(cozum)
+            ? { time: sayi(s.time, 0), price: giris, endTime: cozum, endPrice: vurulan,
+                color: pl.result === 'tp' ? RENK.up : RENK.down }
+            : null,
         })
       } catch (err) { /* onemsiz */ }
     } else if (typeof view.clearPlanLines === 'function') {

@@ -471,6 +471,22 @@ export function createChartView(container) {
     const x2 = Math.min(xSon, paneW);
     if (x2 <= 0 || x1 >= paneW) return;
 
+    // ALANLAR once: cizgiler ve mumlar ustunde kalsin. Alan sinyal barindan
+    // bitise (sonuc bari; acik planda saga dogru) uzanir.
+    if (Array.isArray(plan.zones)) {
+      for (let i = 0; i < plan.zones.length; i++) {
+        const z = plan.zones[i];
+        const ya = priceToY(z.from);
+        const yb = priceToY(z.to);
+        if (!isNum(ya) || !isNum(yb)) continue;
+        const yUst = Math.max(0, Math.min(ya, yb));
+        const yAlt = Math.min(paneH, Math.max(ya, yb));
+        if (yAlt <= yUst) continue;
+        ctx.fillStyle = z.color;
+        ctx.fillRect(x1, yUst, x2 - x1, yAlt - yUst);
+      }
+    }
+
     // Sinyal ani: ince dikey isaret.
     if (xBas >= 0 && xBas <= paneW) {
       ctx.strokeStyle = 'rgba(209, 212, 220, 0.35)';
@@ -512,6 +528,36 @@ export function createChartView(container) {
           ctx.fillStyle = lv.color;
           ctx.fillText(lv.title, lx, y);
         }
+      }
+    }
+
+    // YOL VE VURUS: giristen (sinyal bari) vurulan seviyeye (sonuc bari)
+    // duz cizgi ve ucunda dolu daire. Hangi seviyenin once vurulduguna
+    // bakmadan anlasilsin diye cizgi o seviyenin rengindedir.
+    const yol = plan.path;
+    if (yol) {
+      const px1 = timeToX(yol.time);
+      const py1 = priceToY(yol.price);
+      let px2 = timeToX(yol.endTime);
+      const py2 = priceToY(yol.endPrice);
+      if (isNum(px1) && isNum(py1) && isNum(px2) && isNum(py2)) {
+        // Ayni ya da bir sonraki barda biten plan: cizgi dikeye yakin kalir,
+        // yine de bitisi asgari genislige tasiyoruz ki daire etiketle catismasin.
+        if (px2 - px1 < MIN_PLAN_PX) px2 = px1 + MIN_PLAN_PX;
+        ctx.strokeStyle = yol.color;
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([]);
+        ctx.beginPath();
+        ctx.moveTo(px1, py1);
+        ctx.lineTo(px2, py2);
+        ctx.stroke();
+        ctx.fillStyle = yol.color;
+        ctx.beginPath();
+        ctx.arc(px2, py2, 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(19, 23, 34, 0.9)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
       }
     }
   }
@@ -601,7 +647,25 @@ export function createChartView(container) {
       const bit = (next.endTime === null || next.endTime === undefined)
         ? null
         : (isNum(+next.endTime) ? +next.endTime : null);
-      plan = levels.length ? { time: +next.time, endTime: bit, levels: levels } : null;
+      // ALANLAR (kullanici istedi): giris ile TP arasi ve giris ile SL arasi,
+      // sinyal barindan sonuclanana kadar kendi renginde boyanir. YOL: giristen
+      // vurulan seviyeye uzanan cizgi; VURUS: o noktada dolu daire.
+      const zones = [];
+      if (Array.isArray(next.zones)) {
+        for (let i = 0; i < next.zones.length; i++) {
+          const z = next.zones[i];
+          if (!z || !isNum(+z.from) || !isNum(+z.to)) continue;
+          zones.push({ from: +z.from, to: +z.to, color: z.color || 'rgba(255,255,255,0.08)' });
+        }
+      }
+      const path = next.path && isNum(+next.path.time) && isNum(+next.path.price) &&
+        isNum(+next.path.endTime) && isNum(+next.path.endPrice)
+        ? { time: +next.path.time, price: +next.path.price, endTime: +next.path.endTime,
+            endPrice: +next.path.endPrice, color: next.path.color || COLOR.accent }
+        : null;
+      plan = levels.length
+        ? { time: +next.time, endTime: bit, levels: levels, zones: zones, path: path }
+        : null;
     }
     planEksenGorunumleriniKur();
     if (planPrimitive._requestUpdate) planPrimitive._requestUpdate();
