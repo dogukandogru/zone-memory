@@ -312,6 +312,8 @@ const SINIRLAR = {
   'featureCfg.shapeWindowBars': [16, 512],
   'signalCfg.touchMinWinRate': [0, 1],
   'signalCfg.maxZoneAgeBars': [0, 2000],
+  'signalCfg.tpRr': [0.1, 10],
+  'signalCfg.minConfidence': [0, 100],
   'signalCfg.slAtr': [0.1, 20],
   'signalCfg.tpAtr': [0.1, 20],
   'signalCfg.planHorizonBars': [10, 5000],

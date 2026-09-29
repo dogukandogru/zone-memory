@@ -18,14 +18,23 @@
 
 const series = require('../series')
 
-/** Plan bicimi: eski (kutu kenari / dolar) planlari ayirt etmek icin. */
-const PLAN_MODE = 'atr'
+/** Plan kipleri: 'kutu' (SL kutu kenari, varsayilan) ve 'atr' (sabit ATR). */
+const PLAN_KIPLERI = ['kutu', 'atr']
 
 /** Varsayilanlar; signal.js DEFAULT_SIGNAL_CFG ile ayni degerler. */
 const DEFAULT_PLAN_CFG = {
+  planMode: 'kutu',
+  tpRr: 1.0,
+  breakBufferAtr: 0.25,
   slAtr: 1.0,
   tpAtr: 1.0,
   planHorizonBars: 200,
+}
+
+/** Gecersiz kip verilirse varsayilan. */
+function planKipi (cfg) {
+  const m = cfg && typeof cfg.planMode === 'string' ? cfg.planMode : ''
+  return PLAN_KIPLERI.indexOf(m) >= 0 ? m : DEFAULT_PLAN_CFG.planMode
 }
 
 function sayi (v, varsayilan) {
@@ -34,22 +43,27 @@ function sayi (v, varsayilan) {
 }
 
 /**
- * Plan seviyelerini kurar: ATR cinsinden SL ve TP mesafesi.
+ * Plan seviyelerini kurar.
  *
- * Kullanici istedi: "ATR'ye gore TP ve ATR'ye gore SL ayarlayabilmeliyim".
- *   giris = sinyal barinin kapanisi
- *   SL    = giris -/+ slAtr * ATR   (AL'da asagida, SAT'ta yukarida)
- *   TP    = giris +/- tpAtr * ATR
- * ATR olayin oldugu bardaki 14 barlik ortalama gercek araliktir (signal.atr),
- * yani mesafe piyasanin o anki oynakligiyla olcekli: 2011'de de 2026'da da
- * "1 ATR" ayni anlama gelir. Onceki tanim (kutunun uzak kenari + pay, TP =
- * risk x oran) kaldirildi: dokunusta risk 5-6 dolara dusup ilk fitilde SL
- * vuruluyordu ve iki mesafe ayri ayri ayarlanamiyordu.
+ * KIP 'kutu' (varsayilan): SL = kutunun UZAK kenari -/+ breakBufferAtr * ATR,
+ *   risk = |giris - SL|, TP = giris +/- tpRr * risk.
+ * KIP 'atr': SL = giris -/+ slAtr * ATR, TP = giris +/- tpAtr * ATR.
  *
- * @param {{price?:number, atr?:number, direction?:string, isSupport?:boolean}} signal
- * @param {{slAtr?:number, tpAtr?:number}} [cfg]
- * @returns {{entry:number, sl:number, tp:number, risk:number, rr:number}|null}
- *          Giris ya da ATR yoksa null
+ * NEDEN KUTU KENARI VARSAYILAN. Olculdu (5m 34 bin olay, 15m 8,5 bin; egitim
+ * 2023 oncesi, test sonrasi): kapanistan +-1 ATR tanimiyla HICBIR ozellik ve
+ * benzerlik komsusu sonucu ayirt etmiyor (AUC 0,50, hepsi). SL kutu kenarina
+ * baglaninca ayni ozellikler AUC 0,60 / 0,62 veriyor: en kotu %20 dilim %20-24
+ * TP, en iyi dilim %49-53. Bilgi girisin kutu kenarina uzakliginda: riske
+ * taban konunca (en az 0,5 ya da 1 ATR) bilgi yine kayboluyor. Dokunusta
+ * fiyat uzak kenara yapismissa (risk < 0,5 ATR) 10'da 8 SL: bu sinyaller
+ * alinmamali, SL uzaklastirilmamali. Sabit ATR kipi istege bagli kaldi.
+ *
+ * @param {{price?:number, atr?:number, direction?:string, isSupport?:boolean,
+ *          zoneTop?:number, zoneBottom?:number}} signal
+ * @param {{planMode?:string, tpRr?:number, breakBufferAtr?:number,
+ *          slAtr?:number, tpAtr?:number}} [cfg]
+ * @returns {{mode:string, entry:number, sl:number, tp:number, risk:number, rr:number}|null}
+ *          Giris, ATR ya da (kutu kipinde) kutu kenari yoksa null
  */
 function planKur (signal, cfg) {
   if (!signal) return null
@@ -58,14 +72,39 @@ function planKur (signal, cfg) {
   const atr = sayi(signal.atr, NaN)
   if (!Number.isFinite(entry) || entry <= 0) return null
   if (!(atr > 0)) return null
-  const slAtr = sayi(c.slAtr, DEFAULT_PLAN_CFG.slAtr)
-  const tpAtr = sayi(c.tpAtr, DEFAULT_PLAN_CFG.tpAtr)
-  if (!(slAtr > 0) || !(tpAtr > 0)) return null
   const yukari = signal.direction ? signal.direction !== 'SELL' : !!signal.isSupport
-  const risk = slAtr * atr
-  const sl = yukari ? entry - risk : entry + risk
-  const tp = yukari ? entry + tpAtr * atr : entry - tpAtr * atr
-  return { entry: entry, sl: sl, tp: tp, risk: risk, rr: tpAtr / slAtr }
+  const kip = planKipi(c)
+  if (kip === 'atr') {
+    const slAtr = sayi(c.slAtr, DEFAULT_PLAN_CFG.slAtr)
+    const tpAtr = sayi(c.tpAtr, DEFAULT_PLAN_CFG.tpAtr)
+    if (!(slAtr > 0) || !(tpAtr > 0)) return null
+    const risk = slAtr * atr
+    return {
+      mode: 'atr',
+      entry: entry,
+      sl: yukari ? entry - risk : entry + risk,
+      tp: yukari ? entry + tpAtr * atr : entry - tpAtr * atr,
+      risk: risk,
+      rr: tpAtr / slAtr,
+    }
+  }
+  const uzakKenar = sayi(yukari ? signal.zoneBottom : signal.zoneTop, NaN)
+  if (!Number.isFinite(uzakKenar)) return null
+  const pay = Math.max(0, sayi(c.breakBufferAtr, DEFAULT_PLAN_CFG.breakBufferAtr)) * atr
+  const rr = sayi(c.tpRr, DEFAULT_PLAN_CFG.tpRr)
+  if (!(rr > 0)) return null
+  const sl = yukari ? uzakKenar - pay : uzakKenar + pay
+  const risk = Math.abs(entry - sl)
+  // Giris SL'nin yanlis tarafindaysa (kutu coktan kirilmis) plan kurulamaz.
+  if (!(risk > 0) || (yukari ? entry <= sl : entry >= sl)) return null
+  return {
+    mode: 'kutu',
+    entry: entry,
+    sl: sl,
+    tp: yukari ? entry + rr * risk : entry - rr * risk,
+    risk: risk,
+    rr: rr,
+  }
 }
 
 /**
@@ -122,7 +161,7 @@ function sinyaliPlanla (s, signal, cfg) {
     }
   }
   signal.plan = {
-    mode: PLAN_MODE,
+    mode: kurulan.mode,
     entry: kurulan.entry,
     sl: kurulan.sl,
     tp: kurulan.tp,
@@ -134,4 +173,4 @@ function sinyaliPlanla (s, signal, cfg) {
   return signal.plan
 }
 
-module.exports = { PLAN_MODE, DEFAULT_PLAN_CFG, planKur, planCoz, sinyaliPlanla }
+module.exports = { PLAN_KIPLERI, DEFAULT_PLAN_CFG, planKipi, planKur, planCoz, sinyaliPlanla }

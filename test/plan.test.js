@@ -8,7 +8,7 @@
 
 const test = require('node:test')
 const assert = require('node:assert/strict')
-const { planKur, planCoz, sinyaliPlanla, DEFAULT_PLAN_CFG, PLAN_MODE } = require('../src/core/learn/plan')
+const { planKur, planCoz, sinyaliPlanla, DEFAULT_PLAN_CFG, planKipi } = require('../src/core/learn/plan')
 const series = require('../src/core/series')
 
 const T0 = 1700000000
@@ -22,13 +22,38 @@ function seri (barlar) {
     volume: barlar.map(() => 1),
   })
 }
+// ATR kipi ornekleri (kutusuz); kutu kipi icin asagida ayri ornekler.
 const AL = { price: 100, atr: 2, direction: 'BUY', time: T0 }
 const SAT = { price: 100, atr: 2, direction: 'SELL', time: T0 }
+const ATR_KIP = { planMode: 'atr' }
+// Kutu kipi: AL destek kutusu 96-98, giris 100; SAT direnc kutusu 102-104.
+const AL_KUTU = { price: 100, atr: 2, direction: 'BUY', time: T0, zoneTop: 98, zoneBottom: 96 }
+const SAT_KUTU = { price: 100, atr: 2, direction: 'SELL', time: T0, zoneTop: 104, zoneBottom: 102 }
 
-test('plan seviyeleri: SL ve TP ATR katlari, yon aynali', () => {
-  const al = planKur(AL, { slAtr: 1, tpAtr: 1 })
+test('KUTU KIPI (varsayilan): SL uzak kenar + pay, TP = risk x oran', () => {
+  assert.equal(planKipi({}), 'kutu', 'varsayilan kip kutu')
+  assert.equal(planKipi({ planMode: 'saçma' }), 'kutu', 'gecersiz kip varsayilana duser')
+  // AL: uzak kenar 96, pay 0,25 x 2 = 0,5 -> SL 95,5; risk 4,5; TP 104,5
+  const al = planKur(AL_KUTU, {})
+  assert.deepEqual({ mode: al.mode, sl: al.sl, tp: al.tp, risk: al.risk, rr: al.rr }, { mode: 'kutu', sl: 95.5, tp: 104.5, risk: 4.5, rr: 1 })
+  // SAT: uzak kenar 104 -> SL 104,5; risk 4,5; oran 1,5 -> TP 93,25
+  const sat = planKur(SAT_KUTU, { tpRr: 1.5 })
+  assert.equal(sat.sl, 104.5)
+  assert.equal(sat.tp, 93.25)
+  assert.equal(sat.rr, 1.5)
+  // Pay 0: SL tam kenar.
+  assert.equal(planKur(AL_KUTU, { breakBufferAtr: 0 }).sl, 96)
+  // Kutu kenari yoksa ya da giris SL'nin yanlis tarafindaysa plan yok.
+  assert.equal(planKur(AL, {}), null, 'kutu kipinde kutu kenari sart')
+  assert.equal(planKur(Object.assign({}, AL_KUTU, { price: 95 }), {}), null, 'giris SL altinda: kutu coktan kirilmis')
+  assert.equal(planKur(AL_KUTU, { tpRr: 0 }), null)
+})
+
+test('plan seviyeleri (ATR kipi): SL ve TP ATR katlari, yon aynali', () => {
+  const al = planKur(AL, { planMode: 'atr', slAtr: 1, tpAtr: 1 })
+  assert.equal(al.mode, 'atr')
   assert.deepEqual({ entry: al.entry, sl: al.sl, tp: al.tp, rr: al.rr }, { entry: 100, sl: 98, tp: 102, rr: 1 })
-  const sat = planKur(SAT, { slAtr: 0.5, tpAtr: 1.5 })
+  const sat = planKur(SAT, { planMode: 'atr', slAtr: 0.5, tpAtr: 1.5 })
   assert.equal(sat.sl, 101, 'SAT: SL yukarida, 0,5 ATR')
   assert.equal(sat.tp, 97, 'SAT: TP asagida, 1,5 ATR')
   assert.equal(sat.rr, 3)
@@ -36,10 +61,10 @@ test('plan seviyeleri: SL ve TP ATR katlari, yon aynali', () => {
 })
 
 test('plan kurulamaz: giris yok, ATR yok, mesafe sifir', () => {
-  assert.equal(planKur({ direction: 'BUY', atr: 2 }, {}), null)
-  assert.equal(planKur(Object.assign({}, AL, { atr: 0 }), {}), null)
-  assert.equal(planKur(AL, { slAtr: 0, tpAtr: 1 }), null)
-  assert.equal(planKur(AL, { slAtr: 1, tpAtr: -1 }), null)
+  assert.equal(planKur({ direction: 'BUY', atr: 2 }, ATR_KIP), null)
+  assert.equal(planKur(Object.assign({}, AL, { atr: 0 }), ATR_KIP), null)
+  assert.equal(planKur(AL, { planMode: 'atr', slAtr: 0, tpAtr: 1 }), null)
+  assert.equal(planKur(AL, { planMode: 'atr', slAtr: 1, tpAtr: -1 }), null)
   assert.equal(planKur(null, {}), null)
 })
 
@@ -69,24 +94,25 @@ test('SAT yonu aynali: SL yukarida, TP asagida', () => {
   assert.equal(planCoz(seri([[100, 100.5, 99.5, 100], [101, 102.5, 100.5, 102]]), 0, plan, false, 200).result, 'sl')
 })
 
-test('sinyaliPlanla: sinyali zamana gore bulur, plani takar (mode atr), seri yoksa ACIK', () => {
+test('sinyaliPlanla: sinyali zamana gore bulur, plani takar (kip yazili), seri yoksa ACIK', () => {
   const s = seri([[100, 100.5, 99.5, 100], [101, 102.5, 100.5, 102]])
   const sig = Object.assign({}, AL)
-  const plan = sinyaliPlanla(s, sig, { slAtr: 1, tpAtr: 1, planHorizonBars: 200 })
+  const plan = sinyaliPlanla(s, sig, { planMode: 'atr', slAtr: 1, tpAtr: 1, planHorizonBars: 200 })
   assert.equal(sig.plan, plan)
-  assert.equal(plan.mode, PLAN_MODE)
+  assert.equal(plan.mode, 'atr')
   assert.equal(plan.result, 'tp')
   assert.equal(plan.resolvedTime, T0 + 60)
-  assert.equal(sinyaliPlanla(null, Object.assign({}, AL), {}).result, 'open')
+  assert.equal(sinyaliPlanla(null, Object.assign({}, AL_KUTU), {}).result, 'open')
+  assert.equal(sinyaliPlanla(null, Object.assign({}, AL_KUTU), {}).mode, 'kutu')
   const atrsiz = Object.assign({}, AL, { atr: 0 })
-  assert.equal(sinyaliPlanla(s, atrsiz, {}), null)
+  assert.equal(sinyaliPlanla(s, atrsiz, ATR_KIP), null)
   assert.equal(atrsiz.plan, null)
 })
 
 test('MESAFE DEGISINCE SONUC DEGISIR: TP 1 ATR vurulur, TP 3 ATR acik kalir', () => {
   const s = seri([[100, 100.5, 99.5, 100], [101, 102.5, 100.5, 102], [101, 102.5, 100.5, 102]])
-  const dar = sinyaliPlanla(s, Object.assign({}, AL), { slAtr: 1, tpAtr: 1 })
-  const genis = sinyaliPlanla(s, Object.assign({}, AL), { slAtr: 1, tpAtr: 3 })
+  const dar = sinyaliPlanla(s, Object.assign({}, AL), { planMode: 'atr', slAtr: 1, tpAtr: 1 })
+  const genis = sinyaliPlanla(s, Object.assign({}, AL), { planMode: 'atr', slAtr: 1, tpAtr: 3 })
   assert.equal(dar.result, 'tp')
   assert.equal(genis.result, 'open')
 })

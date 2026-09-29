@@ -570,7 +570,14 @@ function kutuYasiSiniri() {
 /** Plan ayarinin imzasi: degisti mi anlamak icin. */
 function planAyari() {
   const c = durum.ayarlar && durum.ayarlar.signalCfg ? durum.ayarlar.signalCfg : {}
-  return String(c.slAtr) + ':' + String(c.tpAtr) + ':' + String(c.planHorizonBars)
+  const o = durum.ayarlar && durum.ayarlar.outcomeCfg ? durum.ayarlar.outcomeCfg : {}
+  return [planKipi(), c.tpRr, o.breakBufferAtr, c.slAtr, c.tpAtr, c.planHorizonBars, c.minConfidence].map(String).join(':')
+}
+
+/** Ayarlardaki plan kipi: 'kutu' (varsayilan) ya da 'atr'. */
+function planKipi() {
+  const c = durum.ayarlar && durum.ayarlar.signalCfg ? durum.ayarlar.signalCfg : {}
+  return c.planMode === 'atr' ? 'atr' : 'kutu'
 }
 
 /** Aralik secimindeki baslangic zamani (UNIX saniye) ya da null (tumu). */
@@ -1313,10 +1320,11 @@ async function sinyalleriYukle() {
   // PLAN ALANI OLMAYAN ESKI LISTE: TP/SL ozelligi eklenmeden once yazilmis.
   // Bir kez plan-refresh ile hesaplatilir (tarama gerekmez), sonra yeniden
   // okunur. Bayrak tekrar dongusunu onler.
-  // Eski bicim planlar (mode yok: kutu kenari; 'usd': dolar) bir kez ATR
-  // tanimiyla yeniden hesaplanir.
+  // Kipi ayardakinden farkli planlar (eski bicim ya da kip degismis) bir
+  // kez yeniden hesaplanir.
+  const beklenenKip = planKipi()
   if (!durum.planTazelendi && tumu.some((x) => x && (x.plan === undefined ||
-      (x.plan && x.plan.mode !== 'atr')))) {
+      (x.plan && x.plan.mode !== beklenenKip)))) {
     durum.planTazelendi = true
     await cagirGuvenli('engine:plan-refresh',
       { tf: durum.tf, cfgPatch: durum.ayarYamasiKayitli || null }, null)
@@ -2101,6 +2109,7 @@ function sinyalPaneliniCiz() {
     filter: suzgec,
     kind: durum.sinyalTuru,
     from: sinyalAralikBaslangici(),
+    hideWeak: !!(el('weakToggle') && el('weakToggle').checked),
     total: durum.sinyalToplam,
     truncated: durum.sinyalKirpildi,
     // Tarama surerken "hafizayi kurun" demek yaniltici: kurulma zaten suruyor.
@@ -3268,6 +3277,8 @@ function dugmeleriBagla() {
   // Aralik degisince liste de suzulur (sayimlar ve TP orani dahil).
   const aralikSec = el('signalCsvRange')
   if (aralikSec) aralikSec.addEventListener('change', () => sinyalPaneliniCiz())
+  const zayifKutu = el('weakToggle')
+  if (zayifKutu) zayifKutu.addEventListener('change', () => sinyalPaneliniCiz())
 
   const iptal = el('cancelBtn')
   if (iptal) {

@@ -191,6 +191,11 @@
                 >
                 <input type="checkbox" id="asOfToggle"><span>Sonrasını gizle</span>
               </label>
+              <label class="check mini" for="weakToggle"
+                     title="Açıkken TP şansı zayıf sinyal eşiğinin altındaki sinyaller listelenmez (eşik Ayarlar > Sinyal kararı)."
+                >
+                <input type="checkbox" id="weakToggle"><span>Zayıfları gizle</span>
+              </label>
               <button type="button" class="btn mini" id="signalRefreshBtn">Yenile</button>
             </span>
           </div>
@@ -372,7 +377,7 @@ SAG PANEL
                         her birinde data-panel="..."; etkin olana .active
                         (.panel gizli, .panel.active gorunur)
 
-  Sinyaller: #signalFilter #asOfToggle #signalRefreshBtn #signalCsvRange #signalCsvBtn
+  Sinyaller: #signalFilter #asOfToggle #weakToggle #signalRefreshBtn #signalCsvRange #signalCsvBtn
              #signalKindTabs #signalTabForm #signalTabTouch
              #signalCountForm #signalCountTouch
              #signalList #signalEmpty #signalDetail

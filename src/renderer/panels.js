@@ -685,15 +685,24 @@ function guvenIpucu(s) {
   const ham = Number.isFinite(Number(s.confidenceRaw)) ? Math.round(100 * Number(s.confidenceRaw)) : null
   const etkin = Number.isFinite(Number(s.confidenceNeff)) ? Math.round(Number(s.confidenceNeff)) : null
   const taban = Number.isFinite(Number(s.confidenceBase)) ? Math.round(100 * Number(s.confidenceBase)) : null
-  let metin = 'TP şansı: bu yapıya en çok benzeyen 50 geçmiş kurulumun senin TP/SL ' +
-    'mesafenle sonucu, benzerlik ağırlıklı (yakın olan daha çok sayılır). '
-  if (n > 0 && ham !== null) {
-    metin += 'Sonucu sinyal anında belli olan ' + tam(n) + ' kurulumda ağırlıklı TP oranı %' + ham +
-      (etkin !== null ? ' (etkin örneklem ' + tam(etkin) + ')' : '') + '. '
+  let metin = ''
+  if (s.confidenceModel) {
+    metin += 'TP şansı: tüm geçmiş üzerinde eğitilmiş modelin tahmini. Girdiler: girişin kutu ' +
+      'kenarına uzaklığı, penetrasyon, sinyal mumu, kutu yaşı ve genişliği, tür, yön, son ' +
+      'saatlerin hareketi ve benzerlerin TP oranı' +
+      (n > 0 && ham !== null ? ' (en benzer ' + tam(n) + ' kurulumda %' + ham + ')' : '') + '. '
   } else {
-    metin += 'Sonucu sinyal anında belli olan kurulum yok, yüzde türün taban oranı. '
+    metin += 'TP şansı: bu yapıya en çok benzeyen 50 geçmiş kurulumun senin TP/SL ' +
+      'mesafenle sonucu, benzerlik ağırlıklı (yakın olan daha çok sayılır). '
+    if (n > 0 && ham !== null) {
+      metin += 'Sonucu sinyal anında belli olan ' + tam(n) + ' kurulumda ağırlıklı TP oranı %' + ham +
+        (etkin !== null ? ' (etkin örneklem ' + tam(etkin) + ')' : '') + '. '
+    } else {
+      metin += 'Sonucu sinyal anında belli olan kurulum yok, yüzde türün taban oranı. '
+    }
+    if (taban !== null) metin += 'Oran, türün taban oranına (%' + taban + ') doğru hafifçe çekilir. '
   }
-  if (taban !== null) metin += 'Oran, türün taban oranına (%' + taban + ') doğru hafifçe çekilir. '
+  if (s.weak) metin += 'ZAYIF: eşiğin altında, ölçümde bu dilimin yalnızca %20-24\'ü TP oldu. '
   if (Number.isFinite(Number(s.similarCount))) metin += 'Geçmişte ' + tam(s.similarCount) + ' benzer kurulum var.'
   return metin.trim()
 }
@@ -712,6 +721,7 @@ function guvenIpucu(s) {
  *   from: ZAMAN ARALIGI (UNIX saniye). Verilirse yalnizca bu andan sonraki
  *   sinyaller listelenir; sayimlar ve TP orani da buna gore. Kullanici: aralik
  *   secimi hem CSV'yi hem listeyi suzsun.
+ *   hideWeak: true ise zayif (weak) sinyaller listelenmez.
  */
 export function renderSignals(el, signals, opts) {
   if (!el) return
@@ -734,7 +744,8 @@ export function renderSignals(el, signals, opts) {
   const baslangic = Number.isFinite(Number(o.from)) && Number(o.from) > 0 ? Number(o.from) : null
   const turdekiler = hepsi.filter((s) => s &&
     (tur === null || (tur === 'form' ? s.kind === 'form' : s.kind !== 'form')) &&
-    (baslangic === null || sayi(s.time, 0) >= baslangic))
+    (baslangic === null || sayi(s.time, 0) >= baslangic) &&
+    (!o.hideWeak || !s.weak))
 
   const suzgec = o.filter || 'all'
   // 'fired' suzgeci KALDIRILDI: bu kipte liste zaten yalnizca uretilen
@@ -836,7 +847,7 @@ export function renderSignals(el, signals, opts) {
   let seciliSatir = null
   const satirKur = (s) => {
     const alis = s.direction !== 'SELL'
-    const satir = h('div', 'row ' + (alis ? 'buy' : 'sell') + (s.fired ? '' : ' dim') +
+    const satir = h('div', 'row ' + (alis ? 'buy' : 'sell') + (s.fired ? '' : ' dim') + (s.weak ? ' weak' : '') +
       (o.selectedId !== undefined && o.selectedId !== null && String(s.id) === String(o.selectedId) ? ' selected' : ''))
     if (satir.classList.contains('selected')) seciliSatir = satir
 
@@ -854,6 +865,13 @@ export function renderSignals(el, signals, opts) {
     // "zaten o sekmedeyim"). Sekme yokken (kutunun sinyalleri gibi karisik
     // listeler) rozet kalir; SNIPER ayri bir bilgi oldugu icin hep gosterilir.
     if (tur === null || s.sniper) ikinci.appendChild(turRozeti(s.kind, s.sniper))
+    // ZAYIF: TP sansi esigin altinda. Soluk satir + rozet; "Zayiflari gizle"
+    // ile saklanir. Olculdu: bu dilimin %20-24'u TP.
+    if (s.weak) {
+      const z = h('span', 'badge tiny badge-weak', 'ZAYIF')
+      z.title = 'TP şansı zayıf sinyal eşiğinin altında. Ölçümde bu dilimdeki sinyallerin yalnızca %20-24\'ü TP oldu.'
+      ikinci.appendChild(z)
+    }
     if (s.plan) {
       const planSatiri = h('span', 'plan-line',
         'TP ' + formatPrice(s.plan.tp) + ' \u00b7 SL ' + formatPrice(s.plan.sl) + ' ')
@@ -1965,6 +1983,19 @@ function ayarGruplari(saglayiciSecenekleri) {
           not: 'Olay anındaki kutu yaşı bunu aşarsa sinyal üretilmez. 0 kapatır. ' +
             'Kutunun çizim ömrü 100 bardır ama izlenmeye 600 bara kadar devam ' +
             'eder, yani çok eski bir kutuya gelen dokunuş da olay üretebiliyor.' },
+        { yol: 'signalCfg.planMode', ad: 'SL yeri', tip: 'secim',
+          secenekler: [
+            { deger: 'kutu', ad: 'Kutunun kenarı (önerilen)' },
+            { deger: 'atr', ad: 'Sabit ATR mesafesi' },
+          ],
+          not: 'KUTU KENARI: SL kutunun uzak kenarının hemen dışında ("Geçersizlik payı" ' +
+            'kadar ATR ötesinde), TP = risk × "Hedef oranı". Ölçüldü: sonucu önceden ' +
+            'ayırt edebilen tek tanım bu; sabit ATR mesafesinde hiçbir özellik ve ' +
+            'benzerlik işe yaramıyor (yazı tura). SABİT ATR: aşağıdaki iki mesafe.' },
+        { yol: 'signalCfg.tpRr', ad: 'Hedef oranı (TP = risk × bu)',
+          tip: 'sayi', adim: 0.1, min: 0.1, max: 10,
+          not: 'Yalnızca SL yeri = kutu kenarı iken. 1 = birebir, 1,5 = riskin bir buçuk ' +
+            'katı hedef. Değiştirince sonuçlar ve TP şansı yeniden hesaplanır.' },
         { yol: 'signalCfg.slAtr', ad: 'SL mesafesi (ATR)',
           tip: 'sayi', adim: 0.1, min: 0.1, max: 20,
           not: 'Giriş = sinyal mumunun kapanışı; SL = giriş eksi/artı bu kadar ATR ' +
@@ -1975,6 +2006,11 @@ function ayarGruplari(saglayiciSecenekleri) {
           tip: 'sayi', adim: 0.1, min: 0.1, max: 20,
           not: 'TP = giriş artı/eksi bu kadar ATR. SL ile aynıysa 1\'e 1; iki katıysa ' +
             '1\'e 2. Sinyal satırındaki TP oranı buna göre değişir.' },
+        { yol: 'signalCfg.minConfidence', ad: 'Zayıf sinyal eşiği (TP şansı %)',
+          tip: 'sayi', adim: 1, min: 0, max: 100,
+          not: 'TP şansı bunun altındaysa sinyal ZAYIF işaretlenir: listede soluk ' +
+            'görünür, Telegram mesajında uyarı yazar, "Zayıfları gizle" ile saklanır. ' +
+            'Ölçüldü: en düşük dilimdeki sinyallerin yalnızca %20-24\'ü TP oluyor. 0 = kapalı.' },
         { yol: 'signalCfg.planHorizonBars', ad: 'Sonuç süresi (bar)',
           tip: 'sayi', adim: 10, min: 10, max: 5000,
           not: 'Bu kadar bar içinde ne TP ne SL vurulursa sonuç "süre doldu" olur ' +

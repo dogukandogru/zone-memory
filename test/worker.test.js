@@ -826,10 +826,14 @@ test('guven: komsularin agirlikli TP oranindan hesaplanir, olcek dosyasi eski bi
     const guncel = await cagir('data:status', {})
     assert.strictEqual(guncel.byTf[TF].confidenceScaleCurrent, true)
 
-    // TP MESAFESI DEGISINCE GUVEN DE DEGISIR: TP 20 ATR'de hicbir komsu
-    // TP'ye ulasamaz, agirlikli ham oran sifira iner (ya da sayilan komsu
-    // kalmaz). Komsular onbellekten okunur, tarama gerekmez.
-    const yenileme = await cagir('engine:plan-refresh', { tf: TF, cfgPatch: { signalCfg: Object.assign({ tpAtr: 20 }, gevsek.signalCfg) } })
+    for (const x of sinyaller) {
+      assert.strictEqual(typeof x.weak, 'boolean', 'zayif bayragi her sinyalde olmali')
+      assert.strictEqual(x.weak, x.confidence < 35, 'zayif = TP sansi esigin (35) altinda')
+    }
+    // TP MESAFESI DEGISINCE GUVEN DE DEGISIR: hedef orani 20 (TP = 20 x risk)
+    // ile hicbir komsu TP'ye ulasamaz, agirlikli ham oran sifira iner (ya da
+    // sayilan komsu kalmaz). Komsular onbellekten okunur, tarama gerekmez.
+    const yenileme = await cagir('engine:plan-refresh', { tf: TF, cfgPatch: { signalCfg: Object.assign({ tpRr: 20 }, gevsek.signalCfg) } })
     // KILITLENEN HATA: anahtar elle kopyalanan alanlarla uretiliyordu,
     // builtToTime undefined gidiyordu, anahtar tutmuyordu ve guven sessizce
     // eski kaliyordu. Kaynak ONBELLEK olmali, sinyal listesi kadar yenilenmeli.
@@ -841,7 +845,9 @@ test('guven: komsularin agirlikli TP oranindan hesaplanir, olcek dosyasi eski bi
       assert.ok(x.confidenceN === 0 || x.confidenceRaw === 0, 'TP 20 ATR ile komsu TP orani sifir olmali')
     }
     const gv2 = JSON.parse(fs.readFileSync(yol, 'utf8'))
-    assert.strictEqual(gv2.planCfg.tpAtr, 20, 'olcek dosyasi yeni plan ayarini tasimali')
+    assert.strictEqual(gv2.planCfg.tpRr, 20, 'olcek dosyasi yeni plan ayarini tasimali')
+    assert.strictEqual(gv2.planCfg.planMode, 'kutu', 'varsayilan plan kipi kutu kenari')
+    assert.ok('model' in gv2, 'olcek dosyasi model alanini tasimali (az olayda null)')
     assert.ok(Object.keys(gv2.olaylar).length > 0 &&
       Object.values(gv2.olaylar).every((k) => k[0] !== 'tp'), 'TP 20 ATR ile hicbir olay plani tp olamaz')
 

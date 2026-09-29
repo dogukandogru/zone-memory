@@ -785,6 +785,10 @@ table.tbl tr:hover td { background: var(--bg-hover); }
 .badge.badge-tp { background: rgba(38, 166, 154, 0.18); border-color: rgba(38, 166, 154, 0.6); color: var(--up); font-weight: 700; }
 .badge.badge-sl { background: rgba(239, 83, 80, 0.18); border-color: rgba(239, 83, 80, 0.6); color: var(--down); font-weight: 700; }
 .badge.badge-open { background: rgba(242, 180, 14, 0.16); border-color: rgba(242, 180, 14, 0.6); color: var(--warn); font-weight: 700; }
+/* ZAYIF sinyal: TP sansi esigin altinda; satir soluk, rozet gri. */
+.badge.badge-weak { background: rgba(120, 123, 134, 0.18); border-color: rgba(120, 123, 134, 0.6); color: var(--dim, #787b86); font-weight: 700; }
+.row.weak { opacity: 0.6; }
+.row.weak.selected { opacity: 0.85; }
 .badge.badge-timeout { color: var(--text-dim); }
 .badge.badge-sniper {
   background: rgba(242, 180, 14, 0.18);

@@ -73,6 +73,8 @@ function metinKur(veri) {
     satirlar.push(guven +
       (Number.isFinite(Number(s.similarCount)) ? ', ' + Math.round(Number(s.similarCount)) + ' benzer kurulum' : ''))
   }
+  // ZAYIF sinyal yine gonderilir ama acikca yazilir: musteri neyi almayacagini gorsun.
+  if (s.weak) satirlar.push('⚠️ ZAYIF sinyal: TP şansı eşiğin altında, ölçümde bu dilimin çoğu SL oldu.')
   if (s.plan && Number.isFinite(Number(s.plan.tp)) && Number.isFinite(Number(s.plan.sl))) {
     satirlar.push('TP ' + fiyat(s.plan.tp) + ' · SL ' + fiyat(s.plan.sl))
   }

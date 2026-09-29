@@ -144,12 +144,20 @@ const DEFAULT_SIGNAL_CFG = {
    */
   maxZoneAgeBars: 100,
   /**
-   * SINYAL PLANI (bkz. learn/plan.js): SL = giris -/+ slAtr * ATR,
-   * TP = giris +/- tpAtr * ATR. Kullanici ikisini ayri ayri ATR cinsinden
-   * ayarlamak istedi. Varsayilan 1'e 1.
+   * SINYAL PLANI (bkz. learn/plan.js). Kip 'kutu': SL kutunun uzak kenari
+   * (+ gecersizlik payi), TP = tpRr x risk. Kip 'atr': sabit ATR mesafeleri.
+   * Kutu kenari varsayilan: olculdu, sonucu ayirt eden tek tanim o.
    */
+  planMode: 'kutu',
+  tpRr: 1.0,
   slAtr: 1.0,
   tpAtr: 1.0,
+  /**
+   * ZAYIF SINYAL ESIGI: TP sansi (yuzde) bunun altindaysa sinyal "zayif"
+   * isaretlenir (listede soluk, ZAYIF rozeti; Telegram'da uyari). Olculdu:
+   * modelin en kotu %20 dilimi %20-24 TP; esik 35 o dilimi yakalar.
+   */
+  minConfidence: 35,
   /** Plan sonucu icin en fazla kac bar beklenir; dolarsa 'timeout'. */
   planHorizonBars: 200,
   /**

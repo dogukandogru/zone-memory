@@ -1042,7 +1042,11 @@ function hesapImzasi() {
 function planCfgCoz(uygulanan) {
   const planMod = core('learn/plan')
   const sc = uygulanan && uygulanan.signalCfg ? uygulanan.signalCfg : {}
+  const oc = uygulanan && uygulanan.outcomeCfg ? uygulanan.outcomeCfg : {}
   return {
+    planMode: planMod.planKipi(sc),
+    tpRr: num(sc.tpRr, planMod.DEFAULT_PLAN_CFG.tpRr),
+    breakBufferAtr: num(oc.breakBufferAtr, planMod.DEFAULT_PLAN_CFG.breakBufferAtr),
     slAtr: num(sc.slAtr, planMod.DEFAULT_PLAN_CFG.slAtr),
     tpAtr: num(sc.tpAtr, planMod.DEFAULT_PLAN_CFG.tpAtr),
     planHorizonBars: num(sc.planHorizonBars, planMod.DEFAULT_PLAN_CFG.planHorizonBars),
@@ -2849,6 +2853,19 @@ handlers['engine:live-tick'] = async function (payload) {
                 sig.confidenceMatches.map((m) => ({ similarity: m.similarity, plan: kayitliOlayPlani(gv, m.id) })),
                 num(cand.time, fetchedAt),
                 gv.taban ? gv.taban[cand.kind === 'form' ? 'form' : 'touch'] : undefined))
+              // TP sansi: taramanin egittigi modelle (kayitli); model yoksa
+              // benzerlerin orani kalir. Ozellikler canli seriden.
+              if (gv.model) {
+                const skorMod = core('learn/skor')
+                const p = skorMod.tahmin(gv.model, skorMod.ozellikVektoru(sub,
+                  Object.assign({}, cand, { features: feats }), { komsuOrani: sig.confidenceRaw, tfSec: tfSec }))
+                if (Number.isFinite(p)) {
+                  sig.confidence = Math.round(100 * p)
+                  sig.confidenceModel = 'lojistik'
+                }
+              }
+              sig.weak = num(sig.confidence, 100) < num(canliCfg.signalCfg.minConfidence,
+                core('learn/signal').DEFAULT_SIGNAL_CFG.minConfidence)
               const ilk = adaylarListesi.slice(0, 6).map((m) => ({
                 id: num(m.event && m.event.id, -1),
                 time: num(m.event && m.event.time, 0),
@@ -3223,22 +3240,59 @@ function onbellekKomsuBulucu(cache, sirali) {
  */
 function guvenleriHesapla(tf, liste, olaylar, s, uygulanan, komsuBul) {
   const planMod = core('learn/plan')
+  const skorMod = core('learn/skor')
   const cfg = planCfgCoz(uygulanan)
+  const tfSec = core('tf').tfSeconds(tf)
+  const enAzGuven = num(uygulanan && uygulanan.signalCfg ? uygulanan.signalCfg.minConfidence : NaN,
+    core('learn/signal').DEFAULT_SIGNAL_CFG.minConfidence)
   const olayPlanlari = {}
+  const olayById = new Map()
   for (let i = 0; i < olaylar.length; i++) {
     const e = olaylar[i]
     if (!e) continue
+    olayById.set(num(e.id, -1), e)
     const taslak = {
       price: num(e.price, 0),
       atr: num(e.atr, 0),
       direction: e.direction || (e.isSupport ? 'BUY' : 'SELL'),
       time: num(e.time, 0),
+      zoneTop: num(e.zoneTop, NaN),
+      zoneBottom: num(e.zoneBottom, NaN),
     }
     const p = planMod.sinyaliPlanla(s, taslak, cfg)
     if (p) olayPlanlari[String(num(e.id, -1))] = [p.result, p.resolvedTime]
   }
   const gv = { olaylar: olayPlanlari }
   const taban = guvenMod.tabanOranlari(liste)
+  const komsuOrani = (kimlik, zaman, tur) => {
+    const komsular = komsuBul({ eventId: kimlik })
+    if (!Array.isArray(komsular)) return null
+    return guvenMod.guvenHesapla(
+      komsular.map((m) => ({ similarity: m.similarity, plan: kayitliOlayPlani(gv, m.id) })),
+      zaman, taban[tur === 'form' ? 'form' : 'touch'])
+  }
+
+  // MODEL: tum hafiza olaylari (sonucu tp/sl olanlar) uzerinde egitilir.
+  // Etiket o anki TP/SL tanimiyla sonuc; komsu orani da girdi.
+  const X = []
+  const y = []
+  for (let i = 0; i < olaylar.length; i++) {
+    const e = olaylar[i]
+    if (!e) continue
+    const k = olayPlanlari[String(num(e.id, -1))]
+    if (!k || (k[0] !== 'tp' && k[0] !== 'sl')) continue
+    const ko = komsuOrani(num(e.id, -1), num(e.time, 0), e.kind)
+    X.push(skorMod.ozellikVektoru(s, e, { komsuOrani: ko ? ko.confidenceRaw : null, tfSec: tfSec }))
+    y.push(k[0] === 'tp' ? 1 : 0)
+  }
+  const model = skorMod.egit(X, y)
+  if (model) {
+    log('TP şansı modeli: ' + model.n + ' olay, eğitim AUC ' + model.auc.toFixed(3) +
+      ', en etkili: ' + skorMod.etkiler(model).slice(0, 4).map((k) => k.ad + ' ' + k.w.toFixed(2)).join(', '))
+  } else {
+    log('TP şansı modeli kurulamadı (' + X.length + ' etiketli olay, en az ' + skorMod.EN_AZ_SATIR + ' gerekir); benzerlerin oranı kullanılır.')
+  }
+
   let yenilenen = 0
   for (let i = 0; i < liste.length; i++) {
     const sig = liste[i]
@@ -3249,6 +3303,15 @@ function guvenleriHesapla(tf, liste, olaylar, s, uygulanan, komsuBul) {
       komsular.map((m) => ({ similarity: m.similarity, plan: kayitliOlayPlani(gv, m.id) })),
       num(sig.time, 0),
       taban[sig.kind === 'form' ? 'form' : 'touch']))
+    const olay = olayById.get(num(sig.eventId, -1))
+    if (model && olay) {
+      const p = skorMod.tahmin(model, skorMod.ozellikVektoru(s, olay, { komsuOrani: sig.confidenceRaw, tfSec: tfSec }))
+      if (Number.isFinite(p)) {
+        sig.confidence = Math.round(100 * p)
+        sig.confidenceModel = 'lojistik'
+      }
+    }
+    sig.weak = num(sig.confidence, 100) < enAzGuven
     yenilenen++
   }
   guvenEsikleriYaz(tf, {
@@ -3258,6 +3321,8 @@ function guvenleriHesapla(tf, liste, olaylar, s, uygulanan, komsuBul) {
     onsel: guvenMod.GUVEN_ONSEL,
     planCfg: cfg,
     taban: taban,
+    minConfidence: enAzGuven,
+    model: model,
     olaylar: olayPlanlari,
   })
   return yenilenen
