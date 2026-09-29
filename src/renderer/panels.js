@@ -2010,7 +2010,9 @@ function ayarGruplari(saglayiciSecenekleri) {
           tip: 'sayi', adim: 1, min: 0, max: 100,
           not: 'TP şansı bunun altındaysa sinyal ZAYIF işaretlenir: listede soluk ' +
             'görünür, Telegram mesajında uyarı yazar, "Zayıfları gizle" ile saklanır. ' +
-            'Ölçüldü: varsayılan 42 sinyallerin altıda birini yakalar, o dilimin TP oranı %29-32. 0 = kapalı.' },
+            'Eşik 1\'e 1 plan içindir (başa baş %50); hedef oranı değişince başa baş ' +
+            'noktasıyla birlikte kayar (1,5 için 32). Ölçüldü: varsayılan 42 sinyallerin ' +
+            'altıda birini yakalar, o dilimin TP oranı %29-32. 0 = kapalı.' },
         { yol: 'signalCfg.planHorizonBars', ad: 'Sonuç süresi (bar)',
           tip: 'sayi', adim: 10, min: 10, max: 5000,
           not: 'Bu kadar bar içinde ne TP ne SL vurulursa sonuç "süre doldu" olur ' +

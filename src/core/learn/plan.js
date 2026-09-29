@@ -173,4 +173,33 @@ function sinyaliPlanla (s, signal, cfg) {
   return signal.plan
 }
 
-module.exports = { PLAN_KIPLERI, DEFAULT_PLAN_CFG, planKipi, planKur, planCoz, sinyaliPlanla }
+/**
+ * Planin odul/risk orani (TP mesafesi / SL mesafesi) ve basa bas TP olasiligi.
+ * Kutu kipinde oran = tpRr; ATR kipinde tpAtr / slAtr.
+ * @param {Object} [cfg]
+ * @returns {{rr:number, basaBas:number}} basaBas 0..1 (1 / (1 + rr))
+ */
+function basaBas (cfg) {
+  const c = Object.assign({}, DEFAULT_PLAN_CFG, cfg || {})
+  const rr = planKipi(c) === 'atr'
+    ? sayi(c.tpAtr, DEFAULT_PLAN_CFG.tpAtr) / Math.max(1e-9, sayi(c.slAtr, DEFAULT_PLAN_CFG.slAtr))
+    : sayi(c.tpRr, DEFAULT_PLAN_CFG.tpRr)
+  const r = rr > 0 ? rr : 1
+  return { rr: r, basaBas: 1 / (1 + r) }
+}
+
+/**
+ * Zayif sinyal esigi (yuzde). Ayar 1'e 1 plan icin verilir (basa bas %50);
+ * hedef orani degisince esik basa bas noktasiyla birlikte kayar, yoksa 1,5
+ * oranda sinyallerin %80'i zayif gorunur (goruldu: 25 binde 20 bin).
+ * @param {number} minConfidence 1'e 1 icin esik (yuzde)
+ * @param {Object} [cfg]
+ * @returns {number} Etkin esik (yuzde), 0 = kapali
+ */
+function zayifEsigi (minConfidence, cfg) {
+  const m = sayi(minConfidence, 0)
+  if (!(m > 0)) return 0
+  return Math.max(0, m - 50 + 100 * basaBas(cfg).basaBas)
+}
+
+module.exports = { PLAN_KIPLERI, DEFAULT_PLAN_CFG, planKipi, planKur, planCoz, sinyaliPlanla, basaBas, zayifEsigi }

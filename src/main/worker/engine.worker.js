@@ -1053,6 +1053,26 @@ function planCfgCoz(uygulanan) {
   }
 }
 
+/**
+ * Plani kurulamayan sinyalleri (plan === null) listeden dusurur. Kutu
+ * kipinde bu, girisi SL'nin otesinde kalan (kutu coktan kirilmis) olaylardir;
+ * olculdu, 5m'de 25 binin 2 bini. TP/SL'siz satir musteriye bir sey soylemez.
+ * @param {Array} liste
+ * @returns {Array}
+ */
+function plansizlariAyikla(liste) {
+  const cikti = []
+  let dusen = 0
+  for (let i = 0; i < liste.length; i++) {
+    const sig = liste[i]
+    if (!sig) continue
+    if (sig.plan === null) { dusen++; continue }
+    cikti.push(sig)
+  }
+  if (dusen > 0) log(dusen + ' sinyal plansız kaldığı için listeden düşürüldü (kutu kırılmış, giriş SL ötesinde).')
+  return cikti
+}
+
 function planlariUygula(liste, s, uygulanan) {
   const planMod = core('learn/plan')
   const cfg = planCfgCoz(uygulanan)
@@ -1395,11 +1415,12 @@ handlers['engine:scan'] = async function (payload, ctx) {
 
   if (sinyalKipi === 'hepsi') {
     ctx.progress(96, 'Sinyaller yazılıyor')
-    const liste = []
+    let liste = []
     for (let i = 0; i < events.length; i++) {
       if (events[i] && !yasEngelli(events[i])) liste.push(olaydanSinyal(events[i], tf))
     }
     planlariUygula(liste, s, uygulanan)
+    liste = plansizlariAyikla(liste)
     await writeJsonAtomic(paths.signalsPath(tf), liste)
     signalCache = { tf: tf, signals: liste }
     log(liste.length + ' sinyal yazıldı (her kutu oluşumu ve her dokunuş).')
@@ -1460,7 +1481,7 @@ handlers['engine:scan'] = async function (payload, ctx) {
     // Planlar kurulduktan sonra hesaplanir; bkz. asagida guvenleriHesapla.
 
     ctx.progress(96, 'Sinyaller yazılıyor')
-    const liste = []
+    let liste = []
     for (let i = 0; i < sirali.length; i++) {
       const e = sirali[i]
       if (!e) continue
@@ -1493,6 +1514,7 @@ handlers['engine:scan'] = async function (payload, ctx) {
       liste.push(sig)
     }
     planlariUygula(liste, s, uygulanan)
+    liste = plansizlariAyikla(liste)
     // Guven, komsularin planina bakar; planlar kurulduktan sonra gelir.
     // Komsular onbellekten okunur (esik gozetmeksizin en benzer 50).
     guvenleriHesapla(tf, liste, sirali, s, uygulanan, onbellekKomsuBulucu(cache, sirali))
@@ -1883,9 +1905,10 @@ handlers['engine:plan-refresh'] = async function (payload, ctx) {
   const tf = requireTf(payload.tf)
   ctx.progress(0, 'Planlar yeniden hesaplanıyor')
   const s = await getSeries(tf, false)
-  const liste = (await getSignals(tf, true)).slice()
+  let liste = (await getSignals(tf, true)).slice()
   const uygulanan = core('learn/presets').resolveCfg(tf, payload.cfgPatch || cfgPatchGeriUyum(payload), null)
   const acik = planlariUygula(liste, s, uygulanan)
+  liste = plansizlariAyikla(liste)
   // GUVEN DE DEGISIR: komsularin TP/SL sonucu yeni mesafeye gore baska.
   // Hafiza okunamiyorsa (eski surum) guven eski kalir; yeniden tarama
   // zaten istenir. Donen `guven` alani testte ve gunlukte kaynagi soyler.
@@ -2864,8 +2887,10 @@ handlers['engine:live-tick'] = async function (payload) {
                   sig.confidenceModel = 'lojistik'
                 }
               }
-              sig.weak = num(sig.confidence, 100) < num(canliCfg.signalCfg.minConfidence,
-                core('learn/signal').DEFAULT_SIGNAL_CFG.minConfidence)
+              const zayifEsik = core('learn/plan').zayifEsigi(
+                num(canliCfg.signalCfg.minConfidence, core('learn/signal').DEFAULT_SIGNAL_CFG.minConfidence),
+                planCfgCoz(canliCfg))
+              sig.weak = zayifEsik > 0 && num(sig.confidence, 100) < zayifEsik
               const ilk = adaylarListesi.slice(0, 6).map((m) => ({
                 id: num(m.event && m.event.id, -1),
                 time: num(m.event && m.event.time, 0),
@@ -2942,7 +2967,15 @@ handlers['engine:live-tick'] = async function (payload) {
         }
         // PLAN: TP/SL seviyeleri; sonuc henuz belli degil ('open'), ama
         // gecikmeli degerlendirmede sonraki barlar gelmis olabilir.
-        if (sig) planlariUygula([sig], s, canliCfg)
+        // PLAN KURULAMIYORSA SINYAL YOK: kutu kipinde giris SL'nin otesindeyse
+        // kutu coktan kirilmistir; TP/SL'siz bir satir musteriye bir sey soylemez.
+        if (sig) {
+          planlariUygula([sig], s, canliCfg)
+          if (!sig.plan) {
+            logs.push('Sinyal üretilmedi: plan kurulamadı (kutu kırılmış, giriş SL ötesinde) ' + num(cand.time, 0))
+            sig = null
+          }
+        }
         events.push({
           key: liveEvents.eventKey(cand),
           touch: hafif,
@@ -3243,8 +3276,11 @@ function guvenleriHesapla(tf, liste, olaylar, s, uygulanan, komsuBul) {
   const skorMod = core('learn/skor')
   const cfg = planCfgCoz(uygulanan)
   const tfSec = core('tf').tfSeconds(tf)
-  const enAzGuven = num(uygulanan && uygulanan.signalCfg ? uygulanan.signalCfg.minConfidence : NaN,
-    core('learn/signal').DEFAULT_SIGNAL_CFG.minConfidence)
+  // Esik 1'e 1 icin verilir; hedef orani degisince basa bas noktasiyla kayar.
+  const enAzGuven = planMod.zayifEsigi(
+    num(uygulanan && uygulanan.signalCfg ? uygulanan.signalCfg.minConfidence : NaN,
+      core('learn/signal').DEFAULT_SIGNAL_CFG.minConfidence),
+    cfg)
   const olayPlanlari = {}
   const olayById = new Map()
   for (let i = 0; i < olaylar.length; i++) {
@@ -3311,7 +3347,7 @@ function guvenleriHesapla(tf, liste, olaylar, s, uygulanan, komsuBul) {
         sig.confidenceModel = 'lojistik'
       }
     }
-    sig.weak = num(sig.confidence, 100) < enAzGuven
+    sig.weak = enAzGuven > 0 && num(sig.confidence, 100) < enAzGuven
     yenilenen++
   }
   guvenEsikleriYaz(tf, {
