@@ -3323,7 +3323,7 @@ function guvenleriHesapla(tf, liste, olaylar, s, uygulanan, komsuBul) {
   }
   const model = skorMod.egit(X, y)
   if (model) {
-    log('TP şansı modeli: ' + model.n + ' olay, eğitim AUC ' + model.auc.toFixed(3) +
+    log('TP şansı modeli (' + (model.tur === 'agac' ? 'ağaç' : 'lojistik') + '): ' + model.n + ' olay, eğitim AUC ' + model.auc.toFixed(3) +
       ', en etkili: ' + skorMod.etkiler(model).slice(0, 4).map((k) => k.ad + ' ' + k.w.toFixed(2)).join(', '))
   } else {
     log('TP şansı modeli kurulamadı (' + X.length + ' etiketli olay, en az ' + skorMod.EN_AZ_SATIR + ' gerekir); benzerlerin oranı kullanılır.')

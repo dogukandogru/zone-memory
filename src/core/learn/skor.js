@@ -11,15 +11,21 @@
  * %20-24 TP, en iyi dilim %49-53. Komsu orani tek basina 0,56 / 0,55. Kapanistan
  * sabit ATR tanimiyla ise hicbir sey ayirt etmiyor (0,50).
  *
- * MODEL: standartlastirilmis ozellikler uzerinde L2 cezali lojistik
- * regresyon, gradyan inisi. Kutuphane yok; 34 bin satir x 35 ozellik x 300
- * adim bir iki saniye. Tarama ve plan yenileme tum hafiza olaylari uzerinde
- * egitir (etiket = o anki TP/SL tanimiyla sonuc), canli sinyal kayitli
- * modelle tahmin eder. Bilinmeyen ozellik (NaN) egitim ortalamasina esitlenir
- * (standart 0), yani karari etkilemez.
+ * MODEL: gradyan artirmali kucuk agaclar (derinlik 2, 150 tur, hiz 0,1,
+ * 16 kovali histogram bolmeleri). Olculdu (zaman ayrimli, 1m/5m/15m): agac
+ * testte AUC 0,63 / 0,63 / 0,64, lojistik 0,56 / 0,57 / 0,57. Basa bas
+ * esiginde (%50) agacla kalan sinyallerin TP orani %55-57, sinyal basina
+ * +0,11 / +0,34 / +1,53 dolar; lojistikle 0 / +0,06 / +1,00. Derinlik 1-3,
+ * 80-300 tur, hiz 0,05-0,2 hepsi 0,62-0,64: secim sagliksiz degil.
+ * Kutuphane yok; 94 bin satirda (1m) egitim yarim dakika, 30 binde bes
+ * saniye. 2000'den az etiketli satirda lojistik regresyona duser (L2 cezali,
+ * standartlastirilmis). Tarama ve plan yenileme tum hafiza olaylari uzerinde
+ * egitir (etiket = o anki TP/SL tanimiyla sonuc), canli sinyal kayitli modelle
+ * (.guven.json) tahmin eder. Bilinmeyen ozellik (NaN) ayri bir kovaya duser
+ * (agac) ya da ortalamaya esitlenir (lojistik).
  *
  * DURUST SINIR: bu bir kazanc makinesi degil. Kazanc kotu sinyalleri
- * elemekten geliyor; en iyi dilim maliyet oncesi ancak basa bas.
+ * elemekten ve modelin begendigi azinligi almaktan geliyor.
  */
 
 const series = require('../series')
@@ -42,6 +48,10 @@ const EK_ADLAR = [
 const OZELLIK_ADLARI = CTX_NAMES.concat(EK_ADLAR)
 /** Bundan az etiketli satirla model kurulmaz (tahmin komsu oranina duser). */
 const EN_AZ_SATIR = 200
+/** Bundan az satirda agac yerine lojistik (agac az veride ezberler). */
+const EN_AZ_SATIR_AGAC = 2000
+/** Agac ayarlari. */
+const AGAC = { derinlik: 2, tur: 150, hiz: 0.1, kova: 16, enAzHessian: 20 }
 /** Kutu kenari payi (plan.js breakBufferAtr varsayilaniyla ayni). */
 const KENAR_PAYI_ATR = 0.25
 
@@ -142,16 +152,130 @@ function auc (skor, y) {
 }
 
 /**
- * Modeli egitir.
+ * Modeli egitir: yeterli satir varsa agac (artirma), yoksa lojistik.
  * @param {Float64Array[]} X Ozellik vektorleri (NaN olabilir)
  * @param {number[]} y 0/1
- * @param {{iter?:number, lr?:number, l2?:number}} [opts]
- * @returns {{adlar:string[], mu:number[], sd:number[], w:number[], b:number,
- *            n:number, taban:number, auc:number}|null} Yeterli satir yoksa null
+ * @param {{iter?:number, lr?:number, l2?:number, zorlaLojistik?:boolean}} [opts]
+ * @returns {Object|null} Model (tur 'agac' ya da 'lojistik'); yeterli satir yoksa null
  */
 function egit (X, y, opts) {
   const n = Array.isArray(X) ? X.length : 0
   if (n < EN_AZ_SATIR) return null
+  const o = opts || {}
+  if (n >= EN_AZ_SATIR_AGAC && !o.zorlaLojistik) return egitAgac(X, y)
+  return egitLojistik(X, y, o)
+}
+
+/**
+ * Gradyan artirmali agaclar (lojistik kayip, ikinci dereceden yaklasim).
+ * Ozellikler egitim yuzdeliklerine gore AGAC.kova kovaya bolunur; NaN son
+ * kovaya duser. Her agac: kok + iki cocuk (derinlik 2). Yaprak degeri
+ * -G / (H + 1). Model JSON'a yazilir; tahmin ayni kova kenarlariyla yapilir.
+ */
+function egitAgac (X, y) {
+  const n = X.length
+  const d = OZELLIK_ADLARI.length
+  const BIN = AGAC.kova
+  // Kova kenarlari: her ozellik icin BIN-1 yuzdelik.
+  const kenarlar = []
+  for (let j = 0; j < d; j++) {
+    const v = []
+    for (let i = 0; i < n; i++) { const x = X[i][j]; if (Number.isFinite(x)) v.push(x) }
+    v.sort((a, b) => a - b)
+    const k = []
+    for (let q = 1; q < BIN; q++) k.push(v.length ? v[Math.floor(v.length * q / BIN)] : 0)
+    kenarlar.push(k)
+  }
+  const KX = new Array(n)
+  for (let i = 0; i < n; i++) {
+    const a = new Uint8Array(d)
+    for (let j = 0; j < d; j++) a[j] = kovaNo(kenarlar[j], X[i][j], BIN)
+    KX[i] = a
+  }
+  let pozitif = 0
+  for (let i = 0; i < n; i++) pozitif += y[i]
+  const taban = Math.log((pozitif + 1) / (n - pozitif + 1))
+  const F = new Float64Array(n).fill(taban)
+  const g = new Float64Array(n)
+  const h = new Float64Array(n)
+  const sg = new Float64Array(BIN + 1)
+  const sh = new Float64Array(BIN + 1)
+  const enIyiBolme = (idx) => {
+    let best = null
+    for (let j = 0; j < d; j++) {
+      sg.fill(0); sh.fill(0)
+      for (let t = 0; t < idx.length; t++) { const i = idx[t]; const b = KX[i][j]; sg[b] += g[i]; sh[b] += h[i] }
+      let tg = 0; let th = 0
+      for (let b = 0; b <= BIN; b++) { tg += sg[b]; th += sh[b] }
+      let lg = 0; let lh = 0
+      for (let b = 0; b < BIN; b++) {
+        lg += sg[b]; lh += sh[b]
+        const rg = tg - lg; const rh = th - lh
+        if (lh < AGAC.enAzHessian || rh < AGAC.enAzHessian) continue
+        const kazanc = lg * lg / (lh + 1) + rg * rg / (rh + 1) - tg * tg / (th + 1)
+        if (!best || kazanc > best.kazanc) best = { j: j, b: b, kazanc: kazanc }
+      }
+    }
+    return best
+  }
+  const yaprak = (idx) => { let a = 0; let c = 0; for (let t = 0; t < idx.length; t++) { a += g[idx[t]]; c += h[idx[t]] } return -a / (c + 1) }
+  const bol = (idx, kalan) => {
+    if (kalan <= 0) return { deger: yaprak(idx) }
+    const s = enIyiBolme(idx)
+    if (!s) return { deger: yaprak(idx) }
+    const sol = []; const sag = []
+    for (let t = 0; t < idx.length; t++) { const i = idx[t]; (KX[i][s.j] <= s.b ? sol : sag).push(i) }
+    return { j: s.j, b: s.b, kazanc: s.kazanc, sol: bol(sol, kalan - 1), sag: bol(sag, kalan - 1) }
+  }
+  const agaclar = []
+  const kok = new Array(n)
+  for (let i = 0; i < n; i++) kok[i] = i
+  for (let t = 0; t < AGAC.tur; t++) {
+    for (let i = 0; i < n; i++) { const p = 1 / (1 + Math.exp(-F[i])); g[i] = p - y[i]; h[i] = p * (1 - p) }
+    const agac = bol(kok, AGAC.derinlik)
+    if (agac.deger !== undefined) break
+    for (let i = 0; i < n; i++) F[i] += AGAC.hiz * agacDegeri(agac, KX[i])
+    agaclar.push(agac)
+  }
+  const model = {
+    tur: 'agac',
+    adlar: OZELLIK_ADLARI.slice(),
+    kova: BIN,
+    kenarlar: kenarlar,
+    taban: taban,
+    hiz: AGAC.hiz,
+    agaclar: agaclar,
+    n: n,
+    tabanOran: pozitif / n,
+    auc: 0.5,
+  }
+  const p = new Float64Array(n)
+  for (let i = 0; i < n; i++) p[i] = tahmin(model, X[i])
+  model.auc = Math.round(auc(p, y) * 1000) / 1000
+  return model
+}
+
+/** Degerin kovasi: kenarlari gecen ilk kova; NaN son (BIN) kova. */
+function kovaNo (kenar, v, BIN) {
+  if (!Number.isFinite(v)) return BIN
+  let b = 0
+  while (b < kenar.length && v > kenar[b]) b++
+  return b
+}
+
+/** Bir agacin kovalanmis satir icin degeri. */
+function agacDegeri (node, kx) {
+  while (node.deger === undefined) node = kx[node.j] <= node.b ? node.sol : node.sag
+  return node.deger
+}
+
+/**
+ * Lojistik regresyon (az veride yedek).
+ * @returns {{tur:string, adlar:string[], mu:number[], sd:number[], w:number[], b:number,
+ *            n:number, taban:number, auc:number}}
+ */
+function egitLojistik (X, y, opts) {
+  const n = X.length
   const d = OZELLIK_ADLARI.length
   const o = opts || {}
   const iter = Math.max(1, Math.round(sayi(o.iter, 300)))
@@ -195,6 +319,7 @@ function egit (X, y, opts) {
     b -= lr * gb / n
   }
   const model = {
+    tur: 'lojistik',
     adlar: OZELLIK_ADLARI.slice(),
     mu: Array.from(mu),
     sd: Array.from(sd),
@@ -202,6 +327,7 @@ function egit (X, y, opts) {
     b: b,
     n: n,
     taban: y.reduce((t, v) => t + v, 0) / n,
+    tabanOran: y.reduce((t, v) => t + v, 0) / n,
     auc: 0.5,
   }
   const p = new Float64Array(n)
@@ -212,11 +338,24 @@ function egit (X, y, opts) {
 
 /**
  * Tahmin: TP olasiligi (0..1). Model yoksa ya da bozuksa NaN.
- * @param {{mu:number[], sd:number[], w:number[], b:number}|null} model
+ * @param {Object|null} model 'agac' ya da 'lojistik'
  * @param {ArrayLike<number>} x
  */
 function tahmin (model, x) {
-  if (!model || !Array.isArray(model.w) || !Array.isArray(model.mu) || !Array.isArray(model.sd)) return NaN
+  if (!model) return NaN
+  if (model.tur === 'agac') {
+    if (!Array.isArray(model.agaclar) || !Array.isArray(model.kenarlar)) return NaN
+    const d = model.kenarlar.length
+    if (!x || x.length < d) return NaN
+    const BIN = model.kova || AGAC.kova
+    const kx = new Uint8Array(d)
+    for (let j = 0; j < d; j++) kx[j] = kovaNo(model.kenarlar[j], x[j], BIN)
+    let f = sayi(model.taban, 0)
+    const hiz = sayi(model.hiz, AGAC.hiz)
+    for (let t = 0; t < model.agaclar.length; t++) f += hiz * agacDegeri(model.agaclar[t], kx)
+    return 1 / (1 + Math.exp(-f))
+  }
+  if (!Array.isArray(model.w) || !Array.isArray(model.mu) || !Array.isArray(model.sd)) return NaN
   const d = model.w.length
   if (!x || x.length < d) return NaN
   let t = sayi(model.b, 0)
@@ -228,9 +367,21 @@ function tahmin (model, x) {
   return 1 / (1 + Math.exp(-t))
 }
 
-/** Katsayilari buyuklugune gore sirali dondurur (aciklama icin). */
+/**
+ * Ozelliklerin etkisi, buyukten kucuge (aciklama icin). Agacta bolme
+ * kazanclarinin toplami, lojistikte katsayi.
+ */
 function etkiler (model) {
-  if (!model || !Array.isArray(model.w)) return []
+  if (!model) return []
+  if (model.tur === 'agac' && Array.isArray(model.agaclar)) {
+    const toplam = new Float64Array(model.adlar.length)
+    const gez = (node) => { if (!node || node.deger !== undefined) return; toplam[node.j] += sayi(node.kazanc, 0); gez(node.sol); gez(node.sag) }
+    for (let t = 0; t < model.agaclar.length; t++) gez(model.agaclar[t])
+    const enCok = Math.max(1e-9, Math.max.apply(null, Array.from(toplam)))
+    return model.adlar.map((ad, j) => ({ ad: ad, w: Math.round(100 * toplam[j] / enCok) / 100 }))
+      .sort((a, b) => b.w - a.w)
+  }
+  if (!Array.isArray(model.w)) return []
   return model.adlar.map((ad, j) => ({ ad: ad, w: model.w[j] }))
     .sort((a, b) => Math.abs(b.w) - Math.abs(a.w))
 }
@@ -239,6 +390,8 @@ module.exports = {
   OZELLIK_ADLARI,
   EK_ADLAR,
   EN_AZ_SATIR,
+  EN_AZ_SATIR_AGAC,
+  AGAC,
   KENAR_PAYI_ATR,
   ozellikVektoru,
   auc,

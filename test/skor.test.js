@@ -45,6 +45,35 @@ test('ozellik vektoru: baglam + kutu geometrisi + seri ozellikleri + komsu orani
   assert.equal(sat[skor.OZELLIK_ADLARI.indexOf('yon_al')], 0)
 })
 
+test('agac: dogrusal olmayan deseni ogrenir, JSON gidip gelince ayni tahmin, az veride lojistik', () => {
+  const d = skor.OZELLIK_ADLARI.length
+  const j = skor.OZELLIK_ADLARI.indexOf('risk_atr'), k = skor.OZELLIK_ADLARI.indexOf('penetration')
+  const X = [], y = []
+  let tohum = 11
+  const rnd = () => { tohum = (tohum * 1103515245 + 12345) % 2147483648; return tohum / 2147483648 }
+  for (let i = 0; i < 4000; i++) {
+    const x = new Float64Array(d).fill(NaN)
+    const r = rnd() * 3, pn = rnd()
+    x[j] = r; x[k] = pn; x[0] = rnd()
+    // Dogrusal olmayan: orta riskte VE dusuk penetrasyonda TP yuksek.
+    const p = (r > 1 && r < 2 && pn < 0.5) ? 0.75 : 0.35
+    X.push(x); y.push(rnd() < p ? 1 : 0)
+  }
+  const m = skor.egit(X, y)
+  assert.equal(m.tur, 'agac', '4000 satirda agac')
+  assert.ok(m.auc > 0.65, 'agac deseni ogrenmeli: ' + m.auc)
+  const lojistik = skor.egit(X, y, { zorlaLojistik: true })
+  assert.ok(m.auc > lojistik.auc + 0.05, 'agac lojistigi gecmeli: ' + m.auc + ' / ' + lojistik.auc)
+  const kopya = JSON.parse(JSON.stringify(m))
+  for (let i = 0; i < 20; i++) assert.ok(Math.abs(skor.tahmin(kopya, X[i]) - skor.tahmin(m, X[i])) < 1e-12, 'JSON gidip gelince ayni')
+  const iyi = new Float64Array(d).fill(NaN); iyi[j] = 1.5; iyi[k] = 0.2
+  const kotu = new Float64Array(d).fill(NaN); kotu[j] = 0.3; kotu[k] = 0.9
+  assert.ok(skor.tahmin(m, iyi) > 0.6 && skor.tahmin(m, kotu) < 0.45, 'iyi ' + skor.tahmin(m, iyi) + ' kotu ' + skor.tahmin(m, kotu))
+  const etk = skor.etkiler(m)
+  assert.ok(['risk_atr', 'penetration'].includes(etk[0].ad), 'en etkili risk ya da penetrasyon: ' + etk[0].ad)
+  assert.equal(skor.egit(X.slice(0, 1000), y.slice(0, 1000)).tur, 'lojistik', '2000 altinda lojistik')
+})
+
 test('egitim: ayirt edici ozellikte ogrenir, AUC yukselir, NaN ortalamaya duser', () => {
   const d = skor.OZELLIK_ADLARI.length
   const j = skor.OZELLIK_ADLARI.indexOf('risk_atr')
@@ -60,7 +89,7 @@ test('egitim: ayirt edici ozellikte ogrenir, AUC yukselir, NaN ortalamaya duser'
     y.push(rnd() < (r < 0.5 ? 0.2 : 0.55) ? 1 : 0)
   }
   const m = skor.egit(X, y, { iter: 200 })
-  assert.ok(m && m.n === 1000)
+  assert.ok(m && m.n === 1000 && m.tur === 'lojistik')
   assert.ok(m.auc > 0.58, 'egitim AUC yukselmeli: ' + m.auc)
   assert.ok(m.w[j] > 0, 'risk_atr katsayisi pozitif (buyuk risk = daha cok TP)')
   const dusuk = new Float64Array(d).fill(NaN); dusuk[j] = 0.2

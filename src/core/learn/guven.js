@@ -32,7 +32,7 @@
  */
 
 /** Esik dosyasindaki olcek adi; eski bicimler bununla ayrilir. */
-const GUVEN_OLCEGI = 'tp-agirlikli'
+const GUVEN_OLCEGI = 'tp-agac'
 /** En benzer kac kurulum katilir. */
 const GUVEN_KOMSU = 50
 /** Agirlik sicakligi: w = exp((benzerlik - 1) / tau). */

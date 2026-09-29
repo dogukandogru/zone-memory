@@ -809,7 +809,7 @@ test('guven: komsularin agirlikli TP oranindan hesaplanir, olcek dosyasi eski bi
     const yol = pathsCore.memoryPath(TF, undefined, dataDir) + '.guven.json'
     assert.ok(fs.existsSync(yol), 'tarama guven olcek dosyasini yazmali')
     const gv = JSON.parse(fs.readFileSync(yol, 'utf8'))
-    assert.strictEqual(gv.olcek, 'tp-agirlikli', 'olcek alani tp-agirlikli olmali')
+    assert.strictEqual(gv.olcek, 'tp-agac', 'olcek alani tp-agac olmali')
     assert.strictEqual(gv.komsu, 50)
     assert.ok(gv.taban.form >= 0 && gv.taban.form <= 1 && gv.taban.touch >= 0 && gv.taban.touch <= 1)
     assert.ok(gv.olaylar && typeof gv.olaylar === 'object', 'olay plan sonuclari dosyada olmali')
@@ -853,7 +853,7 @@ test('guven: komsularin agirlikli TP oranindan hesaplanir, olcek dosyasi eski bi
       Object.values(gv2.olaylar).every((k) => k[0] !== 'tp'), 'TP 20 ATR ile hicbir olay plani tp olamaz')
 
     // Eski bicim (en benzer 10, esit agirlik): olcek alani farkli, uyumsuz.
-    fs.writeFileSync(yol, JSON.stringify({ olcek: 'tp', taban: { form: 0.5, touch: 0.5 }, olaylar: {} }))
+    fs.writeFileSync(yol, JSON.stringify({ olcek: 'tp-agirlikli', taban: { form: 0.5, touch: 0.5 }, olaylar: {} }))
     const eski = await cagir('data:status', {})
     assert.strictEqual(eski.byTf[TF].confidenceScaleCurrent, false,
       'eski bicim olcek dosyasi uyumsuz sayilmali')
