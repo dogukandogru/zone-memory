@@ -60,11 +60,11 @@ test('DEFAULT_SIGNAL_CFG sozlesmedeki alanlari birebir tasir', () => {
   // (useZoneStop, outcomeCfg, minRr, minExpectancy) ekledi; ek alanlar
   // sozlesmeyi bozmaz, eksik alan bozar.
   //
-  // minMatches ve minWinRate degerleri sozlesmedeki ilk tahminden (5 / 0.60)
-  // gercek veriyle yapilan ornek disi taramaya gore guncellendi (15 / 0.62).
-  // Gerekce signal.js basindaki yorumda ve README'de.
+  // minMatches: 0 = kapi yok (olculdu, en iyi sinyallerin benzer sayisi
+  // dusuk; eleme TP sansi modelinde). minWinRate 0.62 ornek disi taramadan.
+  // Gerekce signal.js DEFAULT_SIGNAL_CFG yorumunda.
   const sozlesme = {
-    k: 25, minSimilarity: 0.80, minMatches: 15, minWinRate: 0.62,
+    k: 25, minSimilarity: 0.80, minMatches: 0, minWinRate: 0.62,
     excludeWithinSec: 86400 * 3,
     tp1Pct: 40, tp2Pct: 70, slPct: 75,
   }
@@ -90,8 +90,8 @@ test('ozellik vektoru yoksa fired false ve gerekce acik', () => {
 })
 
 test('eslesme sayisi esigin ALTINDA ise fired false', () => {
-  // 3 kayit var, minMatches 5.
-  const s = evaluateTouch(dokunus('BUY'), ozellik(), hafizaKur(3, 3, 'BUY'), [], {}, null)
+  // 3 kayit var, minMatches 5 (varsayilan 0 = kapi yok; kapi burada acikca verilir).
+  const s = evaluateTouch(dokunus('BUY'), ozellik(), hafizaKur(3, 3, 'BUY'), [], { minMatches: 5 }, null)
   assert.equal(s.matchCount, 3)
   assert.equal(s.winRate, 1)
   assert.equal(s.fired, false, 'yeterli eslesme yokken sinyal uretilmemeli')

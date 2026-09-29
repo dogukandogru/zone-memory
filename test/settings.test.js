@@ -60,7 +60,7 @@ test('sinir disi ve gecersiz degerler yazilmadan once kirpilir', () => {
   const yeni = settings.applySetPayload({
     patch: { signalCfg: { minMatches: -3, minSimilarity: 5, k: 10000 }, livePollSeconds: 0 },
   })
-  assert.strictEqual(yeni.signalCfg.minMatches, 1, 'minMatches en az 1 olmali')
+  assert.strictEqual(yeni.signalCfg.minMatches, 0, 'minMatches en az 0 olmali (0 = kapi yok)')
   assert.strictEqual(yeni.signalCfg.minSimilarity, 0.999, 'minSimilarity ust sinira kirpilmali')
   assert.strictEqual(yeni.signalCfg.k, 200)
   assert.strictEqual(yeni.livePollSeconds, 3)
